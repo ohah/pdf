@@ -1,7 +1,7 @@
-// React 갈래 — usePdf 로 열고 PdfPage 로 그린다.
+// React 갈래 — usePdf 로 열고 PDFPage 로 그린다.
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { usePdf, PdfPage } from "@ohah/pdf/react";
+import { usePdf, PDFPage } from "@ohah/pdf/react";
 
 const paths = { wasm: "/pdf.wasm", cmaps: "/cmaps" };
 
@@ -30,7 +30,7 @@ function App() {
             <button onClick={() => setPage((p) => Math.max(1, p - 1))}>이전</button>{" "}
             <button onClick={() => setPage((p) => Math.min(doc.pages, p + 1))}>다음</button>
           </p>
-          <PdfPage doc={doc} page={page} scale={1.2}
+          <PDFPage doc={doc} page={page} scale={1.2}
             style={{ border: "1px solid #ddd" }}
             onRender={(r) => { window.__done = { pages: doc.pages, ...r }; }} />
         </>

@@ -3,9 +3,9 @@
 //   const pdf = pdfStore({ wasm: "/pdf.wasm" });
 //   pdf.open(file);
 //   <canvas use:pdfPage={{ doc: $pdf.doc, page: 1, scale: 1.5 }} />
-import { PasswordNeeded, PdfDoc, type OpenOpts, type RenderOpts } from "./index.js";
+import { PasswordNeeded, PDFDocument, type OpenOpts, type RenderOpts } from "./index.js";
 
-type State = { doc: PdfDoc | null; loading: boolean; needPassword: boolean; error: Error | null };
+type State = { doc: PDFDocument | null; loading: boolean; needPassword: boolean; error: Error | null };
 type Sub = (v: State) => void;
 
 /** Svelte 스토어 규약(subscribe)을 따르는 작은 상자. */
@@ -30,7 +30,7 @@ export function pdfStore(opts: OpenOpts = {}) {
         const buf = src instanceof Blob ? new Uint8Array(await src.arrayBuffer())
           : src instanceof Uint8Array ? src
           : new Uint8Array(src);
-        const doc = await PdfDoc.open(buf, { ...opts, password });
+        const doc = await PDFDocument.open(buf, { ...opts, password });
         set({ doc, loading: false });
       } catch (e) {
         if (e instanceof PasswordNeeded) set({ loading: false, needPassword: true });
@@ -44,10 +44,10 @@ export function pdfStore(opts: OpenOpts = {}) {
   };
 }
 
-export type PdfPageParams = RenderOpts & { doc: PdfDoc | null; page: number };
+export type PDFPageParams = RenderOpts & { doc: PDFDocument | null; page: number };
 
 /** canvas 에 거는 action. 값이 바뀌면 다시 그린다. */
-export function pdfPage(node: HTMLCanvasElement, params: PdfPageParams) {
+export function pdfPage(node: HTMLCanvasElement, params: PDFPageParams) {
   let cur = params;
   const draw = () => {
     if (!cur.doc) return;
@@ -55,7 +55,7 @@ export function pdfPage(node: HTMLCanvasElement, params: PdfPageParams) {
   };
   draw();
   return {
-    update(next: PdfPageParams) { cur = next; draw(); },
+    update(next: PDFPageParams) { cur = next; draw(); },
     destroy() { /* 문서는 스토어가 닫는다 */ },
   };
 }

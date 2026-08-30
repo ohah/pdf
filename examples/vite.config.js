@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import vue from "@vitejs/plugin-vue";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { zntc } from "@zntc/vite-plugin";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "..");
@@ -39,7 +40,9 @@ const assets = {
 
 export default {
   root: here,
-  plugins: [react(), vue(), svelte(), assets],
+  // TS·JSX 는 zntc 가 옮긴다 — 꾸러미를 굽는 것과 같은 트랜스파일러다.
+  plugins: [zntc(), react(), vue(), svelte(), assets],
+  esbuild: false,
   resolve: {
     alias: {
       "@ohah/pdf/react": resolve(repo, "src/react.ts"),

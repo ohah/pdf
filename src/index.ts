@@ -3,13 +3,13 @@
 // 엔진은 Zig 로 짜 wasm 하나로 굽고, 워커에서 돌린다. 화면 갈래는 그린
 // 결과만 받아 canvas 에 얹는다 — 큰 문서를 열어도 화면이 멎지 않는다.
 //
-//   import { PdfDoc } from "@ohah/pdf";
+//   import { PDFDocument } from "@ohah/pdf";
 //
-//   const pdf = await PdfDoc.open(bytes, { wasm: "/pdf.wasm", cmaps: "/cmaps" });
+//   const pdf = await PDFDocument.open(bytes, { wasm: "/pdf.wasm", cmaps: "/cmaps" });
 //   await pdf.render(1, canvas, { scale: 1.5 });
 //   const text = await pdf.text(1);
 //   pdf.close();
-import { PdfClient, type PageMsg, type OpenMsg, type BuildSpec } from "./client.js";
+import { PDFClient, type PageMsg, type OpenMsg, type BuildSpec } from "./client.js";
 import { drawOps, toLines, type TextRun } from "./draw.js";
 import { type Paths } from "./config.js";
 import { checkSignature, type SigCheck } from "./sig.js";
@@ -19,7 +19,7 @@ export type { BuildSpec, Mask, PageMsg } from "./client.js";
 export type { TextRun } from "./draw.js";
 export type { SigCheck } from "./sig.js";
 export { toLines } from "./draw.js";
-export { PdfClient } from "./client.js";
+export { PDFClient } from "./client.js";
 
 export type OpenOpts = Paths & {
   /** 잠긴 문서의 암호. 틀리면 needPassword 가 선다. */
@@ -75,8 +75,8 @@ async function loadFont(bytes: Uint8Array): Promise<string | undefined> {
 }
 
 /** 열어 둔 문서 하나. */
-export class PdfDoc {
-  private cl: PdfClient;
+export class PDFDocument {
+  private cl: PDFClient;
   private cache = new Map<number, PageMsg>();
   private fams = new Map<number, (string | undefined)[]>();
   private raw: Uint8Array;
@@ -97,7 +97,7 @@ export class PdfDoc {
   readonly isXfa: boolean;
   private sigsRaw: NonNullable<OpenMsg["sigs"]>;
 
-  private constructor(cl: PdfClient, r: OpenMsg, raw: Uint8Array) {
+  private constructor(cl: PDFClient, r: OpenMsg, raw: Uint8Array) {
     this.cl = cl;
     this.raw = raw;
     this.pages = r.pages ?? 0;
@@ -118,7 +118,7 @@ export class PdfDoc {
   static async open(bytes: Uint8Array | ArrayBuffer, opts: OpenOpts = {}) {
     const raw = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     const keep = raw.slice();
-    const cl = new PdfClient(opts);
+    const cl = new PDFClient(opts);
     const r = await cl.open(raw.slice(), opts.password ?? "");
     if (r.needPw) {
       cl.close();
@@ -128,7 +128,7 @@ export class PdfDoc {
       cl.close();
       throw new Error(r.err === "큼" ? "파일이 너무 큽니다" : "PDF 를 읽지 못했습니다");
     }
-    return new PdfDoc(cl, r, keep);
+    return new PDFDocument(cl, r, keep);
   }
 
   private async get(i: number, formLayer: boolean) {

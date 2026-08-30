@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, ref } from "vue";
-import { usePdf, PdfPage } from "@ohah/pdf/vue";
+import { usePdf, PDFPage } from "@ohah/pdf/vue";
 
 const src = ref(null);
 const page = ref(1);
@@ -27,7 +27,7 @@ onMounted(async () => {
         <button @click="page = Math.max(1, page - 1)">이전</button>
         <button @click="page = Math.min(doc.pages, page + 1)">다음</button>
       </p>
-      <PdfPage :doc="doc" :page="page" :scale="1.2" style="border: 1px solid #ddd" />
+      <PDFPage :doc="doc" :page="page" :scale="1.2" style="border: 1px solid #ddd" />
     </template>
   </div>
 </template>

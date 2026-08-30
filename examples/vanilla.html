@@ -8,15 +8,15 @@
 <canvas id="cv"></canvas>
 <script type="module">
   // 번들러 없이 쓰는 길 — dist 를 그대로 물린다. npm 으로 받았다면
-  //   import { PdfDoc } from "./node_modules/@ohah/pdf/dist/index.js";
+  //   import { PDFDocument } from "./node_modules/@ohah/pdf/dist/index.js";
   // 여기서는 예제 서버가 /dist 로 내어 준다. @vite-ignore 는 이 예제를 띄우는
   // vite 가 이 줄을 손대지 않게 하는 표시일 뿐, 브라우저에는 그냥 주석이다.
   const dist = "/dist/index.js";
-  const { PdfDoc } = await import(/* @vite-ignore */ dist);
+  const { PDFDocument } = await import(/* @vite-ignore */ dist);
 
   const paths = { wasm: "/pdf.wasm", cmaps: "/cmaps" };
   const show = async (bytes) => {
-    const pdf = await PdfDoc.open(bytes, paths);
+    const pdf = await PDFDocument.open(bytes, paths);
     await pdf.render(1, document.getElementById("cv"), { scale: 1.2 });
     const t = await pdf.text(1);
     document.getElementById("info").textContent =

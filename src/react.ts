@@ -1,14 +1,14 @@
 // React 에서 쓰는 갈래.
 //
 //   const { doc, error, needPassword } = usePdf(file, { wasm: "/pdf.wasm" });
-//   <PdfPage doc={doc} page={1} scale={1.5} />
+//   <PDFPage doc={doc} page={1} scale={1.5} />
 import {
   createElement, useCallback, useEffect, useRef, useState, type CSSProperties,
 } from "react";
-import { PasswordNeeded, PdfDoc, type OpenOpts, type RenderOpts } from "./index.js";
+import { PasswordNeeded, PDFDocument, type OpenOpts, type RenderOpts } from "./index.js";
 
 export type UsePdf = {
-  doc: PdfDoc | null;
+  doc: PDFDocument | null;
   /** 여는 중인가 */
   loading: boolean;
   /** 암호가 있어야 열린다 — password 를 넣어 다시 부른다 */
@@ -31,14 +31,14 @@ export function usePdf(
       return;
     }
     let alive = true;
-    let opened: PdfDoc | null = null;
+    let opened: PDFDocument | null = null;
     setState((s) => ({ ...s, loading: true, error: null, needPassword: false }));
     (async () => {
       try {
         const buf = src instanceof Blob ? new Uint8Array(await src.arrayBuffer())
           : src instanceof Uint8Array ? src
           : new Uint8Array(src);
-        const doc = await PdfDoc.open(buf, { wasm, cmaps, password });
+        const doc = await PDFDocument.open(buf, { wasm, cmaps, password });
         opened = doc;
         if (!alive) { doc.close(); return; }
         setState({ doc, loading: false, needPassword: false, error: null });
@@ -59,8 +59,8 @@ export function usePdf(
   return state;
 }
 
-export type PdfPageProps = RenderOpts & {
-  doc: PdfDoc | null;
+export type PDFPageProps = RenderOpts & {
+  doc: PDFDocument | null;
   /** 1 부터 */
   page: number;
   className?: string;
@@ -70,9 +70,9 @@ export type PdfPageProps = RenderOpts & {
 };
 
 /** 쪽 하나를 canvas 에 그리는 컴포넌트. */
-export function PdfPage({
+export function PDFPage({
   doc, page, className, style, onRender, ...opts
-}: PdfPageProps) {
+}: PDFPageProps) {
   const ref = useRef<HTMLCanvasElement | null>(null);
   const { scale, dpr, formLayer } = opts;
   const draw = useCallback(async () => {

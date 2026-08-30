@@ -50,7 +50,7 @@ export type OpenMsg = {
   }[];
 };
 
-export class PdfClient {
+export class PDFClient {
   private w: Worker;
   private seq = 0;
   private waiting = new Map<number, { ok: (v: unknown) => void; no: (e: Error) => void }>();

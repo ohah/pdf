@@ -5,3 +5,4 @@ dist/
 tests/fixtures/sig/key.pem
 # 퍼저가 흘린 임시 파일
 tests/fixtures/.*.pdf
+examples/dist/

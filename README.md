@@ -8,9 +8,9 @@ npm i @ohah/pdf
 ```
 
 ```js
-import { PdfDoc } from "@ohah/pdf";
+import { PDFDocument } from "@ohah/pdf";
 
-const pdf = await PdfDoc.open(bytes, { wasm: "/pdf.wasm", cmaps: "/cmaps" });
+const pdf = await PDFDocument.open(bytes, { wasm: "/pdf.wasm", cmaps: "/cmaps" });
 await pdf.render(1, document.querySelector("canvas"), { scale: 1.5 });
 const text = await pdf.text(1);
 pdf.close();
@@ -51,14 +51,14 @@ Indexed·Separation·Lab·ICC 대체, /Mask 스텐실과 색 열쇠 마스킹, S
 ### React
 
 ```jsx
-import { usePdf, PdfPage } from "@ohah/pdf/react";
+import { usePdf, PDFPage } from "@ohah/pdf/react";
 
 function Viewer({ file }) {
   const { doc, loading, error, needPassword } = usePdf(file, { wasm: "/pdf.wasm" });
   if (loading) return <p>여는 중…</p>;
   if (needPassword) return <p>암호가 필요합니다</p>;
   if (error) return <p>{String(error)}</p>;
-  return doc && <PdfPage doc={doc} page={1} scale={1.5} />;
+  return doc && <PDFPage doc={doc} page={1} scale={1.5} />;
 }
 ```
 
@@ -67,14 +67,14 @@ function Viewer({ file }) {
 ```vue
 <script setup>
 import { ref } from "vue";
-import { usePdf, PdfPage } from "@ohah/pdf/vue";
+import { usePdf, PDFPage } from "@ohah/pdf/vue";
 
 const file = ref(null);
 const { doc } = usePdf(file, { wasm: "/pdf.wasm" });
 </script>
 
 <template>
-  <PdfPage v-if="doc" :doc="doc" :page="1" :scale="1.5" />
+  <PDFPage v-if="doc" :doc="doc" :page="1" :scale="1.5" />
 </template>
 ```
 
@@ -100,7 +100,7 @@ const { doc } = usePdf(file, { wasm: "/pdf.wasm" });
 
 | | |
 |---|---|
-| `PdfDoc.open(bytes, opts)` | 문서를 연다. 암호가 필요하면 `PasswordNeeded` 를 던진다 |
+| `PDFDocument.open(bytes, opts)` | 문서를 연다. 암호가 필요하면 `PasswordNeeded` 를 던진다 |
 | `pdf.pages` · `outline` · `info` · `layers` · `attachments` · `isXfa` · `locked` | 문서 정보 |
 | `pdf.render(page, canvas, opts)` | 쪽을 그린다. 글자 자리(`runs`)를 돌려주므로 투명 글자층을 직접 얹을 수 있다 |
 | `pdf.text(page)` | 쪽의 글자 |
@@ -120,10 +120,16 @@ npm i
 npm run build:wasm   # zig 0.16 이 필요하다 (mise 를 쓰면 mise.toml 이 잡는다)
 npm run build:js
 bash tests/run.sh 3  # 적대적 604개 + 단언 343개
+npx vite examples    # 예제 넷을 한 서버에 띄운다
 ```
 
 `c/*.zig` 가 엔진, `src/*.ts` 가 브라우저 쪽이다. 시험은
 [`tests/README.md`](tests/README.md) 를 본다.
+
+TS 를 JS 로 옮기는 일은 [zntc](https://github.com/ohah/zntc) 가 한다 — Zig 로
+짠 트랜스파일러다. 형 선언(`.d.ts`)만 `tsc` 가 내고, 예제 서버도
+`@zntc/vite-plugin` 을 끼워 같은 트랜스파일러를 쓴다. 묶지 않고 파일마다
+옮기므로 워커가 `dist/worker.js` 로 따로 남는다.
 
 ## 라이선스
 
