@@ -56,6 +56,8 @@ export function pdfPage(node: HTMLCanvasElement, params: PDFPageParams) {
   draw();
   return {
     update(next: PDFPageParams) { cur = next; draw(); },
-    destroy() { /* 문서는 스토어가 닫는다 */ },
+    destroy() {
+      // 문서는 스토어가 닫는다
+    },
   };
 }

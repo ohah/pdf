@@ -11,9 +11,10 @@
 set -e
 cd "$(dirname "$0")/.."
 mkdir -p dist
+# --outdir 로 주면 --sourcemap 이 무시된다(zntc 0.1.4). 파일마다 -o 로 낸다.
 for f in src/*.ts; do
-  npx zntc "$f" --outdir dist
+  npx zntc "$f" -o "dist/$(basename "$f" .ts).js" --sourcemap
 done
 npx tsc -p tsconfig.build.json
-node scripts/fixworker.mjs
-echo "dist/ — JS $(ls dist/*.js | wc -l | tr -d ' ')개, 형 선언 $(ls dist/*.d.ts | wc -l | tr -d ' ')개"
+node scripts/postbuild.mjs
+echo "dist/ — JS $(ls dist/*.js | wc -l | tr -d ' ')개, 소스맵 $(ls dist/*.js.map | wc -l | tr -d ' ')개, 형 선언 $(ls dist/*.d.ts | wc -l | tr -d ' ')개"

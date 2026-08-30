@@ -129,7 +129,9 @@ npx vite examples    # 예제 넷을 한 서버에 띄운다
 TS 를 JS 로 옮기는 일은 [zntc](https://github.com/ohah/zntc) 가 한다 — Zig 로
 짠 트랜스파일러다. 형 선언(`.d.ts`)만 `tsc` 가 내고, 예제 서버도
 `@zntc/vite-plugin` 을 끼워 같은 트랜스파일러를 쓴다. 묶지 않고 파일마다
-옮기므로 워커가 `dist/worker.js` 로 따로 남는다.
+옮기므로 워커가 `dist/worker.js` 로 따로 남는다. 소스맵은 `dist/*.js.map`
+으로 함께 나가고 원본을 안에 담고 있어, 쓰는 쪽에서 소스를 따로 받지
+않아도 브라우저가 TS 를 보여 준다.
 
 ## 라이선스
 

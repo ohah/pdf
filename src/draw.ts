@@ -36,7 +36,9 @@ function gradientFrom(g: CanvasRenderingContext2D, ops: Float32Array, a: number)
     const t = Math.min(1, Math.max(0, ops[a + 10 + k * 4]));
     try {
       grad.addColorStop(t, rgb(ops[a + 11 + k * 4], ops[a + 12 + k * 4], ops[a + 13 + k * 4]));
-    } catch { /* 마디가 겹치면 건너뛴다 */ }
+    } catch {
+      // 마디가 겹치면 건너뛴다
+    }
   }
   return grad;
 }
