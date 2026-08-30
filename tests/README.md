@@ -1,0 +1,86 @@
+# PDF 엔진 시험
+
+```
+bun run test:pdf        # 3회 반복
+bash tests/run.sh 5 # 5회
+```
+
+두 갈래로 돈다.
+
+**적대적** (`r1.mjs`~`r7.mjs`, 440개) — 망가진 파일과 극단값을 넣고
+죽거나 멎지 않는지 본다. 통과 기준은 *예외 0, 3초 넘는 항목 0* 이다.
+`r7.mjs` 는 CMap 표·CIDToGIDMap·라벨·주석·서명·암호 걸기를 겨냥한다.
+`r8.mjs` 는 무작위 퍼저다 — 붙임감을 마구 헝클어 넣고, 회차마다 씨앗이 달라
+돌릴 때마다 다른 파일이 된다. 넘어지면 씨앗을 찍어 두므로 그 값으로 다시
+만들어 볼 수 있다(`node tests/r8.mjs tests/fixtures 12345`).
+
+**브라우저** (`tests/e2e.spec.ts` 20개, `tests/worker.spec.ts` 6개) — 화면과
+워커 경계를 본다. 워커는 이번에 새로 생긴 자리라 따로 두들긴다 — 답이 오기 전에
+다음 파일을 넣기, 망가진 파일 잇달아 넣기, 미리보기가 흐르는 중에 만지기.
+
+    npx playwright test --repeat-each=5
+
+**단언** (`verify.mjs` 204개, `lines.ts` 6개, `place.ts` 12개,
+`sig.ts` 32개) — 결과가 실제로 맞는지 본다.
+죽지 않는 것만으로는 모자란다. 예전에 CFF 글꼴이 통째로 Type1 로 새고
+있었는데 적대적 쪽은 "글꼴 실림" 이라고 답했다. `"/FontFile"` 이
+`"/FontFile3"` 의 접두사라 벌어진 일이었고, 단언을 넣고서야 잡혔다.
+
+`dist/pdf.wasm` 과 `cmaps/` 를 읽는다. wasm 을 고쳤으면
+`npm run build:wasm` 를 먼저 돌린다.
+
+## fixture
+
+`fixtures/` 에 30개. 두 개는 생성기가 있다.
+
+```
+node tests/mkcmap2.mjs tests/fixtures   # cmap2.pdf — ToUnicode 없는 옛 한글
+node tests/mkc2g.mjs   tests/fixtures   # c2g.pdf·c2g0.pdf — CIDToGIDMap
+```
+
+`fixtures/sub.ttf` 는 `korean.pdf` 에서 꺼낸 트루타입이다. 글리프가
+3320개라 번호로 집는 길을 시험할 수 있다.
+
+```
+node tests/mksh.mjs    tests/fixtures   # 셰이딩 1·4·5·6·7 형
+node tests/mktr.mjs    tests/fixtures   # 글자 그리기 모드 Tr 0~7
+node tests/mksmask.mjs tests/fixtures   # ExtGState /SMask
+node tests/mkjbig2.mjs tests/fixtures   # JBIG2 (부록 H 시험 흐름)
+node tests/mkjbig2h.mjs tests/fixtures  # JBIG2 허프만 판의 빈 자리
+node tests/mkjbig2big.mjs tests/fixtures # jb-globals.pdf — 스캔 한 장
+node tests/mktype3.mjs tests/fixtures   # type3.pdf — 글리프가 그림인 글꼴
+node tests/mkdocs.mjs  tests/fixtures   # 여러 쪽 문서 (pages.pdf·sample.pdf 도 함께)
+node tests/mkscan.mjs  tests/fixtures   # 스캔 문서 (scanned.pdf·scan4.pdf)
+node tests/mkdest.mjs  tests/fixtures   # 이름으로 가리킨 목적지 셋
+node tests/mkatt.mjs   tests/fixtures   # 딸린 파일·XFA
+
+`crop.pdf`·`cmyk.pdf`·`mask-stencil.pdf`·`mask-key.pdf`·`bpc16.pdf`·`vert.pdf`·
+`group.pdf` 은 두 번째 전수조사에서 메운 갈래다(CropBox·CMYK JPEG·그림 가리개·
+16비트·세로쓰기·투명 그룹). `cmyk.jpg` 는 macOS `sips` 로 만든 CMYK JPEG 이다 —
+브라우저가 못 푸는 꼴이라 우리 복호기(c/pdfjpeg.zig)로 푼다.
+node tests/mkjpx.mjs   tests/fixtures   # JPEG 2000 (관심 구역 포함)
+node tests/mksig.mjs   tests/fixtures   # 전자 서명 (openssl 이 필요하다)
+```
+
+`mkjbig2h.mjs` 는 부록 H 에 없는 세 갈래를 **직접 부호화해서** 만든다 —
+문서가 제 허프만 표를 실어 오는 꼴, 허프만 사전에서 세밀화로 글자를 만드는 꼴,
+허프만 글자 영역에서 다듬는 꼴이다. 세밀화 자료는 산술 부호라 MQ 부호기
+(T.88 부록 E)를 같이 담았다. 새 길과 옛 길로 각각 담아 짝지어 내므로,
+틀이 한 비트라도 어긋나면 두 그림이 갈린다.
+
+`mksig.mjs` 는 구멍만 뚫린 PDF 를 먼저 쓰고, `/ByteRange` 자리를 잰 다음
+그 바이트를 `openssl smime` 으로 서명해 구멍을 메운다. 열쇠와 인증서는
+`fixtures/sig/` 에 있다(자체 서명, 100년짜리). 개인 열쇠는 저장소에 담지
+않으므로, 없으면 `mksig.mjs` 가 openssl 로 새로 만든다. `signed-tampered.pdf` 는
+서명 뒤에 한 글자를 바꾼 것이라 요약값이 어긋나야 한다.
+
+부호기는 `jbig2enc.mjs` 에 모아 두었다 — MQ 산술 부호기, 허프만 표, 세그먼트
+틀, PDF 껍데기다. `mkjbig2h.mjs` 와 `mkjbig2big.mjs` 가 같이 쓴다.
+
+`fixtures/` 안의 `.*.pdf` 와 `v-*.pdf` 는 붙임감이 아니라 **시험이 돌면서
+만들어 내는 것**이라 저장소에 담지 않는다.
+
+`fixtures/annex-h.jbig2` 는 ITU-T T.88 부록 H 의 시험 흐름이다. 같은 그림을
+쪽1 은 허프만·MMR 로, 쪽2 는 산술 부호로 담아 두어 서로 맞대 볼 수 있다.
+`fixtures/jpx/` 의 `p0_*.j2k` 는 JPEG2000 적합성 시험 자료(openjpeg-data)이고,
+나머지 `.jp2` 는 macOS 인코더로 만든 것이다.

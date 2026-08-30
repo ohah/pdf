@@ -1,0 +1,33 @@
+%PDF-1.5
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /MediaBox [0 0 595 842] /Count 1 /Kids [3 0 R] >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 6 0 R >> /XObject << /St 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<<  /Length 226 >>
+stream
+1 0 0 rg q 100 0 0 100 60 700 cm /St Do Q
+0 g BT /F1 14 Tf 20 TL 60 660 Td (line1) Tj (line2) ' (line3) ' ET
+3 Tr BT /F1 14 Tf 60 560 Td (INVISIBLE) Tj ET
+0 Tr BT /F1 14 Tf 60 520 Td (base) Tj 6 Ts (rise) Tj 0 Ts (back) Tj ET
+
+endstream
+endobj
+5 0 obj
+<< /Type /XObject /Subtype /Image /Width 8 /Height 8 /ImageMask true /BitsPerComponent 1 /Filter /FlateDecode /Length 12 >>
+stream
+xœ[º
+ ý
+endstream
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+trailer
+<< /Size 7 /Root 1 0 R >>
+%%EOF

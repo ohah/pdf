@@ -1,0 +1,39 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>@ohah/pdf — 바닐라</title>
+<style>body{font:14px system-ui;margin:24px} canvas{border:1px solid #ddd;margin-top:12px}</style>
+<h1>바닐라 자바스크립트</h1>
+<input type="file" accept="application/pdf">
+<div id="info"></div>
+<canvas id="cv"></canvas>
+<script type="module">
+  // 번들러 없이 쓰는 길 — dist 를 그대로 물린다. npm 으로 받았다면
+  //   import { PdfDoc } from "./node_modules/@ohah/pdf/dist/index.js";
+  // 여기서는 예제 서버가 /dist 로 내어 준다. @vite-ignore 는 이 예제를 띄우는
+  // vite 가 이 줄을 손대지 않게 하는 표시일 뿐, 브라우저에는 그냥 주석이다.
+  const dist = "/dist/index.js";
+  const { PdfDoc } = await import(/* @vite-ignore */ dist);
+
+  const paths = { wasm: "/pdf.wasm", cmaps: "/cmaps" };
+  const show = async (bytes) => {
+    const pdf = await PdfDoc.open(bytes, paths);
+    await pdf.render(1, document.getElementById("cv"), { scale: 1.2 });
+    const t = await pdf.text(1);
+    document.getElementById("info").textContent =
+      `${pdf.pages}쪽 · 글자 ${t.length}자 · 목차 ${pdf.outline.length} · 딸린 파일 ${pdf.attachments.length}`;
+    window.__done = { pages: pdf.pages, chars: t.length };
+  };
+  document.querySelector("input").onchange = async (e) => {
+    show(new Uint8Array(await e.target.files[0].arrayBuffer()));
+  };
+  // 시험용 — 주소로 바로 열 수 있게 해 둔다
+  const q = new URLSearchParams(location.search).get("doc");
+  if (q) {
+    try {
+      await show(new Uint8Array(await (await fetch(q)).arrayBuffer()));
+    } catch (e) {
+      document.getElementById("info").textContent = "열지 못했습니다: " + e;
+      window.__done = { error: String(e) };
+    }
+  }
+</script>

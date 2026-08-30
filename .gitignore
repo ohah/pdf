@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.DS_Store
+# 서명 시험이 만드는 개인 키 — 절대 올리지 않는다
+tests/fixtures/sig/key.pem
+# 퍼저가 흘린 임시 파일
+tests/fixtures/.*.pdf

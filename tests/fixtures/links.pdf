@@ -1,0 +1,55 @@
+%PDF-1.5
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /Outlines 20 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /MediaBox [0 0 595 842] /Count 2 /Kids [3 0 R 6 0 R] >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R /Annots [8 0 R 9 0 R] >>
+endobj
+4 0 obj
+<< /Length 82 >>
+stream
+BT /F1 20 Tf 60 700 Td (Page one with a link) Tj ET
+0 0 1 RG 60 690 m 260 690 l S
+
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 40 >>
+stream
+BT /F1 20 Tf 60 700 Td (Page two) Tj ET
+
+endstream
+endobj
+8 0 obj
+<< /Type /Annot /Subtype /Link /Rect [60 690 260 715] /A << /S /URI /URI (https://example.com/hello) >> >>
+endobj
+9 0 obj
+<< /Type /Annot /Subtype /Link /Rect [60 640 200 665] /Dest [6 0 R /XYZ 0 800 0] >>
+endobj
+20 0 obj
+<< /Type /Outlines /First 21 0 R /Last 22 0 R /Count 2 >>
+endobj
+21 0 obj
+<< /Title (\376\377\325\134\256\000\000\040\307\245) /Parent 20 0 R /Next 22 0 R /Dest [3 0 R /Fit] >>
+endobj
+22 0 obj
+<< /Title (Second chapter) /Parent 20 0 R /Prev 21 0 R /Dest [6 0 R /Fit] /First 23 0 R >>
+endobj
+23 0 obj
+<< /Title (Sub item) /Parent 22 0 R /Dest [6 0 R /Fit] >>
+endobj
+29 0 obj
+<< /Title (\376\377\302\334\325\330\000\040\273\070\301\034) /Author (Yoon) /Producer (allthatnba pdf) /CreationDate (D:20260830120000) >>
+endobj
+trailer
+<< /Size 30 /Root 1 0 R /Info 29 0 R >>
+%%EOF

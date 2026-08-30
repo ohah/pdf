@@ -1,0 +1,23 @@
+#!/bin/bash
+# Zig 소스를 wasm 하나로 굽는다.
+#
+#   bash scripts/build.sh
+#
+# zig 0.16 이 있어야 한다(mise 를 쓰면 mise.toml 이 잡아 준다).
+# 결과는 dist/pdf.wasm 이다.
+set -e
+cd "$(dirname "$0")/.."
+ZIG="${ZIG:-$(command -v zig || echo "$HOME/.local/share/mise/installs/zig/0.16.0/zig")}"
+if [ ! -x "$ZIG" ] && ! command -v "$ZIG" >/dev/null 2>&1; then echo "zig 를 찾지 못했다. https://ziglang.org 에서 받는다."; exit 1; fi
+mkdir -p dist
+cd c
+EXPORTS="--export=reserve --export=inputPtr --export=outputPtr --export=maxInput --export=outputLen --export=pageCount --export=parse --export=clearPick --export=addPick --export=setRotate --export=clearPageRotate --export=setPageRotate --export=apply --export=renderPage --export=itemCount --export=imageCount --export=itemX --export=itemY --export=itemSize --export=itemOff --export=itemLen --export=textPtr --export=textLen --export=drawPtr --export=drawLen --export=readPtr --export=readLen --export=fontIsPua --export=fontKind --export=fontNamePtr --export=fontNameLen --export=fontGlyphs --export=formCount --export=inlinePtr --export=imageAreaPtr --export=imageSlots --export=slotKind --export=slotWidth --export=slotHeight --export=slotOff --export=slotLen --export=slotFlip --export=slotSMask --export=pageWidth --export=pageOriginX --export=pageOriginY --export=pageRotate --export=linkCount --export=linkRect --export=linkOff --export=linkLen --export=linkPage --export=linkTextPtr --export=outlineCount --export=outlineDepth --export=outlineOff --export=outlineLen --export=outlinePage --export=outlineTextPtr --export=infoCount --export=infoOff --export=infoLen --export=infoTextPtr --export=pageHeight --export=secondPtr --export=maxSecond --export=parseSecond --export=secondPageCount --export=merge --export=clearWatermark --export=addWatermarkChar --export=imageWidth --export=imageHeight --export=imageKind --export=imagePtr --export=imageLen --export=compact --export=opsPtr --export=opsLen --export=fontCount --export=fontFileOff --export=fontFileLen --export=fontAreaPtr --export=cmapReset --export=cmapPtr --export=cmapRoom --export=cmapAdd --export=setFormLayer --export=setEncrypt --export=addEncryptChar --export=encRandomPtr --export=clearNotes --export=addNote --export=addNoteChar --export=addNotePoint --export=clearFieldEdits --export=addFieldEdit --export=addFieldEditChar --export=fieldMaskPtr --export=fieldMaskRoom --export=setFieldEditMask --export=fieldCount --export=fieldObj --export=fieldRect --export=fieldKind --export=fieldFlags --export=fieldMaxLen --export=fieldSize --export=fieldAlign --export=fieldChecked --export=fieldTextPtr --export=fieldNameOff --export=fieldNameLen --export=fieldValOff --export=fieldValLen --export=fieldOnOff --export=fieldOnLen --export=fieldOptsOff --export=fieldOptsLen --export=needCount --export=needOff --export=needLen --export=needPtr --export=clearLabels --export=addLabel --export=addLabelChar --export=setLabelMask --export=setWatermarkMask --export=clearNewFields --export=addNewField --export=addNewFieldChar --export=isXfa --export=attCount --export=attTextPtr --export=attNameOff --export=attNameLen --export=attLoad --export=attPtr --export=ocCount --export=ocTextPtr --export=ocNameOff --export=ocNameLen --export=ocIsOn --export=setOcOn --export=sigCount --export=sigRange --export=sigTextPtr --export=sigDerOff --export=sigDerLen --export=sigNameOff --export=sigNameLen --export=sigDateOff --export=sigDateLen --export=sigReasonOff --export=sigReasonLen --export=sigSubOff --export=sigSubLen --export=sigCovers --export=sigObj --export=clearPassword --export=addPasswordChar --export=needPassword --export=isEncrypted --export=jbDbgN --export=jbDbg --export=jbSymN --export=jbSymW "
+# shellcheck disable=SC2086
+"$ZIG" build-exe pdf.zig pdfwrap.c miniz.c -target wasm32-wasi -O ReleaseSmall -fno-entry -lc \
+  -I. -DMINIZ_NO_STDIO=1 -DMINIZ_NO_ARCHIVE_APIS=1 $EXPORTS || {
+  echo "빌드 실패 — 낡은 wasm 을 그대로 두지 않도록 여기서 멈춘다"
+  exit 1
+}
+mv pdf.wasm ../dist/pdf.wasm
+rm -f ./*.o 2>/dev/null || true
+echo "dist/pdf.wasm  $(wc -c < ../dist/pdf.wasm | tr -d ' ') bytes"
