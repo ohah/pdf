@@ -177,6 +177,36 @@ const r = await p.evaluate(async (doc) => {
     dd.close();
   }
 
+  // 5.9) 글자 항목 · 구조 나무
+  {
+    const kd = await PDFDocument.open(new Uint8Array(await (await fetch('/fixtures/korean.pdf')).arrayBuffer()), { wasm: '/pdf.wasm', cmaps: '/cmaps' });
+    const its = await kd.textItems(1);
+    ok('글자 덩이를 준다', its.length > 0 && typeof its[0].str === 'string', its.length);
+    ok('글꼴 이름이 붙는다', its.every((t) => typeof t.font === 'string') && its.some((t) => t.font.length > 0), its[0]?.font);
+    ok('방향이 붙는다', its.every((t) => ['ltr', 'rtl', 'ttb'].includes(t.dir)), its[0]?.dir);
+    ok('줄 끝이 하나 이상', its.some((t) => t.hasEOL) && !its.every((t) => t.hasEOL), its.filter((t) => t.hasEOL).length);
+    kd.close();
+
+    const vd = await PDFDocument.open(new Uint8Array(await (await fetch('/fixtures/vert.pdf')).arrayBuffer()), { wasm: '/pdf.wasm', cmaps: '/cmaps' });
+    ok('세로쓰기는 ttb', (await vd.textItems(1)).some((t) => t.dir === 'ttb'));
+    vd.close();
+
+    const sd = await PDFDocument.open(new Uint8Array(await (await fetch('/fixtures/struct.pdf')).arrayBuffer()), { wasm: '/pdf.wasm', cmaps: '/cmaps' });
+    const tree = sd.structure();
+    ok('구조 나무 뿌리', tree?.role === 'Root', tree?.role);
+    const doc = tree?.children[0];
+    ok('Document 아래 둘', doc?.role === 'Document' && doc.children.length === 2, doc && `${doc.role}/${doc.children.length}`);
+    ok('제목과 문단', doc?.children.map((c) => c.role).join(',') === 'H1,P', doc?.children.map((c) => c.role).join(','));
+    ok('대체 글(한글)', doc?.children[0].alt === '문서 제목', doc?.children[0].alt);
+    ok('쪽으로 추리기', (sd.structure(1)?.children[0].children.length ?? 0) === 2);
+    ok('없는 쪽은 빈 가지', (sd.structure(9)?.children.length ?? 0) === 0);
+    sd.close();
+
+    const nd = await PDFDocument.open(new Uint8Array(await (await fetch('/fixtures/korean.pdf')).arrayBuffer()), { wasm: '/pdf.wasm', cmaps: '/cmaps' });
+    ok('태그 없는 문서는 null', nd.structure() === null);
+    nd.close();
+  }
+
   // 6) data()
   {
     const d1 = pdf.data(); d1[0] = 0;

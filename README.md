@@ -110,6 +110,8 @@ const { doc } = usePdf(file, { wasm: "/pdf.wasm" });
 | `pdf.viewerPreferences` · `pdf.xmp` | 뷰어 설정 · XMP 원문 |
 | `pdf.render(page, canvas, opts)` | 쪽을 그린다. 글자 자리(`runs`)를 돌려주므로 투명 글자층을 직접 얹을 수 있다 |
 | `pdf.text(page)` | 쪽의 글자 |
+| `pdf.textItems(page)` | 덩이째 — 자리·크기·글꼴 이름·쓰는 방향·줄 끝 |
+| `pdf.structure(page?)` | 구조 나무(태그 PDF) — 제목·문단·표와 대체 글 |
 | `pdf.fields(page)` · `links(page)` | 입력 칸 · 링크 |
 | `pdf.annotations(page)` | 쪽에 달린 주석 전부 — 종류·글·쓴이·날짜·색·깃발 |
 | `pdf.signatures()` | 전자 서명을 WebCrypto 로 맞춰 본다 |

@@ -116,6 +116,17 @@ type Exports = {
   setWatermarkMask?: (w: number, h: number, len: number, pw: number, ph: number) => number;
   isXfa?: () => number;
   permissions?: () => number;
+  itemFont?: (i: number) => number;
+  structCount?: () => number;
+  structDepth?: (i: number) => number;
+  structPageOf?: (i: number) => number;
+  structMcid?: (i: number) => number;
+  structRoleOff?: (i: number) => number;
+  structRoleLen?: (i: number) => number;
+  structAltOff?: (i: number) => number;
+  structAltLen?: (i: number) => number;
+  structTextPtr?: () => number;
+  itemVertical?: (i: number) => number;
   destCount?: () => number;
   destNameOff?: (i: number) => number;
   destNameLen?: (i: number) => number;
@@ -328,6 +339,18 @@ function chars(e: Exports, s: string, put: (c: number) => void) {
   for (const ch of s) put(ch.codePointAt(0) ?? 0);
 }
 
+/** 아랍·히브리처럼 오른쪽에서 왼쪽으로 쓰는 글자가 많은가 */
+function rtl(t: string): boolean {
+  let r = 0;
+  let l = 0;
+  for (const ch of t) {
+    const c = ch.codePointAt(0)!;
+    if ((c >= 0x0590 && c <= 0x08ff) || (c >= 0xfb1d && c <= 0xfdff) || (c >= 0xfe70 && c <= 0xfeff)) r++;
+    else if ((c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a) || c > 0x2000) l++;
+  }
+  return r > l;
+}
+
 async function open(bytes: Uint8Array, pw: string) {
   const e = await engine();
   if (bytes.byteLength > e.maxInput()) return { err: "too-large", max: e.maxInput() };
@@ -425,8 +448,21 @@ async function open(bytes: Uint8Array, pw: string) {
     ? dec.decode(new Uint8Array(e.memory.buffer, e.xmpPtr!(), xn))
     : "";
 
+  // 구조 나무 — 태그 PDF 의 읽는 차례·뜻. 깊이를 붙여 납작하게 담는다.
+  const struct: { depth: number; role: string; alt: string; page: number; mcid: number }[] = [];
+  for (let i = 0; i < (e.structCount?.() ?? 0); i++) {
+    const T = (off: number, len: number) =>
+      len > 0 ? dec.decode(new Uint8Array(e.memory.buffer, e.structTextPtr!() + off, len)) : "";
+    struct.push({
+      depth: e.structDepth!(i),
+      role: T(e.structRoleOff!(i), e.structRoleLen!(i)),
+      alt: T(e.structAltOff!(i), e.structAltLen!(i)),
+      page: e.structPageOf!(i),
+      mcid: e.structMcid!(i),
+    });
+  }
   return {
-    dests, prefs, xmp,
+    dests, prefs, xmp, struct,
     pages: e.pageCount(), locked: (e.isEncrypted?.() ?? 0) === 1,
     outline: marks, info, sigs, layers, atts,
     xfa: (e.isXfa?.() ?? 0) === 1,
@@ -454,7 +490,15 @@ async function page(i: number, formOn: boolean, light = false) {
     if (!len) continue;
     const t = dec.decode(buf.subarray(e.itemOff(k), e.itemOff(k) + len)).replace(/\s+$/, "");
     if (!t) continue;
-    items.push({ x: e.itemX(k), y: e.itemY(k), size: e.itemSize(k), text: t });
+    // 글꼴 이름과 쓰는 방향까지 함께 — pdf.js 의 TextItem 이 주는 것들이다.
+    const fi = e.itemFont?.(k) ?? 0;
+    items.push({
+      x: e.itemX(k), y: e.itemY(k), size: e.itemSize(k), text: t,
+      font: fi > 0 && e.fontNamePtr && e.fontNameLen
+        ? dec.decode(new Uint8Array(e.memory.buffer, e.fontNamePtr(fi - 1), e.fontNameLen(fi - 1)))
+        : "",
+      dir: (e.itemVertical?.(k) ?? 0) === 1 ? "ttb" : rtl(t) ? "rtl" : "ltr",
+    });
   }
   const rawAt = (si: number) =>
     new Uint8Array(e.memory.buffer, e.imageAreaPtr!() + e.slotOff!(si), e.slotLen!(si)).slice();

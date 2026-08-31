@@ -10,7 +10,13 @@ export type { BuildSpec, Mask } from "./worker.js";
 /** 워커가 돌려주는 쪽 하나. 화면 쪽이 canvas 에 얹는다. */
 export type PageMsg = {
   w: number; h: number; x0: number; y0: number; rot: number;
-  items: { x: number; y: number; size: number; text: string }[];
+  items: {
+    x: number; y: number; size: number; text: string;
+    /** 이 덩이를 그린 글꼴 이름. 문서가 안 적어 두면 빈 문자열 */
+    font: string;
+    /** 쓰는 방향 — 세로쓰기면 "ttb", 아랍·히브리면 "rtl", 그 밖은 "ltr" */
+    dir: "ltr" | "rtl" | "ttb";
+  }[];
   ops: Float32Array;
   txt: Uint8Array;
   drw: Uint8Array;
@@ -85,6 +91,8 @@ export type OpenMsg = {
   prefs?: Record<string, string>;
   /** XMP 메타데이터 원문 (RDF/XML). 없으면 빈 문자열 */
   xmp?: string;
+  /** 구조 나무를 깊이와 함께 납작하게 담은 것 */
+  struct?: { depth: number; role: string; alt: string; page: number; mcid: number }[];
   sigs?: {
     name: string; date: string; reason: string; sub: string;
     der: Uint8Array; range: number[]; covers: boolean;

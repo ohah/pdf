@@ -26,6 +26,19 @@ export { makeViewport, type Viewport } from "./viewport.js";
 export { toScreen, placeRect, type PageBox, type Placed } from "./place.js";
 export { PDFClient } from "./client.js";
 
+/** 구조 나무의 마디 하나 */
+export type StructNode = {
+  /** Document·H1·P·Table … (/S). 뿌리는 "Root" */
+  role: string;
+  /** 그림 등에 붙는 대체 글 (/Alt) */
+  alt: string;
+  /** 놓인 쪽(0부터). 모르면 -1 */
+  page: number;
+  /** 본문에서 이 마디를 가리키는 표식. 잎이 아니면 -1 */
+  mcid: number;
+  children: StructNode[];
+};
+
 export type OpenOpts = Paths & {
   /** 잠긴 문서의 암호. 틀리면 needPassword 가 선다. */
   password?: string;
@@ -139,6 +152,7 @@ export class PDFDocument {
   readonly viewerPreferences: Record<string, string>;
   /** XMP 메타데이터 원문(RDF/XML). 문서에 없으면 빈 문자열 */
   readonly xmp: string;
+  private structFlat: NonNullable<OpenMsg["struct"]>;
   private sigsRaw: NonNullable<OpenMsg["sigs"]>;
 
   private constructor(cl: PDFClient, r: OpenMsg, raw: Uint8Array) {
@@ -171,6 +185,7 @@ export class PDFDocument {
     this.destinations = r.dests ?? [];
     this.viewerPreferences = r.prefs ?? {};
     this.xmp = r.xmp ?? "";
+    this.structFlat = r.struct ?? [];
     this.sigsRaw = r.sigs ?? [];
   }
 
@@ -284,6 +299,37 @@ export class PDFDocument {
     return this.raw.slice();
   }
 
+  /**
+   * 쪽의 글자를 덩이째 준다 — pdf.js 의 getTextContent 자리다.
+   *
+   * 그리지 않고도 얻는다(가벼운 뽑기). 각 덩이는 자리·크기와 함께 그린
+   * 글꼴 이름, 쓰는 방향, 줄 끝인지를 달고 온다.
+   */
+  async textItems(page: number): Promise<{
+    str: string; x: number; y: number; size: number;
+    font: string; dir: "ltr" | "rtl" | "ttb"; hasEOL: boolean;
+  }[]> {
+    const q = await this.get(page, false);
+    const out = q.items.map((it) => ({
+      str: it.text, x: it.x, y: it.y, size: it.size,
+      font: it.font, dir: it.dir, hasEOL: false,
+    }));
+    // 줄 끝 표시. 같은 줄에 있는 것끼리 묶고 그 줄의 마지막에 표시한다 —
+    // 문서가 어디서 줄을 바꿨는지는 자리로만 알 수 있다.
+    const byLine = new Map<number, number[]>();
+    out.forEach((it, k) => {
+      const key = Math.round(it.y / Math.max(1, it.size * 0.6));
+      const list = byLine.get(key);
+      if (list) list.push(k); else byLine.set(key, [k]);
+    });
+    for (const list of byLine.values()) {
+      let last = list[0];
+      for (const k of list) if (out[k].x > out[last].x) last = k;
+      out[last].hasEOL = true;
+    }
+    return out;
+  }
+
   /** 쪽 하나의 글자. 사람이 읽는 차례로 줄을 세워 준다. */
   async text(page: number) {
     const q = await this.get(page, false);
@@ -323,6 +369,44 @@ export class PDFDocument {
       }
     }
     return out;
+  }
+
+  /**
+   * 구조 나무 — 태그 PDF 가 적어 둔 읽는 차례와 뜻(제목·문단·표…).
+   *
+   * pdf.js 의 getStructTree 자리다. 쪽 번호를 주면 그 쪽에 놓인 가지만
+   * 추린다. 태그가 없는 문서면 null 이다.
+   */
+  structure(page?: number): StructNode | null {
+    if (this.structFlat.length === 0) return null;
+    const want = page == null ? null : page - 1;
+    const root: StructNode = { role: "Root", alt: "", page: -1, mcid: -1, children: [] };
+    const stack: StructNode[] = [root];
+    for (const n of this.structFlat) {
+      const node: StructNode = {
+        role: n.role, alt: n.alt, page: n.page, mcid: n.mcid, children: [],
+      };
+      stack.length = Math.min(stack.length, n.depth + 1);
+      const parent = stack[stack.length - 1] ?? root;
+      if (n.depth === 0 && parent === root && n.role === "Root") {
+        // 뿌리는 하나로 둔다
+        stack[0] = node;
+        root.children = node.children;
+        root.role = node.role;
+        continue;
+      }
+      parent.children.push(node);
+      stack[n.depth + 1] = node;
+    }
+    if (want == null) return root;
+    // 그 쪽에 놓인 것만 남긴다 — 자식이 남으면 부모도 남긴다
+    const keep = (n: StructNode): StructNode | null => {
+      const kids = n.children.map(keep).filter((k): k is StructNode => k !== null);
+      if (kids.length === 0 && n.page !== want && n.mcid < 0) return null;
+      if (kids.length === 0 && n.page !== want) return null;
+      return { ...n, children: kids };
+    };
+    return keep(root);
   }
 
   /** 딸린 파일 하나를 꺼낸다 */

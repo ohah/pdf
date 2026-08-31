@@ -60,11 +60,11 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 | `getViewport()` + `convertToViewportPoint/PdfPoint` | ✅ `viewport(page, {scale, rotation})` · `toViewport`·`toPdf`·`rect` |
 | render 옵션 `rotation` · `background` | ✅ |
 | render 옵션 `intent:'print'` · `annotationMode` · `transform` · `pageColors` · `isEditing` | ❌ |
-| `getTextContent()` | ⚠️ `text(page)` 와 `render()` 의 `runs`(x·y·w·h·angle·text). `fontName`·`hasEOL`·`dir` 없음 |
+| `getTextContent()` | ✅ `textItems(page)` — `str`·`dir`·`fontName`·`hasEOL` 까지 |
 | `streamTextContent()` | ❌ |
 | `getAnnotations()` 전체 주석 | ✅ `annotations(page)` — 종류·글·쓴이·날짜·색·깃발 |
 | `getOperatorList()` · `recordImages` | ❌ 내부에만 있다 |
-| `getStructTree()` | ❌ |
+| `getStructTree()` | ✅ `structure(page?)` |
 | `view`(MediaBox) · `userUnit` · `ref` · `clone()` | ⚠️ `viewport` 가 쪽 크기를 준다 |
 | `cleanup(keepLoadedFonts)` | ⚠️ `close()` 만 |
 
@@ -75,7 +75,7 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 | `TextLayer` / `TextLayerBuilder` | ✅ `renderTextLayer(container, runs)` |
 | `AnnotationLayer` / `AnnotationLayerBuilder` | ✅ `renderAnnotationLayer()` — 스타일시트 없이 인라인 자리 잡기 |
 | `XfaLayer` | ❌ XFA 미지원 (`isXfa` 로 알려만 준다) |
-| `StructTreeLayerBuilder` | ❌ |
+| `StructTreeLayerBuilder` | ⚠️ 나무는 `structure()` 로. DOM 얹기는 아직 |
 | `AnnotationEditorLayer` · `DrawLayer` · `ColorPicker` (형광펜·자유글·잉크·도장) | ❌ 편집은 `build(spec)` 로만 |
 
 ## 뷰어 부품 (`pdf_viewer.mjs`)
@@ -95,7 +95,6 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 
 이 표에서 ❌ 인 것 중 뷰어에 먼저 아쉬운 순서:
 
-1. 글자 항목의 글꼴 이름·줄 끝 표시, 구조 나무
-2. 스트리밍/진행률 (큰 파일 첫 쪽을 빨리)
-3. 표준 14종 실제 글꼴 데이터 (자간 정확도)
-4. Node.js 실행 (캔버스 팩토리 교체)
+1. 스트리밍/진행률 (큰 파일 첫 쪽을 빨리)
+2. 표준 14종 실제 글꼴 데이터 (자간 정확도)
+3. Node.js 실행 (캔버스 팩토리 교체)

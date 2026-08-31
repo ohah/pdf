@@ -1181,6 +1181,30 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   ok('XMP 안 한글이 살아 있다', xmp.includes('XMP 제목'), xmp.slice(0, 40));
 }
 
+// 구조 나무 · 글자 항목의 글꼴·세로쓰기
+{
+  const r = await load('struct.pdf');
+  const e = r.ex;
+  const S = (o, l) => (l > 0 ? dec.decode(new Uint8Array(e.memory.buffer, e.structTextPtr() + o, l)) : '');
+  const roles = [];
+  for (let i = 0; i < e.structCount(); i++) roles.push(S(e.structRoleOff(i), e.structRoleLen(i)));
+  ok('구조 나무를 읽는다', roles.join(',') === 'Root,Document,H1,P', roles.join(','));
+  ok('/S 가 /StructElem 에 안 걸린다', roles[1] === 'Document', roles[1]);
+  ok('대체 글(UTF-16)', S(e.structAltOff(2), e.structAltLen(2)) === '문서 제목', S(e.structAltOff(2), e.structAltLen(2)));
+  ok('마디가 놓인 쪽', e.structPageOf(2) === 0, e.structPageOf(2));
+  ok('본문 표식(MCID)', e.structMcid(2) === 0 && e.structMcid(3) === 1, [e.structMcid(2), e.structMcid(3)]);
+}
+{
+  const r = await load('korean.pdf');
+  ok('글자 덩이에 글꼴 번호가 붙는다', r.ex.itemFont(0) > 0, r.ex.itemFont(0));
+}
+{
+  const r = await load('vert.pdf');
+  let any = false;
+  for (let i = 0; i < r.ex.itemCount(); i++) if (r.ex.itemVertical(i) === 1) any = true;
+  ok('세로쓰기를 알아본다', any);
+}
+
 console.log(`  기능 단언 ${pass + fail}개 중 통과 ${pass}, 실패 ${fail}`);
 if (bad.length) bad.forEach((b3) => console.log('    ✗ ' + b3));
 process.exit(fail ? 1 : 0);

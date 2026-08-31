@@ -643,6 +643,7 @@ export fn parse(len: usize) u32 {
     collectDests(b);
     collectViewPrefs(b);
     collectXmp(b);
+    collectStruct(b);
     collectLabels(b);
     return if (page_count > 0) 1 else 0;
 }
@@ -2386,7 +2387,10 @@ const MAX_MAP = 2048;
 const MAX_W = 1024;
 
 /// 한 번에 그릴 글자 조각
-const Item = struct { x: f32, y: f32, size: f32, off: u32, len: u32 };
+// 글꼴 번호(fonts 의 자리)와 세로쓰기 여부까지 함께 남긴다. pdf.js 의
+// TextItem 이 fontName·dir 을 주는 자리다 — 글자층이 글꼴을 맞춰 눕히거나
+// 세로쓰기를 알아보는 데 쓴다.
+const Item = struct { x: f32, y: f32, size: f32, off: u32, len: u32, font: i32 = -1, vert: bool = false };
 var items: [MAX_ITEMS]Item = undefined;
 var item_n: u32 = 0;
 
@@ -3164,6 +3168,13 @@ export fn itemX(i: u32) f32 { return items[i].x; }
 export fn itemY(i: u32) f32 { return items[i].y; }
 export fn itemSize(i: u32) f32 { return items[i].size; }
 export fn itemOff(i: u32) u32 { return items[i].off; }
+/// 이 항목을 그린 글꼴 번호(1부터, 없으면 0). 이름은 fontNamePtr 로 읽는다.
+export fn itemFont(i: u32) u32 {
+    if (i >= item_n or items[i].font < 0) return 0;
+    return @as(u32, @intCast(items[i].font)) + 1;
+}
+/// 세로쓰기 글꼴로 그렸나 — pdf.js 의 dir === "ttb" 자리다.
+export fn itemVertical(i: u32) u32 { return if (i < item_n and items[i].vert) 1 else 0; }
 export fn itemLen(i: u32) u32 { return items[i].len; }
 export fn textPtr() [*]u8 { return &text; }
 export fn textLen() u32 { return text_n; }
@@ -3486,7 +3497,11 @@ fn emit(x: f32, y: f32, size: f32, start: u32) void {
     // CTM 을 적용한 좌표는 PDF 기준(아래가 원점)이므로 캔버스 기준으로 뒤집는다.
     // 다만 문서가 이미 위 기준으로 그리는 경우(세로 배율 음수)는 그대로 둔다.
     const cy = if (y > page_h or y < 0) y else page_h - y;
-    items[item_n] = .{ .x = x, .y = cy, .size = size, .off = start, .len = text_n - start };
+    items[item_n] = .{
+        .x = x, .y = cy, .size = size, .off = start, .len = text_n - start,
+        .font = cur_font,
+        .vert = cur_font >= 0 and fonts[@intCast(cur_font)].vertical,
+    };
     item_n += 1;
 }
 
@@ -3907,8 +3922,13 @@ fn runOps(b: []const u8, depth: u32) void {
             runFlush();
             // 뽑아 둔 글자는 문자열 단위로 묶는다 — 나중에 본문 검색에 쓴다
             if (text_n > start_text and item_n < MAX_ITEMS) {
-                items[item_n] = .{ .x = x0, .y = y0, .size = tf_size,
-                    .off = start_text, .len = text_n - start_text };
+                items[item_n] = .{
+                    .x = x0, .y = y0, .size = tf_size,
+                    .off = start_text, .len = text_n - start_text,
+                    // 어떤 글꼴로 그렸는지·세로쓰기인지도 함께 남긴다
+                    .font = cur_font,
+                    .vert = cur_font >= 0 and fonts[@intCast(cur_font)].vertical,
+                };
                 item_n += 1;
             }
             continue;
@@ -6951,10 +6971,26 @@ fn metaPut(used: *u32, i: usize, txt: []const u8) void {
 }
 
 /// 딕셔너리에서 /Key 뒤의 이름(/Foo)을 그대로 읽는다. 슬래시는 뺀다.
+/// 이름이 **그 자리에서 끝나는** 첫 자리. /T 가 /Type 에, /C 가 /Contents 에
+/// 걸려 엉뚱한 값을 읽던 것을 막는다.
+fn keyPos(b: []const u8, from: usize, to: usize, key: []const u8) ?usize {
+    var at_from: usize = 0;
+    while (find(b[from..to], key, at_from)) |at| {
+        const q = from + at + key.len;
+        const c = if (q < to) b[q] else ' ';
+        if (!((c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9'))) {
+            return from + at;
+        }
+        at_from = at + 1;
+    }
+    return null;
+}
+
 fn nameAfter(b: []const u8, from: usize, to: usize, key: []const u8, out: []u8) u32 {
-    const at = find(b[from..to], key, 0) orelse return 0;
-    var q = from + at + key.len;
-    if (q < to and ((b[q] >= 'a' and b[q] <= 'z') or (b[q] >= 'A' and b[q] <= 'Z'))) return 0;
+    // 이름이 그 자리에서 끝나는 것만 고른다 — /S 가 /StructElem 에, /C 가
+    // /Contents 에 먼저 걸려 값이 통째로 비던 자리다.
+    const at = keyPos(b, from, to, key) orelse return 0;
+    var q = at + key.len;
     while (q < to and isSpace(b[q])) q += 1;
     if (q >= to or b[q] != '/') return 0;
     q += 1;
@@ -7423,6 +7459,159 @@ fn walkNameAt(b: []const u8, ob: usize, oe: usize, name: []const u8, depth: u8) 
 }
 
 /// "(이름) 값" 이 늘어선 자리에서 이름을 찾아 그 값의 쪽을 준다.
+// ===== 구조 나무 =====
+//
+// 태그 PDF 는 "이건 제목, 이건 문단, 이건 표의 칸" 을 따로 적어 둔다.
+// 스크린리더가 읽는 차례와 뜻이 여기서 나온다(pdf.js 의 getStructTree).
+// 나무를 그대로 옮기지 않고 깊이를 붙여 납작하게 준다 — 쓰는 쪽이 다시
+// 세우기 쉽고, 재귀 자료를 wasm 경계 너머로 옮기지 않아도 된다.
+const StructNode = struct {
+    depth: u8 = 0,
+    page: i32 = -1,
+    mcid: i32 = -1,
+    role_off: u32 = 0,
+    role_len: u16 = 0,
+    alt_off: u32 = 0,
+    alt_len: u16 = 0,
+};
+var st_nodes: [2048]StructNode = undefined;
+var st_n: u32 = 0;
+var st_buf: [16384]u8 = undefined;
+var st_used: u32 = 0;
+
+export fn structCount() u32 { return st_n; }
+export fn structDepth(i: u32) u32 { return if (i < st_n) st_nodes[i].depth else 0; }
+export fn structPageOf(i: u32) i32 { return if (i < st_n) st_nodes[i].page else -1; }
+export fn structMcid(i: u32) i32 { return if (i < st_n) st_nodes[i].mcid else -1; }
+export fn structRoleOff(i: u32) u32 { return if (i < st_n) st_nodes[i].role_off else 0; }
+export fn structRoleLen(i: u32) u32 { return if (i < st_n) st_nodes[i].role_len else 0; }
+export fn structAltOff(i: u32) u32 { return if (i < st_n) st_nodes[i].alt_off else 0; }
+export fn structAltLen(i: u32) u32 { return if (i < st_n) st_nodes[i].alt_len else 0; }
+export fn structTextPtr() [*]u8 { return &st_buf; }
+
+fn stPut(txt: []const u8) struct { off: u32, len: u16 } {
+    if (txt.len == 0 or st_used + txt.len > st_buf.len or txt.len > 65535) return .{ .off = 0, .len = 0 };
+    const off = st_used;
+    @memcpy(st_buf[off..][0..txt.len], txt);
+    st_used += @intCast(txt.len);
+    return .{ .off = off, .len = @intCast(txt.len) };
+}
+
+/// 구조 요소 하나와 그 아래를 훑는다. /K 는 숫자(MCID)·딕셔너리·배열 셋 다 온다.
+fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) void {
+    if (depth > 32 or st_n >= st_nodes.len) return;
+    var node: StructNode = .{ .depth = depth, .page = page_hint };
+
+    var tmp: [64]u8 = undefined;
+    const rn = nameAfter(b, ob, oe, "/S", &tmp);
+    if (rn > 0) {
+        const put = stPut(tmp[0..rn]);
+        node.role_off = put.off;
+        node.role_len = put.len;
+    } else if (depth == 0) {
+        // 뿌리(StructTreeRoot)에는 /S 가 없다. pdf.js 처럼 이름을 붙여 준다.
+        const put = stPut("Root");
+        node.role_off = put.off;
+        node.role_len = put.len;
+    }
+    // 대체 글(/Alt) — 그림에 붙는 설명이다
+    if (keyPos(b, ob, oe, "/Alt")) |aa| {
+        const n2 = copyPdfText(b, aa + 4, oe, &st_buf, st_used);
+        if (n2 > 0) {
+            node.alt_off = st_used;
+            node.alt_len = @intCast(n2);
+            st_used += n2;
+        }
+    }
+    // 이 요소가 어느 쪽에 놓였나 (/Pg)
+    var page = page_hint;
+    if (keyPos(b, ob, oe, "/Pg")) |pa| {
+        var q = pa + 3;
+        while (q < oe and isSpace(b[q])) q += 1;
+        if (q < oe and isDigit(b[q])) page = pageIndexOf(readUint(b, &q));
+    }
+    node.page = page;
+    const me = st_n;
+    st_nodes[st_n] = node;
+    st_n += 1;
+
+    // 아래를 훑는다
+    const ka = keyPos(b, ob, oe, "/K") orelse return;
+    var q = ka + 2;
+    while (q < oe and isSpace(b[q])) q += 1;
+    if (q >= oe) return;
+
+    if (isDigit(b[q])) {
+        // 숫자 하나면 MCID, "3 0 R" 이면 딴 객체다
+        var q2 = q;
+        const v = readUint(b, &q2);
+        var q3 = q2;
+        while (q3 < oe and isSpace(b[q3])) q3 += 1;
+        const is_ref = q3 < oe and isDigit(b[q3]);
+        if (is_ref) {
+            if (findObj(b, v)) |kb| walkStruct(b, kb, objDictEnd(b, kb), depth + 1, page);
+        } else {
+            st_nodes[me].mcid = @intCast(v);
+        }
+        return;
+    }
+    if (b[q] == '<') {
+        walkStruct(b, q, dictEnd(b, q, oe), depth + 1, page);
+        return;
+    }
+    if (b[q] != '[') return;
+    const end = arrayEnd(b, q, oe);
+    q += 1;
+    var guard: u32 = 0;
+    while (q < end and guard < 4096 and st_n < st_nodes.len) : (guard += 1) {
+        while (q < end and isSpace(b[q])) q += 1;
+        if (q >= end or b[q] == ']') break;
+        if (isDigit(b[q])) {
+            const v = readUint(b, &q);
+            var q3 = q;
+            while (q3 < end and isSpace(b[q3])) q3 += 1;
+            if (q3 < end and isDigit(b[q3])) {
+                // "n 0 R" — 딴 객체
+                _ = readUint(b, &q3);
+                while (q3 < end and isSpace(b[q3])) q3 += 1;
+                if (q3 < end and b[q3] == 'R') q3 += 1;
+                q = q3;
+                if (findObj(b, v)) |kb| walkStruct(b, kb, objDictEnd(b, kb), depth + 1, page);
+            } else {
+                // 그냥 MCID — 잎으로 담는다
+                var leaf: StructNode = .{ .depth = depth + 1, .page = page, .mcid = @intCast(v) };
+                leaf.role_off = st_nodes[me].role_off;
+                leaf.role_len = st_nodes[me].role_len;
+                st_nodes[st_n] = leaf;
+                st_n += 1;
+            }
+            continue;
+        }
+        if (b[q] == '<') {
+            const de = dictEnd(b, q, end);
+            walkStruct(b, q, de, depth + 1, page);
+            q = de;
+            continue;
+        }
+        q += 1;
+    }
+}
+
+fn collectStruct(b: []const u8) void {
+    st_n = 0;
+    st_used = 0;
+    const cat = catalogRange(b) orelse return;
+    const sa = keyPos(b, cat.s, cat.e, "/StructTreeRoot") orelse return;
+    var q = sa + 15;
+    while (q < cat.e and isSpace(b[q])) q += 1;
+    if (q < cat.e and isDigit(b[q])) {
+        const n = readUint(b, &q);
+        if (findObj(b, n)) |ob| walkStruct(b, ob, objDictEnd(b, ob), 0, -1);
+    } else if (q < cat.e and b[q] == '<') {
+        walkStruct(b, q, dictEnd(b, q, cat.e), 0, -1);
+    }
+}
+
 // ===== 이름 목적지 · 뷰어 설정 · XMP =====
 //
 // 목차와 링크가 "3쪽" 대신 이름으로 가리키는 문서가 흔하다. 이름을 물어보면
@@ -7988,20 +8177,6 @@ export fn annAuthorLen(i: u32) u32 { return if (i < ann_n) anns[i].au_len else 0
 export fn annDateOff(i: u32) u32 { return if (i < ann_n) anns[i].dt_off else 0; }
 export fn annDateLen(i: u32) u32 { return if (i < ann_n) anns[i].dt_len else 0; }
 
-/// 이름이 **그 자리에서 끝나는** 첫 자리. /T 가 /Type 에, /C 가 /Contents 에
-/// 걸려 엉뚱한 값을 읽던 것을 막는다.
-fn keyPos(b: []const u8, from: usize, to: usize, key: []const u8) ?usize {
-    var at_from: usize = 0;
-    while (find(b[from..to], key, at_from)) |at| {
-        const q = from + at + key.len;
-        const c = if (q < to) b[q] else ' ';
-        if (!((c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9'))) {
-            return from + at;
-        }
-        at_from = at + 1;
-    }
-    return null;
-}
 
 /// 쪽에 달린 주석을 모두 걷는다. 링크·위젯도 포함한다 — 쓰는 쪽이 가린다.
 fn collectAnnots(b: []const u8, body: usize, end: usize) void {
