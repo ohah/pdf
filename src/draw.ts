@@ -63,6 +63,8 @@ export type DrawInput = {
   originY?: number;
   /** /Rotate — 0·90·180·270 */
   rotate?: number;
+  /** 바탕색. 기본은 흰색이다 — 투명하게 두려면 "transparent" 를 준다. */
+  background?: string;
   bitmap?: ImageBitmap;
   /** 쪽이 쓰는 그림들. Do 가 번호로 고른다. */
   bitmaps?: (ImageBitmap | undefined)[];
@@ -168,8 +170,12 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
   const y0 = input.originY ?? 0;
 
   g.setTransform(1, 0, 0, 1, 0, 0);
-  g.fillStyle = "#fff";
-  g.fillRect(0, 0, canvas.width, canvas.height);
+  const bg = input.background ?? "#fff";
+  g.clearRect(0, 0, canvas.width, canvas.height);
+  if (bg !== "transparent") {
+    g.fillStyle = bg;
+    g.fillRect(0, 0, canvas.width, canvas.height);
+  }
 
   // PDF 는 좌하단이 원점이고 y 가 위로 자란다. 캔버스는 반대라 뒤집고,
   // /Rotate 가 있으면 그만큼 돌린다 — 뷰어들이 쓰는 그 변환이다.

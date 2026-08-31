@@ -44,7 +44,8 @@ Indexed·Separation·Lab·ICC 대체, /Mask 스텐실과 색 열쇠 마스킹, S
 **쓰기** — 쪽 고르기·회전·이어붙이기, 워터마크, 주석, 양식 칸 채우기와
 새 칸 만들기, 암호 걸기(AES-256/R6).
 
-어디까지 되고 무엇이 안 되는지는 [`docs/support.md`](docs/support.md) 에 적어 두었다.
+어디까지 되고 무엇이 안 되는지는 [`docs/support.md`](docs/support.md) 에,
+pdf.js 와 하나씩 맞댄 표는 [`docs/compare.md`](docs/compare.md) 에 있다.
 
 ## 화면 갈래
 
@@ -109,9 +110,24 @@ const { doc } = usePdf(file, { wasm: "/pdf.wasm" });
 | `pdf.attachment(i)` | 딸린 파일 바이트 |
 | `pdf.setLayers(on[])` | 레이어를 켜고 끈다 |
 | `pdf.build(spec)` · `encrypt(bytes, pw)` · `merge(bytes)` | 새 PDF 를 만든다 |
+| `pdf.renderTask(page, canvas, opts)` | 그만둘 수 있는 렌더 — `.cancel()` · `.promise` |
+| `pdf.viewport(page, {scale, rotation})` | 그리지 않고 자리만 계산. `toViewport`·`toPdf`·`rect` |
+| `pdf.data()` | 연 문서의 원본 바이트 |
 | `pdf.close()` | 워커를 닫는다 |
 
-`toLines(runs)` 로 글자 덩이를 사람이 읽는 차례의 줄로 묶을 수 있다.
+`render()` 는 `scale`·`dpr`·`formLayer` 에 더해 `rotation`(문서 회전에 더할 각) ·
+`background`(바탕색) · `signal`(AbortSignal) 을 받는다. 돌려주는 `viewport` 로 얹는
+것들의 자리를 잡는다.
+
+```js
+const { runs, viewport } = await pdf.render(1, canvas, { scale: 1.5, rotation: 90 });
+renderTextLayer(layer, runs);              // 긁어 복사되는 투명 글자층
+Object.assign(box.style, viewport.rect([72, 680, 172, 700]));   // PDF 네모 → 화면 자리
+const [px, py] = viewport.toPdf(ev.offsetX, ev.offsetY);        // 클릭 → PDF 좌표
+```
+
+`toLines(runs)` 로 글자 덩이를 읽는 차례의 줄로 묶을 수 있고, `renderTextLayer()` 가
+그 줄로 투명 글자층을 지어 준다(폭 맞추기·줄바꿈까지).
 
 ## 소스에서 굽기
 

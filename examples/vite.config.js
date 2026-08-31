@@ -23,6 +23,8 @@ const assets = {
       const url = (req.url || "").split("?")[0];
       const file = url === "/pdf.wasm" ? join(repo, "dist/pdf.wasm")
         : url === "/sample.pdf" ? join(repo, "tests/fixtures/korean.pdf")
+        // 시험용 — 붙임감을 이름으로 꺼내 쓴다
+        : url.startsWith("/fixtures/") ? join(repo, "tests", url)
         : url.startsWith("/cmaps/") ? join(repo, url)
         // 번들러 없이 dist 를 그대로 물리는 vanilla.html 용
         : url.startsWith("/dist/") ? join(repo, url)

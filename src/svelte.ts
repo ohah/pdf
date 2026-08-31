@@ -49,14 +49,19 @@ export type PDFPageParams = RenderOpts & { doc: PDFDocument | null; page: number
 /** canvas 에 거는 action. 값이 바뀌면 다시 그린다. */
 export function pdfPage(node: HTMLCanvasElement, params: PDFPageParams) {
   let cur = params;
+  let ac: AbortController | null = null;
   const draw = () => {
+    // 앞서 그리던 것은 버린다 — 빠르게 넘길 때 지나간 쪽이 덮어 그리지 않게
+    ac?.abort();
     if (!cur.doc) return;
-    void cur.doc.render(cur.page, node, cur);
+    ac = new AbortController();
+    void cur.doc.render(cur.page, node, { ...cur, signal: ac.signal }).catch(() => {});
   };
   draw();
   return {
     update(next: PDFPageParams) { cur = next; draw(); },
     destroy() {
+      ac?.abort();
       // 문서는 스토어가 닫는다
     },
   };

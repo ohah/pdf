@@ -54,11 +54,16 @@ export const PDFPage = defineComponent({
   },
   setup(props) {
     const cv = ref<HTMLCanvasElement | null>(null);
-    watchEffect(async () => {
+    watchEffect(async (onCleanup) => {
       if (!cv.value || !props.doc) return;
-      await props.doc.render(props.page, cv.value, {
-        scale: props.scale, formLayer: props.formLayer,
-      });
+      // 쪽·배율이 바뀌면 그리던 것을 버린다
+      const ac = new AbortController();
+      onCleanup(() => ac.abort());
+      await props.doc
+        .render(props.page, cv.value, {
+          scale: props.scale, formLayer: props.formLayer, signal: ac.signal,
+        })
+        .catch(() => {});
     });
     return () => h("canvas", { ref: cv });
   },

@@ -13,12 +13,16 @@ import { PDFClient, type PageMsg, type OpenMsg, type BuildSpec } from "./client.
 import { drawOps, toLines, type TextRun } from "./draw.js";
 import { type Paths } from "./config.js";
 import { checkSignature, type SigCheck } from "./sig.js";
+import { makeViewport, type Viewport } from "./viewport.js";
 
 export type { Paths } from "./config.js";
 export type { BuildSpec, Mask, PageMsg } from "./client.js";
 export type { TextRun } from "./draw.js";
 export type { SigCheck } from "./sig.js";
 export { toLines } from "./draw.js";
+export { renderTextLayer, type TextLayer, type TextLayerOpts } from "./textlayer.js";
+export { makeViewport, type Viewport } from "./viewport.js";
+export { toScreen, placeRect, type PageBox, type Placed } from "./place.js";
 export { PDFClient } from "./client.js";
 
 export type OpenOpts = Paths & {
@@ -33,6 +37,12 @@ export type RenderOpts = {
   dpr?: number;
   /** 입력 칸 겉모습을 그릴지. 진짜 입력 칸을 얹을 거면 false 로 둔다. */
   formLayer?: boolean;
+  /** 문서의 /Rotate 에 **더할** 회전. 90 단위다 — 뷰어의 "돌리기" 단추용. */
+  rotation?: number;
+  /** 바탕색. 기본은 흰색. "transparent" 면 안 칠한다. */
+  background?: string;
+  /** 그만두기. 스크롤로 지나간 쪽을 버릴 때 쓴다. */
+  signal?: AbortSignal;
 };
 
 /** 쪽 하나를 그린 결과. 글자층을 손수 지을 때 쓴다. */
@@ -42,8 +52,10 @@ export type RenderResult = {
   /** 쪽 크기(pt) */
   width: number;
   height: number;
-  /** /Rotate */
+  /** 문서의 /Rotate 에 사용자 회전을 더한 최종 각 */
   rotate: number;
+  /** 이 렌더에 쓰인 뷰포트 — 얹는 것들의 자리를 여기서 구한다 */
+  viewport: Viewport;
 };
 
 const fontCache = new Map<string, Promise<string | undefined>>();
@@ -142,23 +154,33 @@ export class PDFDocument {
     return q;
   }
 
-  /** 쪽 하나를 canvas 에 그린다. 쪽 번호는 1 부터다. */
+  /**
+   * 쪽 하나를 canvas 에 그린다. 쪽 번호는 1 부터다.
+   *
+   * `signal` 로 그만둘 수 있다. 워커가 이미 집어 든 일은 끝까지 가지만,
+   * 결과를 버리고 캔버스에는 손대지 않는다 — 빠르게 스크롤할 때 지나간
+   * 쪽이 나중에 덮어 그리는 것을 막는다.
+   */
   async render(page: number, canvas: HTMLCanvasElement, opts: RenderOpts = {}): Promise<RenderResult> {
+    stopIfAborted(opts.signal);
     const q = await this.get(page, opts.formLayer !== false);
+    stopIfAborted(opts.signal);
     const fams = this.fams.get(page) ?? [];
     const scale = opts.scale ?? 1;
     const dpr = opts.dpr ?? Math.min(globalThis.devicePixelRatio || 1, 2);
-    const swap = q.rot === 90 || q.rot === 270;
-    const cssW = (swap ? q.h : q.w) * scale;
-    const cssH = (swap ? q.w : q.h) * scale;
-    canvas.width = Math.max(1, Math.round(cssW * dpr));
-    canvas.height = Math.max(1, Math.round(cssH * dpr));
-    canvas.style.width = `${Math.round(cssW)}px`;
-    canvas.style.height = `${Math.round(cssH)}px`;
+    const vp = makeViewport({
+      w: q.w, h: q.h, x0: q.x0, y0: q.y0, rot: q.rot,
+      scale, rotation: opts.rotation ?? 0,
+    });
+    canvas.width = Math.max(1, Math.round(vp.width * dpr));
+    canvas.height = Math.max(1, Math.round(vp.height * dpr));
+    canvas.style.width = `${Math.round(vp.width)}px`;
+    canvas.style.height = `${Math.round(vp.height)}px`;
     const runs = drawOps(canvas, {
       ops: q.ops, text: q.drw, read: q.rtx, pageW: q.w, pageH: q.h,
       bitmap: q.bitmap, bitmaps: q.bitmaps, stencils: q.stencils,
-      originX: q.x0, originY: q.y0, rotate: q.rot,
+      originX: q.x0, originY: q.y0, rotate: vp.rotation,
+      background: opts.background,
       fontFamily: (i) => fams[i - 1],
       fontIsPua: (i) => q.fonts[i - 1]?.pua === true,
       fontUnusable: (i) => {
@@ -167,7 +189,43 @@ export class PDFDocument {
       },
       inline: q.inline,
     });
-    return { runs, width: q.w, height: q.h, rotate: q.rot };
+    return { runs, width: q.w, height: q.h, rotate: vp.rotation, viewport: vp };
+  }
+
+  /**
+   * 그만둘 수 있는 렌더. pdf.js 의 RenderTask 와 같은 모양이다.
+   *
+   *   const task = pdf.renderTask(1, canvas, { scale });
+   *   task.cancel();               // 스크롤로 지나갔을 때
+   *   await task.promise;          // RenderCancelled 가 난다
+   */
+  renderTask(page: number, canvas: HTMLCanvasElement, opts: RenderOpts = {}) {
+    const ac = new AbortController();
+    if (opts.signal) {
+      if (opts.signal.aborted) ac.abort();
+      else opts.signal.addEventListener("abort", () => ac.abort(), { once: true });
+    }
+    return {
+      promise: this.render(page, canvas, { ...opts, signal: ac.signal }),
+      cancel: () => ac.abort(),
+    };
+  }
+
+  /**
+   * 쪽의 뷰포트. 그리지 않고 자리만 계산할 때 쓴다 — 자리 잡기·클릭 위치·
+   * 스크롤 높이 미리 재기 같은 것.
+   */
+  async viewport(page: number, opts: { scale?: number; rotation?: number } = {}): Promise<Viewport> {
+    const q = await this.get(page, false);
+    return makeViewport({
+      w: q.w, h: q.h, x0: q.x0, y0: q.y0, rot: q.rot,
+      scale: opts.scale ?? 1, rotation: opts.rotation ?? 0,
+    });
+  }
+
+  /** 연 문서의 원본 바이트. 내려받기 단추에 그대로 쓴다. */
+  data(): Uint8Array {
+    return this.raw.slice();
   }
 
   /** 쪽 하나의 글자. 사람이 읽는 차례로 줄을 세워 준다. */
@@ -227,10 +285,24 @@ export class PDFDocument {
     return this.cl.merge(bytes);
   }
 
+  /** 워커를 닫는다. 두 번 불러도 된다. 닫은 뒤 부르면 바로 오류가 난다. */
   close() {
     this.cl.close();
     this.cache.clear();
+    this.fams.clear();
   }
+}
+
+/** 렌더를 그만뒀다. `signal` 로 끊었거나 `renderTask().cancel()` 을 불렀을 때다. */
+export class RenderCancelled extends Error {
+  constructor() {
+    super("렌더를 그만뒀습니다");
+    this.name = "RenderCancelled";
+  }
+}
+
+function stopIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new RenderCancelled();
 }
 
 /** 암호가 있어야 열리는 문서다. 암호를 받아 다시 open 을 부른다. */

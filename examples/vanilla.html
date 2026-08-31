@@ -5,23 +5,28 @@
 <h1>바닐라 자바스크립트</h1>
 <input type="file" accept="application/pdf">
 <div id="info"></div>
-<canvas id="cv"></canvas>
+<div style="position:relative;display:inline-block"><canvas id="cv"></canvas><div id="layer"></div></div>
 <script type="module">
   // 번들러 없이 쓰는 길 — dist 를 그대로 물린다. npm 으로 받았다면
   //   import { PDFDocument } from "./node_modules/@ohah/pdf/dist/index.js";
   // 여기서는 예제 서버가 /dist 로 내어 준다. @vite-ignore 는 이 예제를 띄우는
   // vite 가 이 줄을 손대지 않게 하는 표시일 뿐, 브라우저에는 그냥 주석이다.
   const dist = "/dist/index.js";
-  const { PDFDocument } = await import(/* @vite-ignore */ dist);
+  const { PDFDocument, renderTextLayer } = await import(/* @vite-ignore */ dist);
 
   const paths = { wasm: "/pdf.wasm", cmaps: "/cmaps" };
   const show = async (bytes) => {
     const pdf = await PDFDocument.open(bytes, paths);
-    await pdf.render(1, document.getElementById("cv"), { scale: 1.2 });
+    const r = await pdf.render(1, document.getElementById("cv"), { scale: 1.2 });
+    // 캔버스 위에 투명한 글자를 얹어 긁고 복사할 수 있게 한다
+    const layer = document.getElementById("layer");
+    layer.style.cssText =
+      `position:absolute;left:0;top:0;width:${r.viewport.width}px;height:${r.viewport.height}px`;
+    renderTextLayer(layer, r.runs);
     const t = await pdf.text(1);
     document.getElementById("info").textContent =
       `${pdf.pages}쪽 · 글자 ${t.length}자 · 목차 ${pdf.outline.length} · 딸린 파일 ${pdf.attachments.length}`;
-    window.__done = { pages: pdf.pages, chars: t.length };
+    window.__done = { pages: pdf.pages, chars: t.length, spans: layer.querySelectorAll("span").length };
   };
   document.querySelector("input").onchange = async (e) => {
     show(new Uint8Array(await e.target.files[0].arrayBuffer()));
