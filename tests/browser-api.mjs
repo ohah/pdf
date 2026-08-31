@@ -118,6 +118,24 @@ const r = await p.evaluate(async (doc) => {
     host.remove();
   }
 
+  // 5.5) 링크 주소 거르기 + 투명 그룹이 상태를 물려받기
+  {
+    const { safeUrl } = await import('/dist/index.js');
+    ok('javascript: 막음', safeUrl('javascript:alert(1)') === null);
+    ok('JAVASCRIPT: 도 막음', safeUrl('  JaVaScRiPt:alert(1)') === null);
+    ok('data: 막음', safeUrl('data:text/html,<script>') === null);
+    ok('http 통과', safeUrl('https://example.com/a?b=1') === 'https://example.com/a?b=1');
+    ok('상대 주소 통과', safeUrl('../doc.pdf') === '../doc.pdf');
+    ok('빈 값', safeUrl('') === null && safeUrl(undefined) === null);
+
+    const g = await PDFDocument.open(new Uint8Array(await (await fetch('/fixtures/gstate.pdf')).arrayBuffer()), { wasm: '/pdf.wasm', cmaps: '/cmaps' });
+    const gc = document.createElement('canvas');
+    await g.render(1, gc, { scale: 2 });
+    const d = gc.getContext('2d').getImageData(gc.width / 2 | 0, gc.height / 2 | 0, 1, 1).data;
+    ok('투명 그룹이 색을 물려받음', d[0] > 200 && d[1] < 200 && d[2] < 200, [d[0], d[1], d[2]]);
+    g.close();
+  }
+
   // 6) data()
   {
     const d1 = pdf.data(); d1[0] = 0;

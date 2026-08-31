@@ -1710,8 +1710,22 @@ export fn apply() usize {
                 }
                 appendStr(&pos, " ]");
             }
-            const rot_here = rotOf(pick[i]);
-            if (rot_here != 0 or rot_each[@min(pick[i], rot_each.len - 1)] >= 0) {
+            // 원본의 /Rotate 는 위에서 건너뛰었으므로 여기서 다시 쓴다.
+            // 쓰는 이가 준 회전은 원본에 **더한다** — 예전에는 원본을 버리고
+            // 사용자 값만 적어, /Rotate 90 인 가로 스캔이 아무 설정도 안 했는데
+            // 똑바로(0도) 나왔다.
+            const src_rot: i32 = blk: {
+                const inh = inheritedKey(b, body, end, "/Rotate") orelse break :blk 0;
+                var rp = inh.at + 7;
+                while (rp < inh.e and isSpace(b[rp])) rp += 1;
+                var neg = false;
+                if (rp < inh.e and b[rp] == '-') { neg = true; rp += 1; }
+                if (rp >= inh.e or !isDigit(b[rp])) break :blk 0;
+                const v: i32 = @intCast(readUint(b, &rp) % 360);
+                break :blk if (neg) -v else v;
+            };
+            const rot_here = src_rot + rotOf(pick[i]);
+            if (@mod(rot_here, 360) != 0) {
                 appendStr(&pos, " /Rotate ");
                 const r = @mod(rot_here, 360);
                 appendNum(&pos, @intCast(if (r < 0) r + 360 else r));
@@ -8719,7 +8733,10 @@ fn emitShade(sh: *const Shade, code: f32) void {
 }
 
 fn emitShadeGrad(sh: *const Shade, code: f32) void {
-    var arg: [40]f32 = undefined;
+    // 10 + 마디 8개 × 4 = 42 칸이 필요하다. 40 으로 두었더니 마지막 마디의
+    // 뒤 두 칸이 배열 밖이었고(ReleaseSmall 이라 경계 검사도 없다), 자르는
+    // 길이도 arg[0..42] 라 스택 8바이트를 그대로 실어 보냈다.
+    var arg: [10 + 8 * 4]f32 = undefined;
     arg[0] = @floatFromInt(sh.kind);
     var i: u32 = 0;
     while (i < 6) : (i += 1) arg[1 + i] = sh.coords[i];

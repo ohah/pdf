@@ -227,6 +227,30 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
     c.height = canvas.height;
     return c.getContext("2d");
   };
+  /**
+   * 새 판에 지금 그리기 상태를 옮긴다.
+   *
+   * 딴 판(투명 그룹·가리개·글자 오려 내기)은 갓 만든 캔버스라 색이 검정,
+   * 선 굵기 1, 점선 없음에서 시작한다. PDF 의 폼 XObject 는 부르는 쪽 상태를
+   * 그대로 물려받아야 하므로, 옮기지 않으면 `1 0 0 rg` 로 칠해 둔 빨강이
+   * 그룹 안에서 검정으로 나온다. 알파와 혼합 모드는 그룹을 겹칠 때 한 번에
+   * 먹이므로 여기서 옮기지 않는다(두 번 먹으면 더 진해진다).
+   */
+  const carry = (from: CanvasRenderingContext2D, to: CanvasRenderingContext2D) => {
+    to.fillStyle = from.fillStyle;
+    to.strokeStyle = from.strokeStyle;
+    to.lineWidth = from.lineWidth;
+    to.lineCap = from.lineCap;
+    to.lineJoin = from.lineJoin;
+    to.miterLimit = from.miterLimit;
+    to.font = from.font;
+    try {
+      to.setLineDash(from.getLineDash());
+      to.lineDashOffset = from.lineDashOffset;
+    } catch {
+      // 점선을 못 옮겨도 그리는 것은 이어 간다
+    }
+  };
   const maskCtx = () => {
     if (!maskG) {
       const c = like();
@@ -269,9 +293,11 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
     switch (code) {
       case OP.SAVE: g.save(); fillStack.push(fillCss); depth++; break;
       case OP.RESTORE:
+        // 층(가리개·글자 오려 내기)을 먼저 얹고 부모로 돌아간 다음에 되돌린다.
+        // 순서를 바꾸면 층에는 save 가 없어 restore 가 헛돌고, 부모의 q 는
+        // 영영 안 닫혀 그 뒤 내용까지 오려진 채 남는다.
+        while (clips.length > 0 && clips[clips.length - 1].depth >= depth) closeClip();
         if (depth > 0) { g.restore(); fillCss = fillStack.pop() ?? "#000000"; depth--; }
-        // 오려 내기를 걸어 둔 q 가 닫히면 여기서 얹는다
-        while (clips.length > 0 && depth < clips[clips.length - 1].depth) closeClip();
         break;
       case OP.SMASK_BEGIN: {
         // 가리개 그림을 딴 판에 그린다. 밝기로 가리는 것이면 바탕색을
@@ -308,6 +334,7 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
         const layer = like();
         if (!layer) break;
         layer.setTransform(g.getTransform());
+        carry(g, layer);
         clips.push({ mask: ctx, layer, parent: g, depth });
         g = layer;
         break;
@@ -318,6 +345,7 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
         const c = like();
         if (!c) break;
         c.setTransform(g.getTransform());
+        carry(g, c);
         groups.push({ layer: c, parent: g, alpha: ops[a], bm: ops[a + 1] | 0, depth });
         g = c;
         break;
@@ -583,7 +611,23 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
       default: break;
     }
   }
-  // 오려 내기를 닫지 않고 끝난 문서도 있다
+  // 닫지 않고 끝난 문서도 있다. 층이 열린 채 끝나면 그 판에 그린 것이
+  // 통째로 사라지므로(g 가 보이지 않는 캔버스를 가리킨 채 끝난다) 여기서
+  // 그룹·가리개·오려 내기를 모두 마저 얹는다.
+  if (smask) {
+    g = smask.parent;
+    smask = null;
+  }
+  while (groups.length > 0) {
+    const top = groups.pop()!;
+    g = top.parent;
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalAlpha = top.alpha;
+    g.globalCompositeOperation = (BLENDS[top.bm] ?? "source-over") as GlobalCompositeOperation;
+    g.drawImage(top.layer.canvas, 0, 0);
+    g.restore();
+  }
   while (clips.length > 0) closeClip();
   // 짝이 안 맞는 q 가 남아 있어도 상태를 되돌린다
   while (depth-- > 0) g.restore();

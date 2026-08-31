@@ -112,10 +112,14 @@ function nameOf(b: Uint8Array, t: TLV, want: string): string {
 /** UTCTime/GeneralizedTime 을 사람이 읽는 꼴로. */
 function timeOf(b: Uint8Array, t: TLV): string {
   const s = new TextDecoder().decode(b.subarray(t.start, t.end));
-  const m = /^(\d{2})?(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/.exec(s);
+  // UTCTime(0x17) 은 YYMMDD…, GeneralizedTime(0x18) 은 YYYYMMDD… 다.
+  // 하나의 정규식에 앞 두 자리를 옵션으로 두면 UTCTime 에서 자리가 한 칸씩
+  // 밀려(260901 → 2009-01-12) 엉뚱한 날짜가 나온다.
+  const gen = t.tag === 0x18;
+  const m = (gen ? /^(\d{4})(\d{2})(\d{2})/ : /^(\d{2})(\d{2})(\d{2})/).exec(s);
   if (!m) return s;
-  const yy = t.tag === 0x17 ? (Number(m[2]) < 50 ? 2000 : 1900) + Number(m[2]) : Number(m[1] + m[2]);
-  return `${yy}-${m[3]}-${m[4]}`;
+  const yy = gen ? Number(m[1]) : (Number(m[1]) < 50 ? 2000 : 1900) + Number(m[1]);
+  return `${yy}-${m[2]}-${m[3]}`;
 }
 
 /** DER 로 적힌 ECDSA 서명을 r‖s 날바이트로 편다. */
@@ -184,7 +188,11 @@ export async function checkSignature(
 
   // [version, sid, digestAlgorithm, (A0 signedAttrs), sigAlgorithm, signature, (A1)]
   const digAlg = sik[2];
-  const hashName = HASH[oid(der, kids(der, digAlg)[0])] ?? "SHA-256";
+  const digOid = oid(der, kids(der, digAlg)[0]);
+  const hashName = HASH[digOid];
+  // 모르는 알고리즘을 SHA-256 으로 치면, 멀쩡한 서명이 "고쳐졌습니다" 로 나온다.
+  // 모르면 모른다고 한다.
+  if (!hashName) return fail(`모르는 요약 알고리즘입니다 (${digOid})`);
   out.hash = hashName;
   const attrs = sik.find((k) => k.tag === 0xa0);
   const after = sik.filter((k) => k.start > (attrs ?? digAlg).end);
@@ -220,7 +228,11 @@ export async function checkSignature(
   let spki: Uint8Array | null = null;
   let curve = "";
   if (certsBag) {
-    const cert = kids(der, certsBag)[0];
+    // 인증서 뭉치는 SET 이라 차례가 정해져 있지 않다. 앞의 것을 그냥 집으면
+    // 체인을 CA 부터 담는 도구(BouncyCastle 등)에서 CA 의 열쇠로 맞춰 보다
+    // "서명이 인증서와 맞지 않습니다" 가 나온다. SignerIdentifier 가 가리키는
+    // 것을 골라야 한다 — issuerAndSerialNumber 면 발급자+일련번호로 맞댄다.
+    const cert = pickSigner(der, kids(der, certsBag), sik[1]);
     if (cert) {
       const tbs = kids(der, cert)[0];
       const tk = kids(der, tbs);
@@ -286,4 +298,47 @@ export async function checkSignature(
   else if (!out.covers) out.note = "서명 뒤에 덧붙은 고침이 있습니다";
   else out.note = "서명한 그대로입니다";
   return out;
+}
+
+/**
+ * SignerIdentifier 가 가리키는 인증서를 고른다.
+ *
+ * issuerAndSerialNumber(SEQUENCE) 면 발급자 이름과 일련번호가 같은 것을,
+ * subjectKeyIdentifier([0]) 면 확장 2.5.29.14 의 값이 같은 것을 찾는다.
+ * 못 찾으면 첫 번째를 준다 — 예전 동작이라 최소한 나빠지지는 않는다.
+ */
+function pickSigner(der: Uint8Array, certs: TLV[], sid: TLV | undefined): TLV | undefined {
+  if (!sid || certs.length <= 1) return certs[0];
+  const eq = (a: TLV, b: TLV) => same(der.subarray(a.start, a.end), der.subarray(b.start, b.end));
+
+  if (sid.tag === 0x30) {
+    // issuerAndSerialNumber
+    const [wantIssuer, wantSerial] = kids(der, sid);
+    if (wantIssuer && wantSerial) {
+      for (const c of certs) {
+        const tk = kids(der, kids(der, c)[0]);
+        const base = tk[0]?.tag === 0xa0 ? 1 : 0;
+        const issuer = tk[base + 2];
+        const serial = tk[base + 1];
+        if (issuer && serial && eq(issuer, wantIssuer) && eq(serial, wantSerial)) return c;
+      }
+    }
+  } else if (sid.tag === 0x80 || sid.tag === 0xa0) {
+    // subjectKeyIdentifier — 확장에서 찾는다
+    const want = der.subarray(sid.start, sid.end);
+    for (const c of certs) {
+      const tk = kids(der, kids(der, c)[0]);
+      const exts = tk.find((k) => k.tag === 0xa3);
+      if (!exts) continue;
+      for (const ext of kids(der, kids(der, exts)[0] ?? exts)) {
+        const ek = kids(der, ext);
+        if (!ek[0] || oid(der, ek[0]) !== "2.5.29.14") continue;
+        const octet = ek[ek.length - 1];
+        const inner = octet && tlv(der, octet.start);
+        const v = inner ? der.subarray(inner.start, inner.end) : null;
+        if (v && same(v, want)) return c;
+      }
+    }
+  }
+  return certs[0];
 }

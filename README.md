@@ -113,6 +113,7 @@ const { doc } = usePdf(file, { wasm: "/pdf.wasm" });
 | `pdf.renderTask(page, canvas, opts)` | 그만둘 수 있는 렌더 — `.cancel()` · `.promise` |
 | `pdf.viewport(page, {scale, rotation})` | 그리지 않고 자리만 계산. `toViewport`·`toPdf`·`rect` |
 | `pdf.data()` | 연 문서의 원본 바이트 |
+| `safeUrl(link.uri)` | 링크 주소를 걸러 준다 — `javascript:` 같은 것은 null |
 | `pdf.close()` | 워커를 닫는다 |
 
 `render()` 는 `scale`·`dpr`·`formLayer` 에 더해 `rotation`(문서 회전에 더할 각) ·

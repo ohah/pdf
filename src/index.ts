@@ -293,6 +293,26 @@ export class PDFDocument {
   }
 }
 
+/**
+ * 링크 주소가 열어도 되는 것인지 본다. 아니면 null 이다.
+ *
+ * 문서 안의 `/URI` 는 만든 이가 적어 넣은 값이라 `javascript:` 도 올 수 있다.
+ * 그걸 그대로 `<a href>` 에 넣으면 문서가 뷰어의 출처에서 스크립트를 돌린다.
+ * 링크를 걸기 전에 여기를 지나게 한다.
+ *
+ *   const href = safeUrl(link.uri);
+ *   if (href) a.href = href;
+ */
+export function safeUrl(uri: string): string | null {
+  const t = (uri ?? "").trim();
+  if (!t) return null;
+  // 스킴 없는 상대 주소는 문서가 열린 곳을 기준으로 도니 그대로 둔다
+  const m = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(t);
+  if (!m) return t;
+  const ok = ["http", "https", "mailto", "tel", "ftp", "ftps"];
+  return ok.includes(m[1].toLowerCase()) ? t : null;
+}
+
 /** 렌더를 그만뒀다. `signal` 로 끊었거나 `renderTask().cancel()` 을 불렀을 때다. */
 export class RenderCancelled extends Error {
   constructor() {

@@ -474,7 +474,9 @@ async function page(i: number, formOn: boolean, light = false) {
       rect: [0, 1, 2, 3].map((q) => e.fieldRect!(k, q)) as [number, number, number, number],
       name: S(e.fieldNameOff!(k), e.fieldNameLen!(k)),
       value: S(e.fieldValOff!(k), e.fieldValLen!(k)),
-      on: S(e.fieldOnOff!(k), e.fieldOnLen!(k)),
+      // 켜짐 이름은 위젯의 /AP /N 에서 읽는다. 겉모습이 없는 확인란은 비어
+      // 나오는데, 그대로 두면 켜서 저장해도 /Off 로 적힌다. 규격의 기본값을 쓴다.
+      on: S(e.fieldOnOff!(k), e.fieldOnLen!(k)) || "Yes",
       opts: S(e.fieldOptsOff!(k), e.fieldOptsLen!(k)),
       checked: e.fieldChecked!(k) === 1,
     });
