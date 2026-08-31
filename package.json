@@ -68,6 +68,7 @@
     "@vitejs/plugin-vue": "^6.0.8",
     "@zntc/core": "^0.1.6",
     "@zntc/vite-plugin": "^0.1.6",
+    "pdfjs-dist": "^6.3.289",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "svelte": "^5.57.0",

@@ -1,0 +1,82 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>@ohah/pdf ↔ pdf.js 속도 재기</title>
+<body style="font:13px system-ui;padding:16px">
+<pre id="out">재는 중…</pre>
+<canvas id="a" style="display:none"></canvas>
+<canvas id="b" style="display:none"></canvas>
+<script type="module">
+import { PDFDocument } from "@ohah/pdf";
+import * as pdfjs from "pdfjs-dist";
+import workerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+
+const bytesOf = async (url) => new Uint8Array(await (await fetch(url)).arrayBuffer());
+const now = () => performance.now();
+
+// 우리 — 열기 · 1쪽 그리기 · 글자 뽑기
+async function ours(bytes, pages) {
+  const t0 = now();
+  const pdf = await PDFDocument.open(bytes.slice(), { wasm: "/pdf.wasm", cmaps: "/cmaps" });
+  const open = now() - t0;
+  const t1 = now();
+  await pdf.render(1, document.getElementById("a"), { scale: 1.5, dpr: 1 });
+  const draw = now() - t1;
+  const t2 = now();
+  for (let p = 1; p <= pages; p++) await pdf.textItems(p);
+  const text = now() - t2;
+  const n = pdf.pages;
+  pdf.close();
+  return { open, draw, text, n };
+}
+
+// pdf.js — 같은 순서, 같은 배율
+async function theirs(bytes, pages) {
+  const t0 = now();
+  const task = pdfjs.getDocument({ data: bytes.slice(), cMapUrl: "/cmaps/", cMapPacked: true });
+  const doc = await task.promise;
+  const open = now() - t0;
+  const t1 = now();
+  const pg = await doc.getPage(1);
+  const vp = pg.getViewport({ scale: 1.5 });
+  const cv = document.getElementById("b");
+  cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+  await pg.render({ canvasContext: cv.getContext("2d"), viewport: vp, canvas: cv }).promise;
+  const draw = now() - t1;
+  const t2 = now();
+  for (let p = 1; p <= pages; p++) {
+    const q = await doc.getPage(p);
+    await q.getTextContent();
+  }
+  const text = now() - t2;
+  const n = doc.numPages;
+  await task.destroy();
+  return { open, draw, text, n };
+}
+
+const DOCS = [
+  ["korean.pdf", 1], ["modern.pdf", 1], ["multi.pdf", 3], ["form.pdf", 1],
+  [".big.pdf", 50], [".huge.pdf", 50],
+];
+const rows = [];
+for (const [name, pages] of DOCS) {
+  let bytes;
+  try { bytes = await bytesOf(`/fixtures/${name}`); } catch { continue; }
+  const row = { name, pages, size: bytes.length };
+  for (const [who, fn] of [["ours", ours], ["theirs", theirs]]) {
+    const runs = [];
+    for (let r = 0; r < 3; r++) {
+      try { runs.push(await fn(bytes, pages)); }
+      catch (e) { row[who] = { err: String(e.message ?? e).slice(0, 80) }; break; }
+    }
+    if (runs.length) {
+      const mid = (k) => runs.map((x) => x[k]).sort((p, q) => p - q)[Math.floor(runs.length / 2)];
+      row[who] = { open: mid("open"), draw: mid("draw"), text: mid("text"), n: runs[0].n };
+    }
+  }
+  rows.push(row);
+  document.getElementById("out").textContent = JSON.stringify(rows, null, 1);
+}
+window.__bench = rows;
+document.title = "done";
+</script>
