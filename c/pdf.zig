@@ -2503,6 +2503,8 @@ const FontMap = struct {
     /// 문서에 박힌 글꼴 파일. 글꼴 영역 안 위치와 길이.
     file_off: u32,
     file_len: u32,
+    /// 표준 14종의 폭 표. /Widths 가 없을 때 여기서 본다.
+    std_w: ?*const [256]u16,
     /// 글자 폭 (1000 단위). 없는 코드는 dw 를 쓴다.
     dw: f32,
     wn: u16,
@@ -3459,6 +3461,7 @@ export fn addFont(name: [*]const u8, name_len: u32, cmap: [*]const u8, cmap_len:
     f.file_len = 0;
     f.dw = 0;
     f.wn = 0;
+    f.std_w = null;
     f.identity = false;
     f.vertical = false;
     f.cmap_kind = 0;
@@ -6406,6 +6409,7 @@ fn buildFontCmap(f: *FontMap, nglyphs: u16, dst: []u8) u32 {
 // 판 2~4 는 RC4·AES-128, 판 5~6 은 AES-256 이다.
 
 const crypt = @import("pdfcrypt.zig");
+const std14 = @import("pdfstd14.zig");
 const ccitt = @import("pdfccitt.zig");
 const jbig2 = @import("pdfjbig2.zig");
 const jpx = @import("pdfjpx.zig");
@@ -10912,9 +10916,69 @@ fn step(f: ?*const FontMap, code: u32, size: f32, tc: f32, tw: f32, th: f32) f32
 }
 
 /// 코드의 폭(1000 단위). 표에 없으면 기본값.
+/// /BaseFont 이름으로 표준 14종을 알아본다.
+///
+/// 문서마다 표기가 갈린다 — "ABCDEF+Helvetica-Bold", "Arial,Bold",
+/// "TimesNewRomanPS-ItalicMT" 처럼. 부분집합 앞머리를 떼고 소문자로 눕힌 뒤
+/// 굵기·기울기를 따로 읽어 짝을 찾는다.
+fn std14For(b: []const u8, fbody: usize, fend: usize) ?*const [256]u16 {
+    var raw: [64]u8 = undefined;
+    const n = nameAfter(b, fbody, fend, "/BaseFont", &raw);
+    if (n == 0) return null;
+    var low: [64]u8 = undefined;
+    var ln: u32 = 0;
+    var i: u32 = 0;
+    // "ABCDEF+" 부분집합 앞머리는 뗀다
+    var start: u32 = 0;
+    if (n > 7 and raw[6] == '+') start = 7;
+    while (i + start < n) : (i += 1) {
+        const c = raw[i + start];
+        if (c == '-' or c == ' ' or c == ',' or c == '_') continue;
+        low[ln] = if (c >= 'A' and c <= 'Z') c + 32 else c;
+        ln += 1;
+        if (ln >= low.len) break;
+    }
+    const name = low[0..ln];
+    const has = struct {
+        fn f(hay: []const u8, needle: []const u8) bool {
+            if (needle.len > hay.len) return false;
+            var k: usize = 0;
+            while (k + needle.len <= hay.len) : (k += 1) {
+                if (std_mem_eq(hay[k .. k + needle.len], needle)) return true;
+            }
+            return false;
+        }
+    }.f;
+
+    const bold = has(name, "bold") or has(name, "black") or has(name, "heavy");
+    const ital = has(name, "italic") or has(name, "oblique");
+    var want: []const u8 = "";
+    if (has(name, "courier") or has(name, "mono")) {
+        want = if (bold and ital) "courierboldoblique" else if (bold) "courierbold" else if (ital) "courieroblique" else "courier";
+    } else if (has(name, "times")) {
+        want = if (bold and ital) "timesromanbolditalic" else if (bold) "timesromanbold" else if (ital) "timesromanitalic" else "timesroman";
+    } else if (has(name, "zapf") or has(name, "dingbat")) {
+        want = "zapfdingbats";
+    } else if (has(name, "symbol")) {
+        want = "symbol";
+    } else if (has(name, "helvetica") or has(name, "arial")) {
+        want = if (bold and ital) "helveticaboldoblique" else if (bold) "helveticabold" else if (ital) "helveticaoblique" else "helvetica";
+    } else return null;
+
+    for (std14.STD14) |e| {
+        if (std_mem_eq(e.name, want)) return e.w;
+    }
+    return null;
+}
+
 fn widthOf(f: *const FontMap, code: u32) f32 {
     var i: u16 = 0;
     while (i < f.wn) : (i += 1) if (f.wcodes[i] == code) return @floatFromInt(f.wvals[i]);
+    // 표준 14종은 문서가 /Widths 를 안 적어도 된다. 그때는 Adobe 가 낸
+    // AFM 값을 쓴다 — 없으면 글자마다 500 으로 잡아 자간이 통째로 어긋난다.
+    if (f.std_w) |w| {
+        if (code < 256 and w[code] > 0) return @floatFromInt(w[code]);
+    }
     if (f.dw > 0) return f.dw;
     // 폭을 모르면 라틴은 반각, 두 바이트 글꼴은 전각으로 본다
     return if (f.two_byte) 1000 else 500;
@@ -11252,6 +11316,8 @@ fn attachWidths(b: []const u8, fbody: usize) void {
     }
     // 한 바이트 글꼴이면 인코딩으로 코드→글자 표를 짓는다
     attachEncoding(b, fbody, fend, f);
+    // 표준 14종이면 폭 표를 달아 둔다. /Widths 가 있으면 그쪽이 이긴다.
+    f.std_w = std14For(b, fbody, fend);
     const first = intAfter(b, fbody, fend, "/FirstChar") orelse 0;
     const wa = find(b[fbody..fend], "/Widths", 0) orelse return;
     var p = fbody + wa + 7;

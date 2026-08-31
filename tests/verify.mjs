@@ -1205,6 +1205,16 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   ok('세로쓰기를 알아본다', any);
 }
 
+// 표준 14종 글꼴의 글자 폭 (문서에 /Widths 가 없을 때)
+{
+  const r = await load('std14.pdf');
+  const e = r.ex;
+  const x0 = e.itemX(0);
+  const x1 = e.itemX(1);
+  // Wine = W(944) + i(222) + n(556) + e(556) = 2278 → 10pt 에서 22.78pt
+  ok('표준 14종 폭을 쓴다', Math.abs((x1 - x0) - 22.78) < 0.02, x1 - x0);
+}
+
 console.log(`  기능 단언 ${pass + fail}개 중 통과 ${pass}, 실패 ${fail}`);
 if (bad.length) bad.forEach((b3) => console.log('    ✗ ' + b3));
 process.exit(fail ? 1 : 0);

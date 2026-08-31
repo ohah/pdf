@@ -10,6 +10,7 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 |---|---|---|
 | 번들 크기 | 505KB | **150KB** + wasm 288KB |
 | 그리기 정확도 | CMYK JPEG·JBIG2 허프만·JPX ROI 문서에서 빈 화면 | **그린다** |
+| 표준 14종 자간 | AFM 폭 + 실제 글꼴 | **AFM 폭** (모양은 시스템 글꼴) |
 | 전자 서명 | 데이터만 준다 | **WebCrypto 로 검증까지** |
 | 편집 | 없음(뷰어) | 쪽 고르기·회전·병합·워터마크·양식 채우기·AES-256 |
 | 뷰어 부품 | `PDFViewer`·검색·링크·썸네일·주석 편집기 한 벌 | **없음** — 화면은 쓰는 쪽이 짠다 |
@@ -23,7 +24,7 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 | `cMapUrl` / `cMapPacked` | ✅ `paths.cmaps` |
 | `url` + `range`·`disableStream`·`disableAutoFetch` | ❌ 전체 바이트를 받아야 시작 |
 | `onProgress` | ✅ `open(url, { onProgress, signal })` |
-| `standardFontDataUrl` (표준 14종 실제 글꼴) | ❌ 시스템 글꼴로 대체 — 자간이 원본과 다르다 |
+| `standardFontDataUrl` (표준 14종) | ⚠️ **자간은 정확**(Adobe AFM 폭 표를 담았다) · 글자 모양은 시스템 글꼴 |
 | `disableFontFace` · `useSystemFonts` · `fontExtraProperties` | ❌ (거절당하면 자동 대체) |
 | `maxImageSize` · `canvasMaxAreaInBytes` · `enableHWA` | ❌ 내부 고정 |
 | `CanvasFactory` · `FilterFactory` 교체 | ❌ → Node.js 실행 불가 |
@@ -95,6 +96,6 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 
 이 표에서 ❌ 인 것 중 뷰어에 먼저 아쉬운 순서:
 
-1. 표준 14종 실제 글꼴 데이터 (자간 정확도)
-2. Node.js 실행 (캔버스 팩토리 교체)
-3. range 요청으로 첫 쪽 먼저 (엔진의 색인 방식을 바꿔야 한다)
+1. Node.js 실행 (캔버스 팩토리 교체)
+2. range 요청으로 첫 쪽 먼저 (엔진의 색인 방식을 바꿔야 한다)
+3. 표준 14종의 **글자 모양**까지 (지금은 자간만 정확하고 모양은 시스템 글꼴)
