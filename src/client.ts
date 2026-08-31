@@ -100,12 +100,21 @@ export type OpenMsg = {
 };
 
 export class PDFClient {
-  private w: Worker;
+  /** 워커. Node 처럼 워커가 없는 곳에서는 null 이고 같은 갈래에서 돈다 */
+  private w: Worker | null = null;
+  /** 워커가 없을 때 엔진을 그 자리에서 부르는 통로. 한 줄로 세워 쓴다 */
+  private inproc: Promise<void> = Promise.resolve();
   private seq = 0;
   private waiting = new Map<number, { ok: (v: unknown) => void; no: (e: Error) => void }>();
   private gone = false;
 
   constructor(paths: Paths = {}) {
+    // Node 에는 Web Worker 가 없다. 그럴 때는 같은 갈래에서 엔진을 부른다 —
+    // 화면이 없으니 멎을 것도 없다.
+    if (typeof Worker === "undefined") {
+      this.tellPaths(paths);
+      return;
+    }
     this.w = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
     this.w.onmessage = (ev) => {
       const { id, r, err } = ev.data;
@@ -134,10 +143,31 @@ export class PDFClient {
     // 닫힌 뒤에 부르면 워커가 없어 대답이 영영 안 온다. 그대로 두면 부르는
     // 쪽 await 가 매달린다 — 바로 알려 준다.
     if (this.gone) return Promise.reject(new Error("the document is already closed"));
+    const w = this.w;
+    if (!w) {
+      // 워커가 없을 때. 엔진 사례가 하나뿐이라 겹치면 섞이므로 줄을 세운다.
+      const done = this.inproc.then(async () => {
+        // 줄을 서서 기다리는 동안 닫혔을 수 있다. 워커 쪽은 terminate 로
+        // 끊기지만 여기서는 그냥 돌아가므로 앞뒤로 한 번씩 본다 —
+        // 닫은 뒤에 값이 돌아오면 부르는 쪽이 닫힌 문서를 계속 쓴다.
+        if (this.gone) throw new Error("the document was closed");
+        // 주소를 변수에 담아 부른다 — 번들러가 브라우저 빌드에 엔진을 한 벌
+        // 더 끼워 넣지 않게 하려는 것이다(워커로 이미 한 벌 들어간다).
+        const here = "./worker.js";
+        const mod = (await import(/* @vite-ignore */ here)) as {
+          doWork: (t: string, a: unknown) => Promise<{ r: unknown }>;
+        };
+        const { r } = await mod.doWork(t, a);
+        if (this.gone) throw new Error("the document was closed");
+        return r as T;
+      });
+      this.inproc = done.then(() => {}, () => {});
+      return done;
+    }
     const id = ++this.seq;
     return new Promise<T>((ok, no) => {
       this.waiting.set(id, { ok: ok as (v: unknown) => void, no });
-      this.w.postMessage({ id, t, a }, move);
+      w.postMessage({ id, t, a }, move);
     });
   }
 
@@ -147,7 +177,7 @@ export class PDFClient {
     // 답을 기다리던 것들도 함께 끊는다
     for (const [, slot] of this.waiting) slot.no(new Error("the document was closed"));
     this.waiting.clear();
-    this.w.terminate();
+    this.w?.terminate();
   }
 
   /** 문서를 연다. 바이트는 넘겨주고 나면 이쪽에서 못 쓴다 — 부르는 쪽이 사본을 준다. */

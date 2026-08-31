@@ -10,7 +10,15 @@ export type Paths = {
   cmaps?: string;
 };
 
+/**
+ * Node 인가 — 브라우저에서는 쓰는 쪽이 올려 둔 자리를 상대 주소로 찾지만,
+ * Node 에는 그 기준이 될 페이지가 없다. 꾸러미 안 자리를 바로 가리킨다.
+ */
+const onNode =
+  !!(globalThis as { process?: { versions?: { node?: string } } }).process?.versions?.node &&
+  typeof (globalThis as { window?: unknown }).window === "undefined";
+
 export const DEFAULTS: Required<Paths> = {
-  wasm: "./pdf.wasm",
-  cmaps: "./cmaps",
+  wasm: onNode ? new URL("./pdf.wasm", import.meta.url).href : "./pdf.wasm",
+  cmaps: onNode ? new URL("../cmaps", import.meta.url).href : "./cmaps",
 };

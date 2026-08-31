@@ -106,6 +106,28 @@ const { doc } = usePdf(file, { wasm: "/pdf.wasm" });
 ### 바닐라
 
 `examples/vanilla.html` 이 번들러 없이 `dist` 를 그대로 물리는 길을 보여 준다.
+`examples/node.mjs` 는 Node 에서 뽑고 다시 내는 길이다.
+
+### Node.js
+
+브라우저 밖에서도 돈다. Worker 가 없으면 같은 갈래에서 엔진을 부르고, wasm 과
+CMap 표는 주소 대신 꾸러미 안 파일에서 읽는다 — 따로 설정할 것이 없다.
+
+```js
+import { PDFDocument } from "@ohah/pdf";
+
+const pdf = await PDFDocument.open("./보고서.pdf");   // 파일 경로 그대로
+console.log(pdf.pages, await pdf.text(1));
+const items = await pdf.textItems(1);                 // 색인·검색용
+const out = await pdf.build({ pick: [0, 2, 4] });     // 쪽만 골라 다시 내기
+pdf.close();
+```
+
+뽑기(`text`·`textItems`·`annotations`·`structure`·`fields`·`signatures`)와
+편집(`build`·`merge`·`encrypt`)은 그대로 되지만 **그리기는 캔버스가 있어야 한다**.
+`render()` 에 `node-canvas` 같은 데서 만든 캔버스를 넘기면 거기에 그린다 —
+아무것도 안 넘기면 그렇게 알려 주는 오류가 난다. 문서에 박힌 글꼴은
+브라우저에서만 등록되므로(FontFace), Node 에서 그린 글자는 시스템 글꼴 모양이다.
 
 ## API
 
@@ -133,6 +155,8 @@ const { doc } = usePdf(file, { wasm: "/pdf.wasm" });
 | `pdf.data()` | 연 문서의 원본 바이트 |
 | `safeUrl(link.uri)` | 링크 주소를 걸러 준다 — `javascript:` 같은 것은 null |
 | `pdf.close()` | 워커를 닫는다 |
+
+브라우저에서는 워커가 일을 맡고, Node 에서는 같은 갈래에서 돈다 — 부르는 쪽 코드는 같다.
 
 `render()` 는 `scale`·`dpr`·`formLayer` 에 더해 `rotation`(문서 회전에 더할 각) ·
 `background`(바탕색) · `signal`(AbortSignal) 을 받는다. 돌려주는 `viewport` 로 얹는

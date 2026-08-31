@@ -1,3 +1,5 @@
+import { loadBytes } from "./bytes.js";
+
 
 /**
  * 미리 정의된 CMap 을 필요할 때만 받아 온다.
@@ -33,8 +35,8 @@ const cache = new Map<string, Promise<ArrayBuffer | null>>();
 
 /** 어떤 이름이 실제로 있는지. 없는 이름을 받으러 가면 404 만 쌓인다. */
 function known() {
-  index ??= fetch(`${base}/index.json`)
-    .then((r) => (r.ok ? (r.json() as Promise<string[]>) : []))
+  index ??= loadBytes(`${base}/index.json`)
+    .then((b) => (b ? (JSON.parse(new TextDecoder().decode(b)) as string[]) : []))
     .then((a) => new Set(a))
     .catch(() => new Set<string>());
   return index;
@@ -43,8 +45,8 @@ function known() {
 function grab(name: string) {
   let p = cache.get(name);
   if (!p) {
-    p = fetch(`${base}/${name}.bin`)
-      .then((r) => (r.ok ? r.arrayBuffer() : null))
+    p = loadBytes(`${base}/${name}.bin`)
+      .then((b) => (b ? (b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer) : null))
       .catch(() => null);
     cache.set(name, p);
   }

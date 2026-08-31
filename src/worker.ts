@@ -13,6 +13,7 @@
 // 오가는 큰 자료는 transfer 로 넘긴다. 복사가 아니라 소유권만 옮기므로
 // 수 MB 짜리 명령 목록도 값이 안 든다.
 import { loadCmaps, setCmapBase } from "./cmaps.js";
+import { loadBytes } from "./bytes.js";
 import { DEFAULTS } from "./config.js";
 
 type Exports = {
@@ -247,20 +248,33 @@ const wasi = {
 
 let wasmPath = DEFAULTS.wasm;
 
+
+
 async function engine() {
   if (ex) return ex;
-  const r = await fetch(wasmPath);
-  mod = await WebAssembly.compile(await r.arrayBuffer());
+  const wasmBytes = await loadBytes(wasmPath);
+  if (!wasmBytes) throw new Error(`could not load ${wasmPath}`);
+  mod = await WebAssembly.compile(wasmBytes);
   const inst = await WebAssembly.instantiate(mod, { wasi_snapshot_preview1: wasi });
   ex = inst.exports as unknown as Exports;
   return ex;
 }
 
+/**
+ * 그림을 만들 수 있는 곳인가.
+ *
+ * Node 에는 createImageBitmap 도 OffscreenCanvas 도 없다. 글자·주석·양식만
+ * 뽑는 데는 그림이 필요 없으므로, 없으면 그림 자리를 비워 두고 나머지는
+ * 그대로 준다 — 예외를 던져 통째로 못 쓰게 만들지 않는다.
+ */
+const canImage =
+  typeof createImageBitmap === "function" && typeof OffscreenCanvas === "function";
+
 async function decodeImage(
   kind: number, iw: number, ih: number, raw: Uint8Array,
   alpha?: { w: number; h: number; bytes: Uint8Array },
 ) {
-  if (kind === 0 || iw === 0 || ih === 0) return undefined;
+  if (kind === 0 || iw === 0 || ih === 0 || !canImage) return undefined;
   try {
     if (kind === 3) {
       // JPEG 은 브라우저가 푼다
@@ -511,6 +525,7 @@ async function page(i: number, formOn: boolean, light = false) {
     const ih = e.slotHeight!(si);
     if (k === 5) {
       // 아직 못 푸는 형식 — 자리만 알린다
+      if (!canImage) { stencils.push(undefined); bitmaps.push(undefined); continue; }
       const cv = new OffscreenCanvas(Math.max(8, Math.min(iw, 400)), Math.max(8, Math.min(ih, 400)));
       const c2 = cv.getContext("2d");
       if (c2) {
@@ -757,57 +772,72 @@ async function merge(bytes: Uint8Array) {
 // 앞의 일이 끝나야 다음이 시작하도록 줄을 세운다.
 let queue: Promise<void> = Promise.resolve();
 
-self.onmessage = (ev: MessageEvent) => {
-  queue = queue.then(() => handle(ev)).catch(() => {});
-};
+// 워커로 돌 때만 메시지를 받는다. Node 에서는 워커가 없어 doWork 를 바로 부른다.
+if (typeof self !== "undefined" && typeof (self as unknown as { postMessage?: unknown }).postMessage === "function") {
+  self.onmessage = (ev: MessageEvent) => {
+    queue = queue.then(() => handle(ev)).catch(() => {});
+  };
+}
 
+/**
+ * 일 하나를 처리한다. 메시지와 떼어 두어 워커 없이도 부를 수 있다 —
+ * Node 에는 Web Worker 가 없어 같은 갈래에서 이 함수를 그대로 쓴다.
+ * 줄 세우기는 부르는 쪽 몫이다(엔진 사례가 하나뿐이라 겹치면 섞인다).
+ */
+export async function doWork(t: string, a: any): Promise<{ r: unknown; move: Transferable[] }> {
+  let r: unknown = null;
+  const move: Transferable[] = [];
+    if (t === "paths") {
+    if (a.wasm) wasmPath = a.wasm;
+    if (a.cmaps) setCmapBase(a.cmaps);
+    r = true;
+  }
+  else if (t === "open") r = await open(a.bytes, a.pw);
+  else if (t === "attach") {
+    const e = await engine();
+    const n = e.attLoad?.(a.i) ?? 0;
+    const q = n ? new Uint8Array(e.memory.buffer, e.attPtr!(), n).slice() : null;
+    if (q) move.push(q.buffer as Transferable);
+    r = q;
+  }
+  else if (t === "layers") {
+    const e = await engine();
+    (a.on as boolean[]).forEach((v, i) => e.setOcOn?.(i, v ? 1 : 0));
+    r = true;
+  }
+  else if (t === "page") {
+    const q = await page(a.i, a.formOn, a.light === true);
+    for (const b of [q.ops.buffer, q.txt.buffer, q.drw.buffer, q.rtx.buffer, q.inline.buffer]) {
+      move.push(b as Transferable);
+    }
+    for (const b of q.bitmaps) if (b) move.push(b);
+    for (const s of q.stencils) if (s) move.push(s.bytes.buffer as Transferable);
+    for (const f of q.fonts) if (f.bytes) move.push(f.bytes.buffer as Transferable);
+    r = q;
+  } else if (t === "build") {
+    const q = await build(a.spec);
+    if (q) move.push(q.buffer as Transferable);
+    r = q;
+  } else if (t === "merge") {
+    const q = await merge(a.bytes);
+    if (q) move.push(q.bytes.buffer as Transferable);
+    r = q;
+  } else if (t === "seal") {
+    const q = await seal(a.bytes, a.pw);
+    if (q) move.push(q.buffer as Transferable);
+    r = q;
+  }
+  return { r, move };
+}
+
+/** 워커 메시지 한 건. doWork 를 부르고 답을 돌려보낸다. */
 async function handle(ev: MessageEvent) {
   const { id, t, a } = ev.data;
   try {
-    let r: unknown = null;
-    const move: Transferable[] = [];
-    if (t === "paths") {
-      if (a.wasm) wasmPath = a.wasm;
-      if (a.cmaps) setCmapBase(a.cmaps);
-      r = true;
-    }
-    else if (t === "open") r = await open(a.bytes, a.pw);
-    else if (t === "attach") {
-      const e = await engine();
-      const n = e.attLoad?.(a.i) ?? 0;
-      const q = n ? new Uint8Array(e.memory.buffer, e.attPtr!(), n).slice() : null;
-      if (q) move.push(q.buffer as Transferable);
-      r = q;
-    }
-    else if (t === "layers") {
-      const e = await engine();
-      (a.on as boolean[]).forEach((v, i) => e.setOcOn?.(i, v ? 1 : 0));
-      r = true;
-    }
-    else if (t === "page") {
-      const q = await page(a.i, a.formOn, a.light === true);
-      for (const b of [q.ops.buffer, q.txt.buffer, q.drw.buffer, q.rtx.buffer, q.inline.buffer]) {
-        move.push(b as Transferable);
-      }
-      for (const b of q.bitmaps) if (b) move.push(b);
-      for (const s of q.stencils) if (s) move.push(s.bytes.buffer as Transferable);
-      for (const f of q.fonts) if (f.bytes) move.push(f.bytes.buffer as Transferable);
-      r = q;
-    } else if (t === "build") {
-      const q = await build(a.spec);
-      if (q) move.push(q.buffer as Transferable);
-      r = q;
-    } else if (t === "merge") {
-      const q = await merge(a.bytes);
-      if (q) move.push(q.bytes.buffer as Transferable);
-      r = q;
-    } else if (t === "seal") {
-      const q = await seal(a.bytes, a.pw);
-      if (q) move.push(q.buffer as Transferable);
-      r = q;
-    }
+    const { r, move } = await doWork(t, a);
     self.postMessage({ id, r }, move);
   } catch (e) {
     self.postMessage({ id, err: String((e as Error)?.message ?? e) });
   }
 }
+

@@ -14,7 +14,7 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 | 전자 서명 | 데이터만 준다 | **WebCrypto 로 검증까지** |
 | 편집 | 없음(뷰어) | 쪽 고르기·회전·병합·워터마크·양식 채우기·AES-256 |
 | 뷰어 부품 | `PDFViewer`·검색·링크·썸네일·주석 편집기 한 벌 | **없음** — 화면은 쓰는 쪽이 짠다 |
-| 실행 환경 | 브라우저 + Node.js | **브라우저만** |
+| 실행 환경 | 브라우저 + Node.js | **브라우저 + Node.js** (Node 에서는 뽑기·편집만, 그리기는 캔버스가 있어야) |
 
 ## 문서 열기
 
@@ -27,7 +27,7 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 | `standardFontDataUrl` (표준 14종) | ⚠️ **자간은 정확**(Adobe AFM 폭 표를 담았다) · 글자 모양은 시스템 글꼴 |
 | `disableFontFace` · `useSystemFonts` · `fontExtraProperties` | ❌ (거절당하면 자동 대체) |
 | `maxImageSize` · `canvasMaxAreaInBytes` · `enableHWA` | ❌ 내부 고정 |
-| `CanvasFactory` · `FilterFactory` 교체 | ❌ → Node.js 실행 불가 |
+| `CanvasFactory` · `FilterFactory` 교체 | ❌ — 대신 Node 에서 워커 없이 그대로 돈다. `render()` 에 캔버스를 넘기면 그것에 그린다 |
 | `verbosity` · `docBaseUrl` · `enableXfa` | ❌ |
 
 ## 문서 수준
@@ -96,6 +96,5 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 
 이 표에서 ❌ 인 것 중 뷰어에 먼저 아쉬운 순서:
 
-1. Node.js 실행 (캔버스 팩토리 교체)
-2. range 요청으로 첫 쪽 먼저 (엔진의 색인 방식을 바꿔야 한다)
-3. 표준 14종의 **글자 모양**까지 (지금은 자간만 정확하고 모양은 시스템 글꼴)
+1. range 요청으로 첫 쪽 먼저 (엔진의 색인 방식을 바꿔야 한다)
+2. 표준 14종의 **글자 모양**까지 (지금은 자간만 정확하고 모양은 시스템 글꼴)

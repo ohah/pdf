@@ -11,7 +11,8 @@
 #             예전에 CFF 글꼴이 통째로 Type1 로 새는데도 적대적 쪽은
 #             "글꼴 실림" 이라고 답한 적이 있다.
 #
-# dist/pdf.wasm 과 cmaps/ 를 읽으므로 저장소 뿌리에서 돈다.
+# dist/pdf.wasm 과 cmaps/ 를 읽으므로 저장소 뿌리에서 돈다. Node 갈래(tests/node.mjs)
+# 는 dist/*.js 까지 읽으므로 build:js 를 먼저 돌려 둔다.
 set -e
 cd "$(dirname "$0")/.."
 N=${1:-3}
@@ -36,12 +37,14 @@ for pass in $(seq 1 "$N"); do
   ln=$(bun run tests/lines.ts)
   pl=$(bun run tests/place.ts)
   sg=$(bun run tests/sig.ts)
+  nd=$(node tests/node.mjs "$FX" 2>&1 || true)
   printf "%s회차  적대적 %s개 · 예외 %s · 느림 %s | %s | %s\n" \
     "$pass" "$n" "$ex" "$slow" "$(echo "$fn" | head -1 | sed 's/^ *//')" "$(echo "$ln" | head -1 | sed 's/^ *//')"
-  echo "        ${pl# } | ${sg# }"
+  echo "        ${pl# } | ${sg# } | ${nd# }"
   if [ "$ex" != 0 ] || [ "$slow" != 0 ]; then echo "$adv" | grep -E '예외|⚠'; fail=1; fi
   if echo "$fn" | grep -qE '실패 [1-9]'; then echo "$fn"; fail=1; fi
   if echo "$ln$pl$sg" | grep -qE '실패 [1-9]'; then echo "$ln"; echo "$pl"; echo "$sg"; fail=1; fi
+  if echo "$nd" | grep -qE '실패 [1-9]'; then echo "$nd"; fail=1; fi
 done
 [ "$fail" = 0 ] || { echo "실패한 항목이 있다."; exit 1; }
 echo "모두 통과."

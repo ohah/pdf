@@ -4,6 +4,7 @@
 // 결과만 받아 canvas 에 얹는다 — 큰 문서를 열어도 화면이 멎지 않는다.
 //
 //   import { PDFDocument } from "@ohah/pdf";
+import { loadBytes } from "./bytes.js";
 //
 //   const pdf = await PDFDocument.open(bytes, { wasm: "/pdf.wasm", cmaps: "/cmaps" });
 //   await pdf.render(1, canvas, { scale: 1.5 });
@@ -38,6 +39,17 @@ async function toBytes(src: Source, opts: OpenOpts): Promise<Uint8Array> {
   if (src instanceof ArrayBuffer) return new Uint8Array(src);
   if (typeof Blob !== "undefined" && src instanceof Blob) {
     return new Uint8Array(await src.arrayBuffer());
+  }
+  if (!(src instanceof Response)) {
+    // Node 에서는 주소 대신 파일 경로가 온다 — fetch 로는 못 읽는다
+    const where = String(src);
+    const proc = (globalThis as { process?: { versions?: { node?: string } } }).process;
+    if (proc?.versions?.node && !/^(https?|blob|data):/.test(where)) {
+      const bytes = await loadBytes(where);
+      if (!bytes) throw new Error(`could not read ${where}`);
+      opts.onProgress?.({ loaded: bytes.length, total: bytes.length });
+      return sniff(bytes, "");
+    }
   }
   const res = src instanceof Response
     ? src
@@ -121,6 +133,9 @@ export type OpenOpts = Paths & {
 };
 
 /** 열 수 있는 것들. 주소를 주면 받아 오면서 진행률을 알려 준다. */
+/** build() 에 주는 것. 다 안 적어도 된다 — 안 적으면 그대로 둔다. */
+export type BuildOpts = Partial<BuildSpec>;
+
 export type Source = Uint8Array | ArrayBuffer | Blob | Response | string | URL;
 
 export type RenderOpts = {
@@ -156,6 +171,9 @@ let fontSeq = 0;
 
 /** 문서에 박힌 글꼴을 브라우저에 등록한다. 실패하면 undefined 다. */
 async function loadFont(bytes: Uint8Array): Promise<string | undefined> {
+  // FontFace 는 문서에 다는 것이라 브라우저에만 있다. Node 에서는 건너뛴다 —
+  // 글자 뽑기에는 필요 없고, 그리기는 어차피 캔버스가 있어야 한다.
+  if (typeof FontFace === "undefined" || typeof document === "undefined") return undefined;
   let h = 2166136261;
   const step = Math.max(1, Math.floor(bytes.length / 512));
   for (let i = 0; i < bytes.length; i += step) h = ((h ^ bytes[i]) * 16777619) >>> 0;
@@ -182,6 +200,8 @@ async function loadFont(bytes: Uint8Array): Promise<string | undefined> {
 /** 열어 둔 문서 하나. */
 export class PDFDocument {
   private cl: PDFClient;
+  /** 닫혔는가 */
+  private shut = false;
   private cache = new Map<number, PageMsg>();
   private fams = new Map<number, (string | undefined)[]>();
   private raw: Uint8Array;
@@ -297,6 +317,9 @@ export class PDFDocument {
     const hit = this.cache.get(i);
     if (hit) return hit;
     const q = await this.cl.page(i - 1, formLayer);
+    // 기다리는 사이에 닫혔으면 담아 두지 않는다 — 담으면 닫은 뒤에도
+    // 그 쪽만 계속 답해 준다.
+    if (this.shut) throw new Error("the document is already closed");
     const fams: (string | undefined)[] = [];
     for (const f of q.fonts) fams.push(f.bytes ? await loadFont(f.bytes) : undefined);
     this.cache.set(i, q);
@@ -313,6 +336,14 @@ export class PDFDocument {
    */
   async render(page: number, canvas: HTMLCanvasElement, opts: RenderOpts = {}): Promise<RenderResult> {
     stopIfAborted(opts.signal);
+    // Node 에서 그리려면 node-canvas 같은 것을 만들어 넘겨야 한다. 아무것도
+    // 안 넘기면 아래에서 알 수 없는 오류가 나므로 여기서 먼저 알린다.
+    if (!canvas || typeof (canvas as { getContext?: unknown }).getContext !== "function") {
+      throw new Error(
+        "render() needs a canvas with getContext('2d'). "
+        + "On Node, pass one from a canvas package, or use text()/textItems() to extract instead.",
+      );
+    }
     const q = await this.get(page, opts.formLayer !== false);
     stopIfAborted(opts.signal);
     const fams = this.fams.get(page) ?? [];
@@ -324,8 +355,12 @@ export class PDFDocument {
     });
     canvas.width = Math.max(1, Math.round(vp.width * dpr));
     canvas.height = Math.max(1, Math.round(vp.height * dpr));
-    canvas.style.width = `${Math.round(vp.width)}px`;
-    canvas.style.height = `${Math.round(vp.height)}px`;
+    // node-canvas 에는 style 이 없다 — 있을 때만 화면 크기를 적어 준다
+    const style = (canvas as { style?: { width: string; height: string } }).style;
+    if (style) {
+      style.width = `${Math.round(vp.width)}px`;
+      style.height = `${Math.round(vp.height)}px`;
+    }
     const runs = drawOps(canvas, {
       ops: q.ops, text: q.drw, read: q.rtx, pageW: q.w, pageH: q.h,
       bitmap: q.bitmap, bitmaps: q.bitmaps, stencils: q.stencils,
@@ -501,8 +536,22 @@ export class PDFDocument {
   }
 
   /** 새 PDF 를 만든다 (쪽 고르기·회전·워터마크·주석·양식·암호). */
-  build(spec: BuildSpec) {
-    return this.cl.build(spec);
+  build(spec: BuildOpts) {
+    // 안 적은 것은 "손대지 않는다"로 채운다 — 쪽만 골라 새로 내는
+    // 흔한 쓰임에서 빈 배열을 열 개씩 적게 하지 않으려는 것이다.
+    return this.cl.build({
+      pick: spec.pick ?? Array.from({ length: this.pages }, (_, k) => k),
+      rotate: spec.rotate ?? 0,
+      pageRot: spec.pageRot ?? [],
+      watermark: spec.watermark ?? "",
+      wmMask: spec.wmMask,
+      fields: spec.fields ?? [],
+      newFields: spec.newFields ?? [],
+      notes: spec.notes ?? [],
+      labels: spec.labels ?? [],
+      shrink: spec.shrink ?? false,
+      encryptPw: spec.encryptPw,
+    });
   }
 
   /** 다 만든 바이트에 암호를 건다 */
@@ -517,6 +566,7 @@ export class PDFDocument {
 
   /** 워커를 닫는다. 두 번 불러도 된다. 닫은 뒤 부르면 바로 오류가 난다. */
   close() {
+    this.shut = true;
     this.cl.close();
     this.cache.clear();
     this.fams.clear();
