@@ -2,6 +2,7 @@
 //
 //   node tests/mkbig.mjs 2000 tests/fixtures/.big.pdf     # 11MB
 //   node tests/mkbig.mjs 4200 tests/fixtures/.many.pdf 1  # 쪽만 많고 가벼운 것
+//   node tests/mkbig.mjs 2000 tests/fixtures/.bigbad.pdf 45 broken   # 목차(xref)가 깨진 것
 //   node tests/mkbig.mjs 6000 tests/fixtures/.huge.pdf    # 34MB
 //
 // 점(.)으로 시작하는 이름은 .gitignore 가 걸러 준다 — 저장소에 안 들어간다.
@@ -9,6 +10,9 @@ import { writeFileSync } from "node:fs";
 const N = Number(process.argv[2] ?? 2000);
 const out = process.argv[3] ?? "big.pdf";
 const LINES = Number(process.argv[4] ?? 45);
+// 목차가 가리키는 자리를 엉뚱한 곳으로 돌린다. 파일 자체는 멀쩡하다 —
+// 목차를 믿고 읽는 리더가 무엇을 하는지 보려는 것이다.
+const BREAK = process.argv[5] === "broken";
 const parts = [];
 const offs = [];
 let pos = 0;
@@ -34,6 +38,6 @@ const xref = pos;
 const max = 4 + 2 * N;
 put(`xref\n0 ${max}\n0000000000 65535 f \n`);
 for (let n = 1; n < max; n++) put(`${String(offs[n] ?? 0).padStart(10, "0")} 00000 n \n`);
-put(`trailer\n<< /Size ${max} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+put(`trailer\n<< /Size ${max} /Root 1 0 R >>\nstartxref\n${BREAK ? 999999999 : xref}\n%%EOF\n`);
 writeFileSync(out, Buffer.concat(parts));
 console.log(out, (Buffer.concat(parts).length / 1048576).toFixed(1) + "MB", N + "쪽");
