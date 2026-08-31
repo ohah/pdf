@@ -3,16 +3,21 @@
 //   node tests/mkbig.mjs 2000 tests/fixtures/.big.pdf     # 11MB
 //   node tests/mkbig.mjs 4200 tests/fixtures/.many.pdf 1  # 쪽만 많고 가벼운 것
 //   node tests/mkbig.mjs 2000 tests/fixtures/.bigbad.pdf 45 broken   # 목차(xref)가 깨진 것
+//   node tests/mkbig.mjs 2000 tests/fixtures/.zbig.pdf 45 zip        # 스트림을 눌러 담은 것
 //   node tests/mkbig.mjs 6000 tests/fixtures/.huge.pdf    # 34MB
 //
 // 점(.)으로 시작하는 이름은 .gitignore 가 걸러 준다 — 저장소에 안 들어간다.
 import { writeFileSync } from "node:fs";
+import { deflateSync } from "node:zlib";
 const N = Number(process.argv[2] ?? 2000);
 const out = process.argv[3] ?? "big.pdf";
 const LINES = Number(process.argv[4] ?? 45);
 // 목차가 가리키는 자리를 엉뚱한 곳으로 돌린다. 파일 자체는 멀쩡하다 —
 // 목차를 믿고 읽는 리더가 무엇을 하는지 보려는 것이다.
 const BREAK = process.argv[5] === "broken";
+// 스트림을 눌러 담는다. 실제 문서는 대개 이렇고, 눌린 자리는 이진 바이트라
+// " obj" 처럼 보이는 우연이 생긴다 — 훑는 쪽이 거기 걸리는지 보려는 것이다.
+const ZIP = process.argv[5] === "zip";
 const parts = [];
 const offs = [];
 let pos = 0;
@@ -32,7 +37,12 @@ for (let i = 0; i < N; i++) {
   }
   const st = lines.join("\n");
   obj(4 + 2 * i, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + 2 * i} 0 R >>`);
-  obj(5 + 2 * i, `<< /Length ${st.length} >>\nstream\n${st}\nendstream`);
+  if (ZIP) {
+    const z = deflateSync(Buffer.from(st, "latin1")).toString("latin1");
+    obj(5 + 2 * i, `<< /Length ${z.length} /Filter /FlateDecode >>\nstream\n${z}\nendstream`);
+  } else {
+    obj(5 + 2 * i, `<< /Length ${st.length} >>\nstream\n${st}\nendstream`);
+  }
 }
 const xref = pos;
 const max = 4 + 2 * N;
