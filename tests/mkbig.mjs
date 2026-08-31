@@ -1,12 +1,14 @@
 // 속도 재기용 큰 PDF 를 만든다. 쪽마다 45줄짜리 글이 들어간다.
 //
 //   node tests/mkbig.mjs 2000 tests/fixtures/.big.pdf     # 11MB
+//   node tests/mkbig.mjs 4200 tests/fixtures/.many.pdf 1  # 쪽만 많고 가벼운 것
 //   node tests/mkbig.mjs 6000 tests/fixtures/.huge.pdf    # 34MB
 //
 // 점(.)으로 시작하는 이름은 .gitignore 가 걸러 준다 — 저장소에 안 들어간다.
 import { writeFileSync } from "node:fs";
 const N = Number(process.argv[2] ?? 2000);
 const out = process.argv[3] ?? "big.pdf";
+const LINES = Number(process.argv[4] ?? 45);
 const parts = [];
 const offs = [];
 let pos = 0;
@@ -21,7 +23,7 @@ obj(2, `<< /Type /Pages /Count ${N} /Kids [${kids.join(" ")}] >>`);
 obj(3, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
 for (let i = 0; i < N; i++) {
   const lines = [];
-  for (let L = 0; L < 45; L++) {
+  for (let L = 0; L < LINES; L++) {
     lines.push(`BT /F1 11 Tf 40 ${760 - L * 16} Td (page ${i + 1} line ${L + 1} ${"lorem ipsum dolor sit amet consectetur ".repeat(2)}) Tj ET`);
   }
   const st = lines.join("\n");

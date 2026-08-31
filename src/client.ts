@@ -64,6 +64,8 @@ export type OpenMsg = {
   max?: number;
   needPw?: boolean;
   pages?: number;
+  /** 쪽이 너무 많아 뒤를 잘랐는가 */
+  truncated?: boolean;
   locked?: boolean;
   outline?: { depth: number; title: string; page: number }[];
   info?: string[];

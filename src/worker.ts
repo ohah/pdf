@@ -95,6 +95,7 @@ type Exports = {
   addLabelChar?: (c: number) => void;
   outputLen: () => number;
   pageCount: () => number;
+  pagesTruncated?: () => number;
   parse: (len: number) => number;
   setFormLayer?: (on: number) => void;
   clearNotes?: () => void;
@@ -478,6 +479,8 @@ async function open(bytes: Uint8Array, pw: string) {
   return {
     dests, prefs, xmp, struct,
     pages: e.pageCount(), locked: (e.isEncrypted?.() ?? 0) === 1,
+    // 쪽이 너무 많아 뒤를 잘랐는가 — 조용히 잘라 놓고 다 보여 주는 척하지 않는다
+    truncated: (e.pagesTruncated?.() ?? 0) === 1,
     outline: marks, info, sigs, layers, atts,
     xfa: (e.isXfa?.() ?? 0) === 1,
     perm: e.permissions?.() ?? -1,

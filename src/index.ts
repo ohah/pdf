@@ -208,6 +208,8 @@ export class PDFDocument {
 
   /** 쪽 수 */
   readonly pages: number;
+  /** 쪽이 너무 많아 뒤를 잘라 냈는가. 그렇다면 `pages` 는 문서의 전부가 아니다 */
+  readonly truncated: boolean;
   /** 잠긴 문서였나 */
   readonly locked: boolean;
   /** 목차 */
@@ -285,6 +287,7 @@ export class PDFDocument {
     this.viewerPreferences = r.prefs ?? {};
     this.xmp = r.xmp ?? "";
     this.structFlat = r.struct ?? [];
+    this.truncated = r.truncated === true;
     this.sigsRaw = r.sigs ?? [];
   }
 

@@ -85,9 +85,35 @@ var out_cap: usize = 0;
 /// JPEG2000 은 웨이블릿 계수를 실수로 들고 있어야 해서 화소당 스무 바이트가
 /// 넘게 든다. 늘 잡아 두면 어떤 PDF 를 열든 수백 MB 를 들고 시작하므로,
 /// 필요할 때만 메모리 끝을 늘려 쓴다.
+/// 문서 크기에 맞춰 표를 떼어 주는 자리 (출력 버퍼 뒤).
+///
+/// 쪽 수만큼 필요한 표가 넷이다 — 쪽 객체 번호·고른 쪽·쪽마다 회전·쪽 라벨.
+/// 고정 배열로 두면 상한이 생긴다. 실제로 4096 쪽에 묶여 있었고 그보다 긴
+/// 문서는 뒤가 조용히 잘렸다. 문서를 읽고 나서 쓸 만큼만 떼어 준다.
+/// 메모리 끝에 있어 늘려도 앞의 것을 옮길 일이 없다.
+var zone_top: usize = 0;
+fn zoneBase() usize { return out_off + out_cap; }
+fn zoneTop() usize { return if (zone_top < zoneBase()) zoneBase() else zone_top; }
+fn zoneReset() void { zone_top = zoneBase(); }
+/// 자리를 떼어 준다. 못 늘리면 null.
+fn zoneAlloc(bytes: usize) ?usize {
+    if (out_off == 0) return null;
+    const at = (zoneTop() + 7) & ~@as(usize, 7);
+    const need = at + bytes;
+    const have = @wasmMemorySize(0) * PAGE;
+    if (need > have) {
+        const more = (need - have + PAGE - 1) / PAGE;
+        if (@wasmMemoryGrow(0, more) < 0) return null;
+    }
+    zone_top = need;
+    return at;
+}
+/// 넉넉히 잡아 둔 것을 실제로 쓴 만큼으로 줄인다.
+fn zoneShrink(to: usize) void { if (to >= zoneBase()) zone_top = to; }
+
 fn bigScratch(want: usize) ?[]u8 {
     if (out_off == 0 or want == 0) return null;
-    const base = out_off + out_cap;
+    const base = zoneTop();
     const need = base + want;
     const have = @wasmMemorySize(0) * PAGE;
     if (need > have) {
@@ -114,15 +140,26 @@ fn outputAt(i: usize) *u8 {
     return @ptrFromInt(out_off + i);
 }
 
-/// 페이지 객체 번호들 (문서 순서)
-var page_objs: [4096]u32 = undefined;
+/// 페이지 객체 번호들 (문서 순서). 자리는 parse 가 쪽 수에 맞춰 잡는다.
+var pg_at: usize = 0;
+var pg_cap: u32 = 0;
 var page_count: u32 = 0;
+/// 담을 자리가 모자라 뒤를 잘랐는가 — 화면에 알려 주기 위한 것이다.
+var pages_cut: bool = false;
+
+fn u32sAt(at: usize, n: u32) []u32 {
+    if (at == 0 or n == 0) return &[_]u32{};
+    return @as([*]u32, @ptrFromInt(at))[0..n];
+}
+fn page_objs() []u32 { return u32sAt(pg_at, pg_cap); }
 /// Pages 트리 루트 객체 번호
 var pages_obj: u32 = 0;
 /// Catalog 객체 번호 — 만들 때 /AcroForm 을 손대는 데 쓴다
 var doc_root: u32 = 0;
 /// 사용자가 고른 순서
-var pick: [4096]u32 = undefined;
+var pick_at: usize = 0;
+var pick_cap: u32 = 0;
+fn pick() []u32 { return u32sAt(pick_at, pick_cap); }
 var pick_n: usize = 0;
 var rotate: i32 = 0;
 /// 워터마크 문구 (라틴 문자만 — 표준 글꼴을 쓰므로 한글은 넣을 수 없다)
@@ -155,6 +192,8 @@ export fn outputPtr() usize { return out_off; }
 export fn maxInput() usize { return 512 * 1024 * 1024; }
 export fn outputLen() usize { return out_len; }
 export fn pageCount() u32 { return page_count; }
+/// 쪽이 너무 많아 뒤를 잘랐는가
+export fn pagesTruncated() u32 { return if (pages_cut) 1 else 0; }
 
 fn isSpace(c: u8) bool {
     return c == ' ' or c == '\n' or c == '\r' or c == '\t' or c == 0 or c == 12;
@@ -296,8 +335,9 @@ fn dictInt(b: []const u8, start: usize, end: usize, key: []const u8) ?u32 {
 }
 
 /// Kids 배열에서 "N 0 R" 들을 걷어 페이지 객체를 모은다. 중첩 트리도 따라간다.
-fn collectPages(b: []const u8, obj: u32, depth: u32) void {
-    if (depth > 16 or page_count >= page_objs.len) return;
+fn collectPages(b: []const u8, obj: u32, depth: u32, dest: []u32, n: *u32) void {
+    if (depth > 16) return;
+    if (n.* >= dest.len) { pages_cut = true; return; }
     const body = findObj(b, obj) orelse return;
     // 객체 끝 = 다음 endobj
     const end = find(b, "endobj", body) orelse b.len;
@@ -305,8 +345,8 @@ fn collectPages(b: []const u8, obj: u32, depth: u32) void {
         find(b[body..end], "/Page", 0) != null and
         find(b[body..end], "/Pages", 0) == null;
     if (is_page) {
-        page_objs[page_count] = obj;
-        page_count += 1;
+        dest[n.*] = obj;
+        n.* += 1;
         return;
     }
     const kids_at = find(b[body..end], "/Kids", 0) orelse return;
@@ -317,12 +357,12 @@ fn collectPages(b: []const u8, obj: u32, depth: u32) void {
         while (p < end and isSpace(b[p])) p += 1;
         if (p >= end or b[p] == ']') break;
         if (b[p] < '0' or b[p] > '9') { p += 1; continue; }
-        const n = readUint(b, &p);
+        const kid = readUint(b, &p);
         // "0 R" 을 건너뛴다
         _ = readUint(b, &p);
         while (p < end and isSpace(b[p])) p += 1;
         if (p < end and b[p] == 'R') p += 1;
-        collectPages(b, n, depth + 1);
+        collectPages(b, kid, depth + 1, dest, n);
     }
 }
 
@@ -636,7 +676,41 @@ export fn parse(len: usize) u32 {
     collectAttach(b);
     checkXfa(b);
     if (pages_obj == 0) return 0;
-    collectPages(b, pages_obj, 0);
+
+    // 쪽 표 자리를 잡는다.
+    //
+    // 쪽 수는 걷어 봐야 알지만 쪽 하나는 반드시 객체 하나이므로, 문서에서
+    // 본 가장 큰 객체 번호가 상한이 된다. 파일 크기로도 한 번 더 묶는다 —
+    // 고리처럼 얽힌 쪽 트리를 만나도 훑는 양이 파일 크기를 넘지 않게 한다.
+    // 넉넉히 잡아 채운 뒤 실제로 쓴 만큼으로 줄인다.
+    zoneReset();
+    pages_cut = false;
+    {
+        const by_obj: usize = @as(usize, max_obj) + 8;
+        const by_size: usize = total / 16 + 8;
+        const room = @max(@as(usize, 16), @min(@min(by_obj, by_size), 1 << 20));
+        pg_at = zoneAlloc(room * 4) orelse return 0;
+        pg_cap = @intCast(room);
+    }
+    page_count = 0;
+    collectPages(b, pages_obj, 0, page_objs(), &page_count);
+    // 쓴 만큼만 남기고 나머지 표를 그 뒤에 잇는다
+    pg_cap = page_count;
+    zoneShrink(pg_at + @as(usize, page_count) * 4);
+    {
+        // 고른 쪽은 같은 쪽을 두 번 넣을 수도 있어 넉넉히 잡는다
+        pick_cap = page_count * 2 + 64;
+        pick_at = zoneAlloc(@as(usize, pick_cap) * 4) orelse return 0;
+        pick_n = 0;
+        rot_at = zoneAlloc(@as(usize, page_count) * 2 + 2) orelse return 0;
+        rot_cap = page_count;
+        clearPageRotate();
+        lbl_off_at = zoneAlloc(@as(usize, page_count) * 4 + 4) orelse return 0;
+        lbl_len_at = zoneAlloc(@as(usize, page_count) + 4) orelse return 0;
+        lbl_buf_cap = @max(@as(usize, 1024), @as(usize, page_count) * 16);
+        lbl_buf_at = zoneAlloc(lbl_buf_cap) orelse return 0;
+        label_n = 0;
+    }
     if (root != 0) collectOutline(b, root);
     collectInfo(b);
     collectMeta(b);
@@ -650,28 +724,31 @@ export fn parse(len: usize) u32 {
 
 export fn clearPick() void { pick_n = 0; }
 export fn addPick(i: u32) void {
-    if (pick_n < pick.len and i < page_count) { pick[pick_n] = i; pick_n += 1; }
+    if (pick_n < pick_cap and i < page_count) { pick()[pick_n] = i; pick_n += 1; }
 }
 export fn setRotate(deg: i32) void { rotate = deg; }
 
 /// 쪽마다 따로 돌리기. -1 은 "정하지 않음" 이라 전체 회전을 따른다.
-var rot_each: [4096]i16 = .{-1} ** 4096;
+var rot_at: usize = 0;
+var rot_cap: u32 = 0;
+fn rot_each() []i16 {
+    if (rot_at == 0 or rot_cap == 0) return &[_]i16{};
+    return @as([*]i16, @ptrFromInt(rot_at))[0..rot_cap];
+}
 export fn clearPageRotate() void {
-    var i: usize = 0;
-    while (i < rot_each.len) : (i += 1) rot_each[i] = -1;
+    for (rot_each()) |*r| r.* = -1;
 }
 export fn setPageRotate(page: u32, deg: i32) void {
-    if (page >= rot_each.len) return;
+    if (page >= rot_cap) return;
     const d = @mod(deg, 360);
-    rot_each[page] = @intCast(if (d < 0) d + 360 else d);
+    rot_each()[page] = @intCast(if (d < 0) d + 360 else d);
 }
 fn rotOf(page: u32) i32 {
-    if (page < rot_each.len and rot_each[page] >= 0) return rot_each[page];
+    if (page < rot_cap and rot_each()[page] >= 0) return rot_each()[page];
     return rotate;
 }
 fn anyPageRotate() bool {
-    var i: usize = 0;
-    while (i < rot_each.len) : (i += 1) if (rot_each[i] >= 0) return true;
+    for (rot_each()) |r| if (r >= 0) return true;
     return false;
 }
 
@@ -1070,7 +1147,7 @@ export fn apply() usize {
     var i: usize = 0;
     while (i < pick_n) : (i += 1) {
         appendStr(&pos, " ");
-        appendNum(&pos, page_objs[pick[i]]);
+        appendNum(&pos, page_objs()[pick()[i]]);
         appendStr(&pos, " 0 R");
     }
     appendStr(&pos, " ] >>\nendobj\n");
@@ -1159,7 +1236,7 @@ export fn apply() usize {
         var use_doc = false;
         var doc_font: u8 = 0;
         if (!wmIsAscii()) {
-            _ = renderPage(pick[0]);
+            _ = renderPage(pick()[0]);
             var fi: u8 = 0;
             outer: while (fi < font_n) : (fi += 1) {
                 if (fonts[fi].n == 0 or fonts[fi].name_len == 0) continue;
@@ -1172,7 +1249,7 @@ export fn apply() usize {
                 break;
             }
         } else {
-            _ = renderPage(pick[0]);
+            _ = renderPage(pick()[0]);
         }
 
         // 쪽 한가운데에 비스듬히, 쪽 크기에 맞춰 얹는다
@@ -1576,7 +1653,7 @@ export fn apply() usize {
             }
             // /F 4 는 "찍을 때도 보인다" 는 뜻이다. 없으면 인쇄에서 사라진다.
             appendStr(&pos, " ] /F 4 /P ");
-            appendNum(&pos, page_objs[f.page]);
+            appendNum(&pos, page_objs()[f.page]);
             appendStr(&pos, " 0 R /MK << /BC [0 0 0] /BG [1 1 1] >> /DA ");
             if (f.kind == 1) {
                 appendStr(&pos, "(/ZaDb 0 Tf 0 g) /V /Off /AS /Off >>\nendobj\n");
@@ -1594,15 +1671,15 @@ export fn apply() usize {
     if (rotate != 0 or overlay or anyPageRotate() or has_notes or anyFieldStruct()) {
         i = 0;
         while (i < pick_n) : (i += 1) {
-            const obj = page_objs[pick[i]];
+            const obj = page_objs()[pick()[i]];
             const body = findObj(b, obj) orelse continue;
             const end = find(b, "endobj", body) orelse b.len;
             // 이 쪽에 라벨이 있으면 그릴 스트림을 먼저 적어 둔다.
             // 쪽마다 자리가 다르니 스트림도 쪽마다 하나씩 나간다.
             var my_lab: u32 = 0;
-            if (lab_n > 0 and pageHasLabels(pick[i]) and new_n + 2 < new_nums.len) {
-                _ = renderPage(pick[i]);
-                const bl2 = buildLabelStream(pick[i]);
+            if (lab_n > 0 and pageHasLabels(pick()[i]) and new_n + 2 < new_nums.len) {
+                _ = renderPage(pick()[i]);
+                const bl2 = buildLabelStream(pick()[i]);
                 if (bl2 > 2) {
                     my_lab = lab_base + lab_used;
                     lab_used += 1;
@@ -1673,7 +1750,7 @@ export fn apply() usize {
                 pos += 1;
                 cq2 += 1;
             }
-            if ((has_notes and notesOnPage(pick[i])) or anyFieldStruct()) {
+            if ((has_notes and notesOnPage(pick()[i])) or anyFieldStruct()) {
                 // 원래 있던 주석에 새로 단 것을 이어 붙인다
                 appendStr(&pos, " /Annots [");
                 if (findObj(b, obj)) |pb2| {
@@ -1702,14 +1779,14 @@ export fn apply() usize {
                 }
                 var nk: u32 = 0;
                 while (nk < note_n) : (nk += 1) {
-                    if (notes[nk].page != pick[i] or notes[nk].obj == 0) continue;
+                    if (notes[nk].page != pick()[i] or notes[nk].obj == 0) continue;
                     appendStr(&pos, " ");
                     appendNum(&pos, notes[nk].obj);
                     appendStr(&pos, " 0 R");
                 }
                 var nf: u32 = 0;
                 while (nf < newf_n) : (nf += 1) {
-                    if (newf[nf].page != pick[i] or newf[nf].obj == 0) continue;
+                    if (newf[nf].page != pick()[i] or newf[nf].obj == 0) continue;
                     appendStr(&pos, " ");
                     appendNum(&pos, newf[nf].obj);
                     appendStr(&pos, " 0 R");
@@ -1730,7 +1807,7 @@ export fn apply() usize {
                 const v: i32 = @intCast(readUint(b, &rp) % 360);
                 break :blk if (neg) -v else v;
             };
-            const rot_here = src_rot + rotOf(pick[i]);
+            const rot_here = src_rot + rotOf(pick()[i]);
             if (@mod(rot_here, 360) != 0) {
                 appendStr(&pos, " /Rotate ");
                 const r = @mod(rot_here, 360);
@@ -4739,7 +4816,7 @@ fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
 export fn renderPage(idx: u32) u32 {
     if (idx >= page_count) return 0;
     const b = searchSlice();
-    const obj = page_objs[idx];
+    const obj = page_objs()[idx];
     const body = findObj(b, obj) orelse return 0;
     const end = find(b, "endobj", body) orelse b.len;
 
@@ -7010,14 +7087,24 @@ fn nameAfter(b: []const u8, from: usize, to: usize, key: []const u8, out: []u8) 
 // 쪽 라벨 — 표지가 i, ii, iii 이고 본문이 1 부터인 문서가 흔하다.
 // /PageLabels 는 번호 나무다: [ 0 << /S /r >> 4 << /S /D /St 1 >> ] 처럼
 // "이 쪽부터 이 방식" 을 적어 둔다.
-var label_buf: [16384]u8 = undefined;
-var label_off: [4096]u32 = undefined;
-var label_len: [4096]u8 = undefined;
+var lbl_off_at: usize = 0;
+var lbl_len_at: usize = 0;
+var lbl_buf_at: usize = 0;
+var lbl_buf_cap: usize = 0;
 var label_n: u32 = 0;
+fn label_off() []u32 { return u32sAt(lbl_off_at, if (pg_cap == 0) 0 else pg_cap); }
+fn label_len() []u8 {
+    if (lbl_len_at == 0 or pg_cap == 0) return &[_]u8{};
+    return @as([*]u8, @ptrFromInt(lbl_len_at))[0..pg_cap];
+}
+fn label_buf() []u8 {
+    if (lbl_buf_at == 0 or lbl_buf_cap == 0) return &[_]u8{};
+    return @as([*]u8, @ptrFromInt(lbl_buf_at))[0..lbl_buf_cap];
+}
 export fn pageLabelCount() u32 { return label_n; }
-export fn pageLabelOff(i: u32) u32 { return if (i < label_n) label_off[i] else 0; }
-export fn pageLabelLen(i: u32) u32 { return if (i < label_n) label_len[i] else 0; }
-export fn pageLabelPtr() [*]u8 { return &label_buf; }
+export fn pageLabelOff(i: u32) u32 { return if (i < label_n) label_off()[i] else 0; }
+export fn pageLabelLen(i: u32) u32 { return if (i < label_n) label_len()[i] else 0; }
+export fn pageLabelPtr() [*]u8 { return @ptrFromInt(if (lbl_buf_at == 0) heapBase() else lbl_buf_at); }
 
 /// 로마 숫자. 1~3999 만 다룬다(그 밖은 십진수로 떨어뜨린다).
 fn roman(n0: u32, upper: bool, out: []u8) u32 {
@@ -7073,7 +7160,7 @@ fn collectLabels(b: []const u8) void {
     q += 1;
 
     const pages = page_count;
-    if (pages == 0 or pages > label_off.len) return;
+    if (pages == 0 or pages > label_off().len) return;
     var used: u32 = 0;
     var page: u32 = 0;
 
@@ -7154,14 +7241,14 @@ fn collectLabels(b: []const u8) void {
                     w += alphaLabel(nth, c == 'A', one[w..]);
                 }
             }
-            if (w == 0 or used + w > label_buf.len) {
+            if (w == 0 or used + w > label_buf().len) {
                 // 스타일이 없으면 접두사만 — 규격이 그렇게 정한다
-                if (w == 0 and pn == 0) { label_off[page] = used; label_len[page] = 0; continue; }
+                if (w == 0 and pn == 0) { label_off()[page] = used; label_len()[page] = 0; continue; }
             }
-            if (used + w <= label_buf.len) {
-                @memcpy(label_buf[used..][0..w], one[0..w]);
-                label_off[page] = used;
-                label_len[page] = @intCast(@min(w, 255));
+            if (used + w <= label_buf().len) {
+                @memcpy(label_buf()[used..][0..w], one[0..w]);
+                label_off()[page] = used;
+                label_len()[page] = @intCast(@min(w, 255));
                 used += w;
             }
         }
@@ -7302,7 +7389,7 @@ export fn outlineTextPtr() [*]u8 { return &mark_buf; }
 /// 쪽 객체 번호를 쪽 차례로 바꾼다.
 fn pageIndexOf(obj: u32) i32 {
     var i: u32 = 0;
-    while (i < page_count) : (i += 1) if (page_objs[i] == obj) return @intCast(i);
+    while (i < page_count) : (i += 1) if (page_objs()[i] == obj) return @intCast(i);
     return -1;
 }
 
@@ -11555,7 +11642,9 @@ fn attachEmbedded(b: []const u8, fbody: usize) void {
 // 밀어야 하는데, 스트림 안의 이진 데이터는 건드리면 안 된다. 그래서 객체를
 // 딕셔너리 구간과 스트림 구간으로 나눠 딕셔너리에서만 숫자를 고친다.
 
-var b2_pages: [4096]u32 = undefined;
+var b2_at: usize = 0;
+var b2_cap_n: u32 = 0;
+fn b2_pages() []u32 { return u32sAt(b2_at, b2_cap_n); }
 var b2_page_n: u32 = 0;
 var b2_max_obj: u32 = 0;
 
@@ -11604,19 +11693,18 @@ export fn parseSecond(len: usize) u32 {
         }
     }
     if (pgs == 0) return 0;
-    // 재귀 수집 (page_objs 를 잠시 빌려 쓴 뒤 옮긴다)
-    const saved = page_count;
-    page_count = 0;
-    var keep_save: [64]u32 = undefined;
-    var si: usize = 0;
-    while (si < 64 and si < saved) : (si += 1) keep_save[si] = page_objs[si];
-    collectPages(b, pgs, 0);
-    b2_page_n = page_count;
-    var t: u32 = 0;
-    while (t < b2_page_n and t < b2_pages.len) : (t += 1) b2_pages[t] = page_objs[t];
-    page_count = saved;
-    si = 0;
-    while (si < 64 and si < saved) : (si += 1) page_objs[si] = keep_save[si];
+    // 둘째 문서의 쪽은 제 자리에 바로 담는다. 예전에는 page_objs 를 잠시
+    // 빌려 쓰고 앞 64 개만 되돌렸다 — 첫 문서가 64 쪽을 넘으면 그 뒤가
+    // 둘째 문서의 번호로 덮인 채 남았다.
+    {
+        const room = @max(@as(usize, 16), @min(b.len / 16 + 8, 1 << 20));
+        b2_at = zoneAlloc(room * 4) orelse return 0;
+        b2_cap_n = @intCast(room);
+    }
+    b2_page_n = 0;
+    collectPages(b, pgs, 0, b2_pages(), &b2_page_n);
+    b2_cap_n = b2_page_n;
+    zoneShrink(b2_at + @as(usize, b2_page_n) * 4);
     return if (b2_page_n > 0) 1 else 0;
 }
 
@@ -11722,13 +11810,13 @@ export fn merge() usize {
     var t: u32 = 0;
     while (t < page_count) : (t += 1) {
         appendStr(&pos, " ");
-        writeNum(&pos, page_objs[t]);
+        writeNum(&pos, page_objs()[t]);
         appendStr(&pos, " 0 R");
     }
     t = 0;
     while (t < b2_page_n) : (t += 1) {
         appendStr(&pos, " ");
-        writeNum(&pos, b2_pages[t] + shift);
+        writeNum(&pos, b2_pages()[t] + shift);
         appendStr(&pos, " 0 R");
     }
     appendStr(&pos, " ] >>\nendobj\n");
@@ -11736,7 +11824,7 @@ export fn merge() usize {
     // B 쪽 페이지의 부모를 A 의 트리로 바꾼다
     t = 0;
     while (t < b2_page_n and new_n < new_nums.len - 2) : (t += 1) {
-        const obj = b2_pages[t];
+        const obj = b2_pages()[t];
         const body = findObj(b, obj) orelse continue;
         const end = find(b, "endobj", body) orelse b.len;
         new_offsets[new_n] = pos;
@@ -11750,7 +11838,48 @@ export fn merge() usize {
         var q = body;
         while (q < end and b[q] != '<') q += 1;
         if (q + 1 < end and b[q + 1] == '<') q += 2;
+        // 딕셔너리 깊이. 쪽 딕셔너리 안에는 /Resources << … >> 처럼 딕셔너리가
+        // 또 들어 있다. 처음 만난 ">>" 에서 멈추면 그 안쪽 것에서 끊겨
+        // /MediaBox·/Contents 가 통째로 날아간다 — 실제로 그랬다.
+        var depth: u32 = 0;
         while (q < end) {
+            // 글 안의 괄호·부등호는 구조가 아니다
+            if (b[q] == '(') {
+                const st2 = q;
+                q += 1;
+                var par: u32 = 1;
+                while (q < end and par > 0) : (q += 1) {
+                    if (b[q] == '\\') { q += 1; continue; }
+                    if (b[q] == '(') par += 1;
+                    if (b[q] == ')') par -= 1;
+                }
+                @memcpy(outBuf()[pos..][0 .. q - st2], b[st2..q]);
+                pos += q - st2;
+                continue;
+            }
+            if (b[q] == '<' and q + 1 < end and b[q + 1] == '<') {
+                depth += 1;
+                appendStr(&pos, "<<");
+                q += 2;
+                continue;
+            }
+            if (b[q] == '<') {
+                // 16진 글자열 <AB12> — 닫는 '>' 까지 그대로 옮긴다
+                const st2 = q;
+                q += 1;
+                while (q < end and b[q] != '>') q += 1;
+                if (q < end) q += 1;
+                @memcpy(outBuf()[pos..][0 .. q - st2], b[st2..q]);
+                pos += q - st2;
+                continue;
+            }
+            if (b[q] == '>' and q + 1 < end and b[q + 1] == '>') {
+                if (depth == 0) break; // 바깥 딕셔너리의 끝
+                depth -= 1;
+                appendStr(&pos, ">>");
+                q += 2;
+                continue;
+            }
             if (b[q] == '/' and q + 7 <= end and std_mem_eq(b[q .. q + 7], "/Parent")) {
                 q += 7;
                 while (q < end and isSpace(b[q])) q += 1;
@@ -11761,7 +11890,6 @@ export fn merge() usize {
                 if (q < end and b[q] == 'R') q += 1;
                 continue;
             }
-            if (b[q] == '>' and q + 1 < end and b[q + 1] == '>') break;
             if (b[q] >= '0' and b[q] <= '9') {
                 var r = q;
                 const n1 = readUint(b, &r);
@@ -12331,7 +12459,7 @@ export fn compact() usize {
 
     // 고른 쪽과 그 아래 딸린 것들만 표시한다
     i = 0;
-    while (i < pick_n) : (i += 1) markReach(b, page_objs[pick[i]], 0);
+    while (i < pick_n) : (i += 1) markReach(b, page_objs()[pick()[i]], 0);
 
     var pos: usize = 0;
     appendStr(&pos, "%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
@@ -12411,7 +12539,7 @@ export fn compact() usize {
     i = 0;
     while (i < pick_n) : (i += 1) {
         appendStr(&pos, " ");
-        appendNum(&pos, page_objs[pick[i]]);
+        appendNum(&pos, page_objs()[pick()[i]]);
         appendStr(&pos, " 0 R");
     }
     appendStr(&pos, " ] >>\nendobj\n");

@@ -1,5 +1,6 @@
 // 기능이 실제로 맞게 동작하는지 단언으로 확인한다.
 import fs from 'fs';
+import { execFileSync } from 'node:child_process';
 const wasm = fs.readFileSync('dist/pdf.wasm');
 const S = process.argv[2];
 const dec = new TextDecoder();
@@ -251,6 +252,55 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   fs.writeFileSync(`${S}/v-merge.pdf`, Buffer.from(new Uint8Array(ex.memory.buffer, ex.outputPtr(), n)));
   const r = await load('v-merge.pdf');
   ok('병합: 5쪽', r && r.pages === 5, r && r.pages);
+  // 붙인 쪽의 딕셔너리가 안쪽 ">>" 에서 끊기면 /MediaBox·/Contents 가 통째로
+  // 날아가 빈 쪽이 된다. 실제로 그랬다 — 붙인 쪽에 글자가 남아 있어야 한다.
+  let empty = 0;
+  for (let p = 1; p < 5; p++) {
+    const q = await load('v-merge.pdf', p);
+    if (!q || q.text.length === 0) empty++;
+  }
+  ok('병합: 붙인 쪽이 비지 않는다', empty === 0, `빈 쪽 ${empty}개`);
+}
+// --- 병합: 64쪽을 넘겨도 제자리 (앞 64개만 되돌리던 버그)
+{
+  const mk = (n, f, lines) =>
+    execFileSync(process.execPath, ['tests/mkbig.mjs', String(n), `${S}/${f}`, String(lines)]);
+  mk(100, '.m100.pdf', 1);
+  mk(70, '.m70.pdf', 1);
+  // 둘째 문서의 번호를 밀어 첫 문서와 겹치지 않게 한다 — 겹치면 잘못 섞여도
+  // 우연히 맞아 보인다
+  const t = fs.readFileSync(`${S}/.m70.pdf`, 'latin1')
+    .replace(/(\d+) 0 obj/g, (m0, n) => `${+n + 500} 0 obj`)
+    .replace(/(\d+) 0 R/g, (m0, n) => `${+n + 500} 0 R`);
+  fs.writeFileSync(`${S}/.m70r.pdf`, Buffer.from(t, 'latin1'));
+  const m = await WebAssembly.instantiate(wasm, { wasi_snapshot_preview1: new Proxy({}, { get: () => () => 0 }) });
+  const ex = m.instance.exports;
+  const a = fs.readFileSync(`${S}/.m100.pdf`);
+  const b2 = fs.readFileSync(`${S}/.m70r.pdf`);
+  ex.reserve(a.length, a.length * 3 + b2.length * 3 + 1048576);
+  new Uint8Array(ex.memory.buffer, ex.inputPtr(), a.length).set(a);
+  ex.parse(a.length);
+  new Uint8Array(ex.memory.buffer, ex.secondPtr(), b2.length).set(b2);
+  ex.parseSecond(b2.length);
+  const n = ex.merge();
+  fs.writeFileSync(`${S}/.m-merged.pdf`, Buffer.from(new Uint8Array(ex.memory.buffer, ex.outputPtr(), n)));
+  const r = await load('.m-merged.pdf');
+  ok('병합(170쪽): 쪽 수', r && r.pages === 170, r && r.pages);
+  let wrong = 0;
+  for (const p of [1, 50, 64, 65, 66, 99, 100, 101, 135, 170]) {
+    const q = await load('.m-merged.pdf', p - 1);
+    const want = `page ${p <= 100 ? p : p - 100} `;
+    if (!q || !q.text.startsWith(want)) wrong++;
+  }
+  ok('병합(170쪽): 쪽이 제자리', wrong === 0, `어긋난 쪽 ${wrong}개`);
+}
+// --- 쪽 수 상한이 없다 (예전에는 4096 에서 조용히 잘렸다)
+{
+  execFileSync(process.execPath, ['tests/mkbig.mjs', '4200', `${S}/.many.pdf`, '1']);
+  const r = await load('.many.pdf', 4199);
+  ok('쪽 4200개: 다 센다', r && r.pages === 4200, r && r.pages);
+  ok('쪽 4200개: 마지막 쪽도 읽힌다', r && r.text.startsWith('page 4200 '), r && r.text.slice(0, 12));
+  ok('쪽 4200개: 잘렸다고 하지 않는다', r && r.ex.pagesTruncated() === 0, r && r.ex.pagesTruncated());
 }
 
 // --- 새로 붙인 것들
