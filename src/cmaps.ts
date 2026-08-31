@@ -17,6 +17,10 @@ let base = "./cmaps";
 export function setCmapBase(url: string) {
   base = url.replace(/\/$/, "");
 }
+/** 지금 어디를 보고 있나. 워커 없이 여럿이 나눠 쓸 때 되돌리려고 쓴다. */
+export function cmapBase() {
+  return base;
+}
 
 type CmapEx = {
   memory: WebAssembly.Memory;

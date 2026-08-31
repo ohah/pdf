@@ -70,7 +70,7 @@ for (const [name, pages] of DOCS) {
       try { runs.push(await fn(bytes, pages)); }
       catch (e) { row[who] = { err: String(e.message ?? e).slice(0, 80) }; break; }
     }
-    if (runs.length) {
+    if (runs.length && !row[who]) {
       const mid = (k) => runs.map((x) => x[k]).sort((p, q) => p - q)[Math.floor(runs.length / 2)];
       row[who] = { open: mid("open"), draw: mid("draw"), text: mid("text"), n: runs[0].n };
     }

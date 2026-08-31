@@ -104,8 +104,8 @@ export type OpenMsg = {
 export class PDFClient {
   /** 워커. Node 처럼 워커가 없는 곳에서는 null 이고 같은 갈래에서 돈다 */
   private w: Worker | null = null;
-  /** 워커가 없을 때 엔진을 그 자리에서 부르는 통로. 한 줄로 세워 쓴다 */
-  private inproc: Promise<void> = Promise.resolve();
+  /** 워커가 없을 때 이 문서가 쓰는 엔진 사례. 문서마다 따로 든다 */
+  private slot: unknown = null;
   private seq = 0;
   private waiting = new Map<number, { ok: (v: unknown) => void; no: (e: Error) => void }>();
   private gone = false;
@@ -147,24 +147,26 @@ export class PDFClient {
     if (this.gone) return Promise.reject(new Error("the document is already closed"));
     const w = this.w;
     if (!w) {
-      // 워커가 없을 때. 엔진 사례가 하나뿐이라 겹치면 섞이므로 줄을 세운다.
-      const done = this.inproc.then(async () => {
-        // 줄을 서서 기다리는 동안 닫혔을 수 있다. 워커 쪽은 terminate 로
-        // 끊기지만 여기서는 그냥 돌아가므로 앞뒤로 한 번씩 본다 —
-        // 닫은 뒤에 값이 돌아오면 부르는 쪽이 닫힌 문서를 계속 쓴다.
+      // 워커가 없을 때. 이 문서의 엔진 사례를 들고 그 자리에서 부른다.
+      // 줄 세우기는 runWork 가 한다 — 한 모듈을 여러 문서가 나눠 쓴다.
+      return (async () => {
         if (this.gone) throw new Error("the document was closed");
         // 주소를 변수에 담아 부른다 — 번들러가 브라우저 빌드에 엔진을 한 벌
         // 더 끼워 넣지 않게 하려는 것이다(워커로 이미 한 벌 들어간다).
         const here = "./worker.js";
         const mod = (await import(/* @vite-ignore */ here)) as {
-          doWork: (t: string, a: unknown) => Promise<{ r: unknown }>;
+          newSlot: () => unknown;
+          runWork: (slot: unknown, t: string, a: unknown) => Promise<{ r: unknown }>;
         };
-        const { r } = await mod.doWork(t, a);
+        this.slot ??= mod.newSlot();
+        // 워커였다면 여기서 넘긴 바이트는 소유권이 넘어가 부르는 쪽에서
+        // 비워진다. 같은 갈래에서는 그런 일이 없어 바이트가 살아 있다 —
+        // 넘긴 것을 다시 쓰면 브라우저에서만 빈 값이 되니 주의.
+        const { r } = await mod.runWork(this.slot, t, a);
+        // 기다리는 사이에 닫혔으면 값을 넘기지 않는다
         if (this.gone) throw new Error("the document was closed");
         return r as T;
-      });
-      this.inproc = done.then(() => {}, () => {});
-      return done;
+      })();
     }
     const id = ++this.seq;
     return new Promise<T>((ok, no) => {
@@ -180,6 +182,9 @@ export class PDFClient {
     for (const [, slot] of this.waiting) slot.no(new Error("the document was closed"));
     this.waiting.clear();
     this.w?.terminate();
+    // 워커가 없을 때 쓰던 엔진 사례를 놓아 준다 — 안 놓으면 문서를 닫아도
+    // 그 문서가 쓰던 wasm 메모리가 그대로 남는다
+    this.slot = null;
   }
 
   /** 문서를 연다. 바이트는 넘겨주고 나면 이쪽에서 못 쓴다 — 부르는 쪽이 사본을 준다. */

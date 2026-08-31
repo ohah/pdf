@@ -99,5 +99,61 @@ const t = (name, cond, got) => {
   void PasswordNeeded;
 }
 
+// 문서 두 개를 한꺼번에 — 워커가 없으면 모듈 하나를 나눠 쓰므로, 문서마다
+// 제 엔진 사례를 들지 않으면 뒤엣것이 앞엣것을 덮어쓴다. 실제로 그랬다:
+// 5쪽짜리를 열어 둔 채 1쪽짜리를 열면 5쪽짜리의 글자가 1쪽짜리 것으로 나왔다.
+{
+  const A = await PDFDocument.open(`${FX}/multi.pdf`);
+  const B = await PDFDocument.open(`${FX}/annots.pdf`);
+  t("둘 다 열림", A.pages === 5 && B.pages === 1, `${A.pages}/${B.pages}`);
+  t("앞 문서가 안 덮인다", (await A.text(1)).includes("PAGE 1"), JSON.stringify((await A.text(1)).slice(0, 20)));
+  t("뒤 문서도 제 것", (await B.text(1)).includes("annots"));
+  // 번갈아 불러도 섞이지 않아야 한다
+  const [a2, b1, a3] = await Promise.all([A.text(2), B.text(1), A.text(3)]);
+  t("섞어 불러도 제 것", a2.includes("PAGE 2") && b1.includes("annots") && a3.includes("PAGE 3"),
+    `${a2.slice(0, 12)} | ${b1.slice(0, 8)} | ${a3.slice(0, 12)}`);
+  // 만들어 낸 것도 제 문서여야 한다
+  const out = await A.build({});
+  const back = await PDFDocument.open(out.slice());
+  t("만든 것이 앞 문서", back.pages === 5, back.pages);
+  back.close();
+  A.close();
+  B.close();
+}
+
+// 쪽이 너무 많으면 잘랐다고 알린다 (같은 쪽을 백 번 가리키는 문서로 만든다)
+{
+  const one = [
+    "%PDF-1.7", "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj",
+    `2 0 obj\n<< /Type /Pages /Count 100 /Kids [${Array(100).fill("4 0 R").join(" ")}] >>\nendobj`,
+    "3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj",
+    "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>\nendobj",
+    "5 0 obj\n<< /Length 44 >>\nstream\nBT /F1 12 Tf 20 100 Td (many) Tj ET\nendstream\nendobj",
+    "trailer\n<< /Size 6 /Root 1 0 R >>", "%%EOF", "",
+  ].join("\n");
+  const many = await PDFDocument.open(new TextEncoder().encode(one));
+  t("쪽이 넘치면 알린다", many.truncated === true && many.pages > 0, `${many.pages}쪽 truncated=${many.truncated}`);
+  many.close();
+}
+
+// 캔버스를 주면 Node 에서도 그린다 (@napi-rs/canvas 가 있을 때만 본다)
+{
+  let createCanvas = null;
+  try { ({ createCanvas } = await import("@napi-rs/canvas")); } catch { /* 없으면 건너뛴다 */ }
+  if (createCanvas) {
+    const pdf = await PDFDocument.open(`${FX}/tile.pdf`);
+    const cv = createCanvas(10, 10);
+    const r = await pdf.render(1, cv, { scale: 1, dpr: 1 });
+    const d = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data;
+    let inked = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 0 && d[i] < 200) inked++;
+    // 브라우저에서 같은 문서를 같은 배율로 그리면 25235 칸이 찍힌다.
+    // 무늬·도형은 글꼴과 무관하므로 Node 에서도 같아야 한다.
+    t("Node 에서 그리기", Math.abs(inked - 25235) < 500, `${cv.width}x${cv.height} 잉크 ${inked}`);
+    t("그리며 글자 자리도 준다", Array.isArray(r.runs), typeof r.runs);
+    pdf.close();
+  }
+}
+
 console.log(`Node  통과 ${ok} · 실패 ${bad}`);
 process.exit(bad === 0 ? 0 : 1);

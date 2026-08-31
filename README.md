@@ -124,10 +124,22 @@ pdf.close();
 ```
 
 뽑기(`text`·`textItems`·`annotations`·`structure`·`fields`·`signatures`)와
-편집(`build`·`merge`·`encrypt`)은 그대로 되지만 **그리기는 캔버스가 있어야 한다**.
-`render()` 에 `node-canvas` 같은 데서 만든 캔버스를 넘기면 거기에 그린다 —
-아무것도 안 넘기면 그렇게 알려 주는 오류가 난다. 문서에 박힌 글꼴은
-브라우저에서만 등록되므로(FontFace), Node 에서 그린 글자는 시스템 글꼴 모양이다.
+편집(`build`·`merge`·`encrypt`)은 그대로 된다. **그리려면 캔버스를 만들어 넘긴다.**
+
+```js
+import { createCanvas } from "@napi-rs/canvas";   // node-canvas 도 된다
+
+const cv = createCanvas(10, 10);                  // 크기는 render 가 맞춘다
+await pdf.render(1, cv, { scale: 1, dpr: 1 });
+await writeFile("1쪽.png", cv.toBuffer("image/png"));
+```
+
+도형·그림·무늬·투명 무리·소프트 마스크는 브라우저와 같은 그림이 나온다(잉크
+양까지 맞다). 다만 문서에 박힌 글꼴은 브라우저에서만 등록되므로(FontFace),
+**Node 에서 그린 글자는 시스템 글꼴 모양이다** — 자간과 자리는 맞고 글자 모양만
+다르다. 캔버스를 안 넘기면 무슨 일인지 알려 주는 오류가 난다.
+
+문서를 여러 개 한꺼번에 열어도 된다. 문서마다 제 엔진 사례를 들고 다닌다.
 
 ## API
 

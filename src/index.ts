@@ -45,7 +45,9 @@ async function toBytes(src: Source, opts: OpenOpts): Promise<Uint8Array> {
     const where = String(src);
     const proc = (globalThis as { process?: { versions?: { node?: string } } }).process;
     if (proc?.versions?.node && !/^(https?|blob|data):/.test(where)) {
+      stopIfAborted(opts.signal);
       const bytes = await loadBytes(where);
+      stopIfAborted(opts.signal);
       if (!bytes) throw new Error(`could not read ${where}`);
       opts.onProgress?.({ loaded: bytes.length, total: bytes.length });
       return sniff(bytes, "");

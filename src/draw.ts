@@ -99,9 +99,8 @@ function inlineCanvas(
   const hit = inlineCache.get(key);
   if (hit) return hit;
   if (off + len > src.length) return null;
-  const cv = document.createElement("canvas");
-  cv.width = w;
-  cv.height = h;
+  const cv = scratch(w, h, null) as HTMLCanvasElement | null;
+  if (!cv) return null;
   const c = cv.getContext("2d");
   if (!c) return null;
   const img = c.createImageData(w, h);
@@ -155,6 +154,43 @@ function inlineCanvas(
  * 그리면서 글자가 놓인 자리를 모아 돌려준다. 그 위에 투명한 글자층을 얹으면
  * 뷰어에서 긁어 복사할 수 있다 — PDF.js 가 하는 그 방식이다.
  */
+/**
+ * 여벌 판을 하나 만든다.
+ *
+ * 투명 무리·오려 내기·소프트 마스크·인라인 그림은 딴 판에 그렸다가 얹는다.
+ * 브라우저에서는 document 로 만들면 되지만 워커에는 document 가 없고 Node
+ * 에는 둘 다 없다. 있는 것부터 차례로 써 보고, 마지막에는 넘겨받은 판과
+ * 같은 것을 하나 더 만든다(node-canvas 처럼 생성자가 (폭, 높이)인 것).
+ */
+function scratch(
+  w: number, h: number, like: { constructor: unknown } | null,
+): { width: number; height: number; getContext: (k: "2d") => unknown } | null {
+  const W = Math.max(1, Math.round(w));
+  const H = Math.max(1, Math.round(h));
+  try {
+    if (typeof document !== "undefined" && document.createElement) {
+      const c = document.createElement("canvas");
+      c.width = W;
+      c.height = H;
+      return c;
+    }
+  } catch { /* 아래로 */ }
+  try {
+    if (typeof OffscreenCanvas === "function") {
+      return new OffscreenCanvas(W, H) as unknown as {
+        width: number; height: number; getContext: (k: "2d") => unknown;
+      };
+    }
+  } catch { /* 아래로 */ }
+  try {
+    const Ctor = like?.constructor as (new (w: number, h: number) => {
+      width: number; height: number; getContext: (k: "2d") => unknown;
+    }) | undefined;
+    if (Ctor) return new Ctor(W, H);
+  } catch { /* 없다 */ }
+  return null;
+}
+
 export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] {
   const runs: TextRun[] = [];
   const g0 = canvas.getContext("2d");
@@ -195,7 +231,9 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
   let fillCss = "#000000";
   const fillStack: string[] = [];
   // 글자층에 쓸 자리 모으기
-  const dpr = canvas.width / (parseFloat(canvas.style.width) || canvas.width);
+  // 화면 배율. node-canvas 처럼 style 이 없는 판도 있으므로 없으면 1 로 본다.
+  const shown = parseFloat((canvas as { style?: { width: string } }).style?.width ?? "");
+  const dpr = canvas.width / (shown || canvas.width);
   // 오려 내기가 걸리면 그리는 곳이 바뀐다
   let run: (TextRun & { endX: number }) | null = null;
   const flush = () => {
@@ -222,10 +260,8 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
     parent: CanvasRenderingContext2D; depth: number };
   const clips: ClipLayer[] = [];
   const like = () => {
-    const c = document.createElement("canvas");
-    c.width = canvas.width;
-    c.height = canvas.height;
-    return c.getContext("2d");
+    const c = scratch(canvas.width, canvas.height, canvas);
+    return c ? c.getContext("2d") as CanvasRenderingContext2D | null : null;
   };
   /**
    * 새 판에 지금 그리기 상태를 옮긴다.

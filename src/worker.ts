@@ -12,7 +12,7 @@
 //
 // 오가는 큰 자료는 transfer 로 넘긴다. 복사가 아니라 소유권만 옮기므로
 // 수 MB 짜리 명령 목록도 값이 안 든다.
-import { loadCmaps, setCmapBase } from "./cmaps.js";
+import { cmapBase, loadCmaps, setCmapBase } from "./cmaps.js";
 import { loadBytes } from "./bytes.js";
 import { DEFAULTS } from "./config.js";
 
@@ -253,12 +253,56 @@ let wasmPath = DEFAULTS.wasm;
 
 async function engine() {
   if (ex) return ex;
-  const wasmBytes = await loadBytes(wasmPath);
-  if (!wasmBytes) throw new Error(`could not load ${wasmPath}`);
-  mod = await WebAssembly.compile(wasmBytes);
+  if (!mod) {
+    const wasmBytes = await loadBytes(wasmPath);
+    if (!wasmBytes) throw new Error(`could not load ${wasmPath}`);
+    // 컴파일 결과는 사례끼리 나눠 써도 된다 — 무거운 건 이것뿐이다
+    mod = await WebAssembly.compile(wasmBytes);
+  }
   const inst = await WebAssembly.instantiate(mod, { wasi_snapshot_preview1: wasi });
   ex = inst.exports as unknown as Exports;
   return ex;
+}
+
+/**
+ * 워커 없이 돌 때 쓰는 엔진 사례 한 벌.
+ *
+ * 브라우저에서는 문서마다 워커가 따로라 서로 섞일 일이 없다. Node 에는
+ * 워커가 없어 모듈 하나를 여럿이 나눠 쓰는데, 엔진 상태가 모듈에 있으면
+ * 문서를 두 개 열었을 때 뒤엣것이 앞엣것을 덮어쓴다 — 앞 문서에 글자를
+ * 물으면 뒤 문서의 글자가 나왔다. 문서마다 제 사례를 들고 다니게 한다.
+ */
+export type Slot = { ex: Exports | null; wasm: string; cmaps: string };
+
+export function newSlot(): Slot {
+  return { ex: null, wasm: DEFAULTS.wasm, cmaps: DEFAULTS.cmaps };
+}
+
+/** 모듈 상태를 이 사례의 것으로 갈아 끼우고 일을 시킨다. 한 줄로 세운다. */
+let gate: Promise<unknown> = Promise.resolve();
+
+export function runWork(slot: Slot, t: string, a: unknown): Promise<{ r: unknown }> {
+  const done = gate.then(async () => {
+    const keepEx = ex;
+    const keepWasm = wasmPath;
+    const keepCmaps = cmapBase();
+    ex = slot.ex;
+    wasmPath = slot.wasm;
+    setCmapBase(slot.cmaps);
+    try {
+      return await doWork(t, a);
+    } finally {
+      // 이번에 만든 사례와 바뀐 자리를 이 슬롯에 담아 두고 원래대로 돌린다
+      slot.ex = ex;
+      slot.wasm = wasmPath;
+      slot.cmaps = cmapBase();
+      ex = keepEx;
+      wasmPath = keepWasm;
+      setCmapBase(keepCmaps);
+    }
+  });
+  gate = done.then(() => {}, () => {});
+  return done;
 }
 
 /**
