@@ -133,6 +133,8 @@ const [px, py] = viewport.toPdf(ev.offsetX, ev.offsetY);        // 클릭 → PD
 
 `toLines(runs)` 로 글자 덩이를 읽는 차례의 줄로 묶을 수 있고, `renderTextLayer()` 가
 그 줄로 투명 글자층을 지어 준다(폭 맞추기·줄바꿈까지).
+`renderAnnotationLayer(container, annots, viewport)` 는 주석을 다룰 수 있게 얹는다 —
+링크는 `<a>`(위험한 갈래는 거른다), 문서 안 이동은 단추, 남긴 글은 툴팁이다.
 
 ## 소스에서 굽기
 

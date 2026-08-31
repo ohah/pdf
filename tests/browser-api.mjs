@@ -136,6 +136,36 @@ const r = await p.evaluate(async (doc) => {
     g.close();
   }
 
+  // 5.7) 주석 층
+  {
+    const { renderAnnotationLayer } = await import('/dist/index.js');
+    const ad = await PDFDocument.open(new Uint8Array(await (await fetch('/fixtures/annots.pdf')).arrayBuffer()), { wasm: '/pdf.wasm', cmaps: '/cmaps' });
+    const list = await ad.annotations(1);
+    ok('주석을 걷는다', list.length === 5, list.length);
+    const vp = await ad.viewport(1, { scale: 1.3 });
+    const host = document.createElement('div');
+    host.style.cssText = `position:relative;width:${vp.width}px;height:${vp.height}px`;
+    document.body.appendChild(host);
+    let goto = -1;
+    const layer = renderAnnotationLayer(host, list, vp, { onGoto: (p) => { goto = p; } });
+    ok('요소를 만든다', layer.elements.length === 5, layer.elements.length);
+    const a = host.querySelector('a[data-annot="Link"]');
+    ok('링크는 <a>', !!a && a.href.startsWith('https://example.com'), a && a.href);
+    ok('바깥 링크는 새 창', a?.target === '_blank');
+    const hl = host.querySelector('[data-annot="Highlight"]');
+    ok('형광펜에 남긴 글이 툴팁으로', (hl?.title ?? '').includes('중요한 곳') && hl.title.includes('윤보경'), hl?.title);
+    ok('자리를 잡는다', Math.round(parseFloat(hl.style.left)) === Math.round(vp.rect([100, 700, 300, 720]).left), hl.style.left);
+    ok('글 없는 네모는 마우스를 안 먹는다', host.querySelector('[data-annot="Square"]').style.pointerEvents === 'none');
+    // 숨김 깃발은 건너뛴다
+    const hidden = list.map((x) => ({ ...x, flags: 2 }));
+    const h2 = renderAnnotationLayer(host, hidden, vp, {});
+    ok('숨김 주석은 안 얹는다', h2.elements.length === 0, h2.elements.length);
+    layer.destroy();
+    ok('destroy 뒤 빔', host.childElementCount === 0);
+    host.remove();
+    ad.close();
+  }
+
   // 6) data()
   {
     const d1 = pdf.data(); d1[0] = 0;

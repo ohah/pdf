@@ -517,6 +517,18 @@ async function page(i: number, formOn: boolean, light = false) {
       });
     }
   }
+  // 링크 주석에는 목표(주소·쪽)를 채워 준다. 링크는 따로 걷어 두었으므로
+  // 자리로 짝짓는다 — 같은 /Annots 를 두 번 훑지 않는다.
+  for (const a of annots) {
+    if (a.subtype !== "Link") continue;
+    const hit = links.find((L) =>
+      Math.abs(L.x0 - a.rect[0]) < 0.5 && Math.abs(L.y0 - a.rect[1]) < 0.5 &&
+      Math.abs(L.x1 - a.rect[2]) < 0.5 && Math.abs(L.y1 - a.rect[3]) < 0.5);
+    if (hit) {
+      (a as typeof a & { uri: string; page: number }).uri = hit.uri;
+      (a as typeof a & { uri: string; page: number }).page = hit.page;
+    }
+  }
   let inlMax = 0;
   for (let k = 0; k + 1 < ops.length;) {
     const argc = ops[k + 1];

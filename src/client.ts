@@ -32,6 +32,10 @@ export type PageMsg = {
     color: [number, number, number] | null;
     /** 2=숨김, 4=인쇄됨 … (/F) */
     flags: number;
+    /** Link 주석이 가리키는 주소. 문서 안 이동이면 빈 문자열 */
+    uri?: string;
+    /** Link 주석이 가리키는 쪽(0부터). 모르면 -1 */
+    page?: number;
   }[];
   inline: Uint8Array;
   fields: {

@@ -21,6 +21,7 @@ export type { TextRun } from "./draw.js";
 export type { SigCheck } from "./sig.js";
 export { toLines } from "./draw.js";
 export { renderTextLayer, type TextLayer, type TextLayerOpts } from "./textlayer.js";
+export { renderAnnotationLayer, type Annot, type AnnotLayer, type AnnotLayerOpts } from "./annotlayer.js";
 export { makeViewport, type Viewport } from "./viewport.js";
 export { toScreen, placeRect, type PageBox, type Placed } from "./place.js";
 export { PDFClient } from "./client.js";
