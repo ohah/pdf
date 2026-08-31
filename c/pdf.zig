@@ -303,12 +303,12 @@ fn trailerStart(b: []const u8) ?usize {
     if (b.len == 0) return null;
     const win: usize = 64 * 1024;
     const from = if (b.len > win) b.len - win else 0;
-    if (rfind(b[from..], "trailer", b.len - from - 1)) |t| {
-        var p = from + t + 7;
-        while (p < b.len and isSpace(b[p])) p += 1;
-        if (p + 1 < b.len and b[p] == '<' and b[p + 1] == '<') return p;
-    }
-    // xref 스트림 — startxref 가 가리키는 객체를 본다
+    // startxref 를 먼저 본다.
+    //
+    // 옛 꼴(trailer 키워드)로 만든 문서에 xref 스트림으로 갱신을 얹으면,
+    // 꼬리 창에 죽은 옛 trailer 가 그대로 남아 있다. 키워드를 먼저 찾으면
+    // 그 죽은 판의 /Root 를 집어 옛 쪽 트리를 읽는다 — 세 쪽짜리가 한 쪽으로
+    // 보였다. startxref 는 언제나 지금 판을 가리킨다.
     if (rfind(b[from..], "startxref", b.len - from - 1)) |sx| {
         var p = from + sx + 9;
         const off = readUint(b, &p);
@@ -319,7 +319,19 @@ fn trailerStart(b: []const u8) ?usize {
                 while (q < b.len and isSpace(b[q])) q += 1;
                 if (q + 1 < b.len and b[q] == '<' and b[q + 1] == '<') return q;
             }
+            // 옛 꼴이면 그 자리에 xref 표가 있고 그 뒤에 trailer 가 온다
+            if (find(b[off..], "trailer", 0)) |t| {
+                var q = off + t + 7;
+                while (q < b.len and isSpace(b[q])) q += 1;
+                if (q + 1 < b.len and b[q] == '<' and b[q + 1] == '<') return q;
+            }
         }
+    }
+    // startxref 를 못 읽으면 꼬리에 적힌 trailer 를 찾는다
+    if (rfind(b[from..], "trailer", b.len - from - 1)) |t| {
+        var p = from + t + 7;
+        while (p < b.len and isSpace(b[p])) p += 1;
+        if (p + 1 < b.len and b[p] == '<' and b[p + 1] == '<') return p;
     }
     return null;
 }
@@ -366,8 +378,7 @@ fn prevTrailer(b: []const u8, ts: usize, te: usize) ?usize {
     const off = readUint(b, &p);
     if (off == 0 or off >= b.len) return null;
     // 옛 꼴이면 그 자리부터 "trailer" 가 곧 나온다
-    const look_end = @min(b.len, off + 1024 * 1024);
-    if (find(b[off..look_end], "trailer", 0)) |t| {
+    if (find(b[off..], "trailer", 0)) |t| {
         var q = off + t + 7;
         while (q < b.len and isSpace(b[q])) q += 1;
         if (q + 1 < b.len and b[q] == '<' and b[q + 1] == '<') return q;
@@ -543,10 +554,44 @@ fn dictInt(b: []const u8, start: usize, end: usize, key: []const u8) ?u32 {
     return readUint(b, &p);
 }
 
+/// 쪽을 담는 자리. 모자라면 늘린다.
+///
+/// 쪽 수는 걷어 봐야 안다. 객체 수로 미리 어림잡았더니, 같은 쪽을 여러 번
+/// 가리키는 문서(/Kids 에 같은 객체가 500번)가 열여섯 쪽으로 잘렸다 — 쪽
+/// 하나가 객체 하나라는 가정이 그런 문서에서는 깨진다. 지금 자리를 잡아 둔
+/// 것이 이 표뿐이므로 뒤로 이어 붙이면 옮길 일 없이 늘어난다.
+var walk_at: usize = 0;
+var walk_cap: u32 = 0;
+var walk_ceil: u32 = 0;
+
+/// 걷어 담을 자리를 처음 잡는다. 천장은 파일 크기로 묶는다 — 고리처럼
+/// 얽힌 쪽 트리를 만나도 훑는 양이 파일 크기를 넘지 않게 한다.
+fn walkStart(total: usize) bool {
+    walk_ceil = @intCast(@max(@as(usize, 64), @min(total / 4 + 64, 1 << 22)));
+    walk_cap = 0;
+    walk_at = zoneAlloc(256 * 4) orelse return false;
+    walk_cap = 256;
+    return true;
+}
+
+fn walkPush(n: *u32, obj: u32) bool {
+    if (n.* >= walk_cap) {
+        if (walk_cap >= walk_ceil) { pages_cut = true; return false; }
+        // 두 배씩. 짝수로 잡아 다음 자리가 여덟 바이트에 맞게 둔다.
+        var want: u32 = @min(walk_ceil, walk_cap * 2);
+        want += want & 1;
+        if (want <= walk_cap) { pages_cut = true; return false; }
+        if (zoneAlloc(@as(usize, want - walk_cap) * 4) == null) { pages_cut = true; return false; }
+        walk_cap = want;
+    }
+    u32sAt(walk_at, walk_cap)[n.*] = obj;
+    n.* += 1;
+    return true;
+}
+
 /// Kids 배열에서 "N 0 R" 들을 걷어 페이지 객체를 모은다. 중첩 트리도 따라간다.
-fn collectPages(b: []const u8, obj: u32, depth: u32, dest: []u32, n: *u32) void {
-    if (depth > 16) return;
-    if (n.* >= dest.len) { pages_cut = true; return; }
+fn collectPages(b: []const u8, obj: u32, depth: u32, n: *u32) void {
+    if (depth > 16 or pages_cut) return;
     const body = findObj(b, obj) orelse return;
     // 객체 끝 = 다음 endobj
     const end = find(b, "endobj", body) orelse b.len;
@@ -554,8 +599,7 @@ fn collectPages(b: []const u8, obj: u32, depth: u32, dest: []u32, n: *u32) void 
         find(b[body..end], "/Page", 0) != null and
         find(b[body..end], "/Pages", 0) == null;
     if (is_page) {
-        dest[n.*] = obj;
-        n.* += 1;
+        _ = walkPush(n, obj);
         return;
     }
     const kids_at = find(b[body..end], "/Kids", 0) orelse return;
@@ -571,7 +615,7 @@ fn collectPages(b: []const u8, obj: u32, depth: u32, dest: []u32, n: *u32) void 
         _ = readUint(b, &p);
         while (p < end and isSpace(b[p])) p += 1;
         if (p < end and b[p] == 'R') p += 1;
-        collectPages(b, kid, depth + 1, dest, n);
+        collectPages(b, kid, depth + 1, n);
     }
 }
 
@@ -871,16 +915,11 @@ export fn parse(len: usize) u32 {
     // 넉넉히 잡아 채운 뒤 실제로 쓴 만큼으로 줄인다.
     zoneReset();
     pages_cut = false;
-    {
-        const by_obj: usize = @as(usize, max_obj) + 8;
-        const by_size: usize = total / 16 + 8;
-        const room = @max(@as(usize, 16), @min(@min(by_obj, by_size), 1 << 20));
-        pg_at = zoneAlloc(room * 4) orelse return 0;
-        pg_cap = @intCast(room);
-    }
+    if (!walkStart(total)) return 0;
     page_count = 0;
-    collectPages(b, pages_obj, 0, page_objs(), &page_count);
+    collectPages(b, pages_obj, 0, &page_count);
     // 쓴 만큼만 남기고 나머지 표를 그 뒤에 잇는다
+    pg_at = walk_at;
     pg_cap = page_count;
     zoneShrink(pg_at + @as(usize, page_count) * 4);
     {
@@ -893,6 +932,11 @@ export fn parse(len: usize) u32 {
         clearPageRotate();
         lbl_off_at = zoneAlloc(@as(usize, page_count) * 4 + 4) orelse return 0;
         lbl_len_at = zoneAlloc(@as(usize, page_count) + 4) orelse return 0;
+        // 0 으로 채운다. 예전에는 .bss 라 저절로 0 이었지만 지금은 앞 문서가
+        // 쓰던 자리를 물려받는다 — 라벨이 안 붙은 쪽에서 남의 자리·길이를
+        // 읽어 엉뚱한 글자를 내놓거나 아예 열다 죽었다.
+        @memset(u32sAt(lbl_off_at, page_count + 1), 0);
+        @memset(@as([*]u8, @ptrFromInt(lbl_len_at))[0 .. page_count + 4], 0);
         lbl_buf_cap = @max(@as(usize, 1024), @as(usize, page_count) * 16);
         lbl_buf_at = zoneAlloc(lbl_buf_cap) orelse return 0;
         label_n = 0;
@@ -942,6 +986,14 @@ fn outBuf() [*]u8 { return @ptrFromInt(out_off); }
 
 /// 출력 자리가 남았나. 넘겨 쓰면 wasm 이 통째로 죽는다 — 입력 칸을 천 개
 /// 채우면 실제로 그랬다.
+/// 출력에 그대로 옮겨 적는다. 자리가 모자라면 안 적고 false.
+fn outCopy(pos: *usize, src: []const u8) bool {
+    if (!outRoom(pos.*, src.len)) return false;
+    @memcpy(outBuf()[pos.*..][0..src.len], src);
+    pos.* += src.len;
+    return true;
+}
+
 fn outRoom(pos: usize, need: usize) bool {
     return pos + need + 64 <= out_cap;
 }
@@ -5315,6 +5367,9 @@ export fn clearNewFields() void {
 
 export fn addNewField(page: u32, kind: u32, x0: f32, y0: f32, x1: f32, y1: f32) u32 {
     if (newf_n >= MAX_NEWF) return 0;
+    // 없는 쪽에 달라고 하면 그냥 안 단다. 예전에는 쪽 표가 [4096] 고정이라
+    // 빈 자리(0)를 읽었지만, 지금은 그 뒤가 다른 표라 엉뚱한 번호를 집는다.
+    if (page >= page_count) return 0;
     const lo_x = @min(x0, x1);
     const hi_x = @max(x0, x1);
     const lo_y = @min(y0, y1);
@@ -11882,19 +11937,28 @@ export fn parseSecond(len: usize) u32 {
     // 둘째 문서의 쪽은 제 자리에 바로 담는다. 예전에는 page_objs 를 잠시
     // 빌려 쓰고 앞 64 개만 되돌렸다 — 첫 문서가 64 쪽을 넘으면 그 뒤가
     // 둘째 문서의 번호로 덮인 채 남았다.
-    {
-        const room = @max(@as(usize, 16), @min(b.len / 16 + 8, 1 << 20));
-        b2_at = zoneAlloc(room * 4) orelse return 0;
-        b2_cap_n = @intCast(room);
-    }
+    // 둘째 문서를 걷는 동안 첫 문서의 "잘렸다" 표시를 건드리지 않는다
+    const cut_keep = pages_cut;
+    const keep_at = walk_at;
+    const keep_cap = walk_cap;
+    const keep_ceil = walk_ceil;
+    if (!walkStart(b.len)) return 0;
     b2_page_n = 0;
-    collectPages(b, pgs, 0, b2_pages(), &b2_page_n);
+    collectPages(b, pgs, 0, &b2_page_n);
+    b2_at = walk_at;
     b2_cap_n = b2_page_n;
     zoneShrink(b2_at + @as(usize, b2_page_n) * 4);
+    pages_cut = cut_keep;
+    walk_at = keep_at;
+    walk_cap = keep_cap;
+    walk_ceil = keep_ceil;
     return if (b2_page_n > 0) 1 else 0;
 }
 
 export fn secondPageCount() u32 { return b2_page_n; }
+/// 지금 잡아 둔 출력 자리와 원본 길이 — 이어 붙이기 전에 모자란지 보라고 준다
+export fn outCapacity() usize { return out_cap; }
+export fn inputLen() usize { return in_len; }
 
 /// 숫자를 output 에 적는다.
 fn writeNum(pos: *usize, v: u32) void { appendNum(pos, v); }
@@ -11907,6 +11971,9 @@ export fn merge() usize {
     const b = b2Slice();
     const shift = 1000000; // A 의 번호와 겹치지 않게 넉넉히 민다
 
+    // 이어 붙이면 두 문서를 합친 만큼이 필요하다. 자리가 모자라면 여기서
+    // 접는다 — 예전에는 그냥 넘겨 썼고, 그 뒤에는 쪽 표가 있다.
+    if (!outRoom(in_len + b.len, 64 * 1024)) return 0;
     @memcpy(outBuf()[0..in_len], a[0..in_len]);
     var pos: usize = in_len;
     if (pos > 0 and outBuf()[pos - 1] != '\n') { outBuf()[pos] = '\n'; pos += 1; }
@@ -11962,25 +12029,23 @@ export fn merge() usize {
                 {
                     writeNum(&pos, n1 + shift);
                     appendStr(&pos, " ");
-                    @memcpy(outBuf()[pos..][0 .. r3 + 1 - gen_start], b[gen_start .. r3 + 1]);
-                    pos += r3 + 1 - gen_start;
+                    if (!outCopy(&pos, b[gen_start .. r3 + 1])) return 0;
                     q = r3 + 1;
                     continue;
                 }
                 // 참조가 아니면 그대로
-                @memcpy(outBuf()[pos..][0 .. r - q], b[q..r]);
-                pos += r - q;
+                if (!outCopy(&pos, b[q..r])) return 0;
                 q = r;
                 continue;
             }
+            if (!outRoom(pos, 1)) return 0;
             outBuf()[pos] = b[q];
             pos += 1;
             q += 1;
         }
         // 스트림 구간은 손대지 않는다
         if (dict_end < end) {
-            @memcpy(outBuf()[pos..][0 .. end - dict_end], b[dict_end..end]);
-            pos += end - dict_end;
+            if (!outCopy(&pos, b[dict_end..end])) return 0;
         }
         appendStr(&pos, "endobj\n");
     }
@@ -12039,8 +12104,7 @@ export fn merge() usize {
                     if (b[q] == '(') par += 1;
                     if (b[q] == ')') par -= 1;
                 }
-                @memcpy(outBuf()[pos..][0 .. q - st2], b[st2..q]);
-                pos += q - st2;
+                if (!outCopy(&pos, b[st2..q])) return 0;
                 continue;
             }
             if (b[q] == '<' and q + 1 < end and b[q + 1] == '<') {
@@ -12055,8 +12119,7 @@ export fn merge() usize {
                 q += 1;
                 while (q < end and b[q] != '>') q += 1;
                 if (q < end) q += 1;
-                @memcpy(outBuf()[pos..][0 .. q - st2], b[st2..q]);
-                pos += q - st2;
+                if (!outCopy(&pos, b[st2..q])) return 0;
                 continue;
             }
             if (b[q] == '>' and q + 1 < end and b[q + 1] == '>') {
@@ -12091,11 +12154,11 @@ export fn merge() usize {
                     q = r3 + 1;
                     continue;
                 }
-                @memcpy(outBuf()[pos..][0 .. r - q], b[q..r]);
-                pos += r - q;
+                if (!outCopy(&pos, b[q..r])) return 0;
                 q = r;
                 continue;
             }
+            if (!outRoom(pos, 1)) return 0;
             outBuf()[pos] = b[q];
             pos += 1;
             q += 1;

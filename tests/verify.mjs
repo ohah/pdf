@@ -294,6 +294,72 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   }
   ok('병합(170쪽): 쪽이 제자리', wrong === 0, `어긋난 쪽 ${wrong}개`);
 }
+// --- 같은 쪽을 여러 번 가리키는 문서 (쪽 수가 객체 수보다 많다)
+{
+  const mk = (n) => [
+    '%PDF-1.7',
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj',
+    `2 0 obj\n<< /Type /Pages /Count ${n} /Kids [${Array(n).fill('4 0 R').join(' ')}] >>\nendobj`,
+    '3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj',
+    '4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>\nendobj',
+    '5 0 obj\n<< /Length 44 >>\nstream\nBT /F1 12 Tf 20 100 Td (many) Tj ET\nendstream\nendobj',
+    'trailer\n<< /Size 6 /Root 1 0 R >>', '%%EOF', '',
+  ].join('\n');
+  fs.writeFileSync(`${S}/.rep.pdf`, mk(500));
+  const r = await load('.rep.pdf');
+  // 쪽 하나가 객체 하나라는 어림으로 자리를 잡으면 열여섯 쪽으로 잘렸다
+  ok('같은 쪽 500번: 다 센다', r && r.pages === 500, r && r.pages);
+  ok('같은 쪽 500번: 안 잘렸다고 한다', r && r.ex.pagesTruncated() === 0, r && r.ex.pagesTruncated());
+}
+// --- 앞 문서의 쪽 라벨이 다음 문서로 새지 않는다 (표를 안 비우던 버그)
+{
+  const withLabels = (pages, start) => [
+    '%PDF-1.7',
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R /PageLabels << /Nums [' +
+      `${start} << /S /D /P (X) >>` + '] >> >>\nendobj',
+    `2 0 obj\n<< /Type /Pages /Count ${pages} /Kids [${Array(pages).fill('4 0 R').join(' ')}] >>\nendobj`,
+    '3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj',
+    '4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>\nendobj',
+    '5 0 obj\n<< /Length 40 >>\nstream\nBT /F1 12 Tf 20 100 Td (lab) Tj ET\nendstream\nendobj',
+    'trailer\n<< /Size 6 /Root 1 0 R >>', '%%EOF', '',
+  ].join('\n');
+  const m = await WebAssembly.instantiate(wasm, { wasi_snapshot_preview1: new Proxy({}, { get: () => () => 0 }) });
+  const ex = m.instance.exports;
+  const feed = (txt) => {
+    const buf = Buffer.from(txt, 'latin1');
+    ex.reserve(buf.length, buf.length * 3 + 1048576);
+    new Uint8Array(ex.memory.buffer, ex.inputPtr(), buf.length).set(buf);
+    return ex.parse(buf.length);
+  };
+  // 두 문서의 길이를 똑같이 맞춘다 — 길이가 같아야 자리도 같아서, 표를
+  // 안 비웠을 때 앞 문서가 쓰던 값을 그대로 물려받는다.
+  const A = withLabels(223, 0);
+  let B = withLabels(223, 222);
+  while (B.length < A.length) B = B.replace('%%EOF', ' %%EOF');
+  feed(A);
+  const first = ex.pageLabelLen(10);
+  feed(B);
+  let leaked = 0;
+  for (let i = 0; i < 222; i++) if (ex.pageLabelLen(i) !== 0 || ex.pageLabelOff(i) !== 0) leaked++;
+  ok('쪽 라벨: 앞 문서 것이 안 남는다', first > 0 && leaked === 0, `앞 ${first} · 샌 쪽 ${leaked}`);
+}
+// --- 이어 붙일 자리가 모자라면 망가뜨리지 말고 접는다
+{
+  const m = await WebAssembly.instantiate(wasm, { wasi_snapshot_preview1: new Proxy({}, { get: () => () => 0 }) });
+  const ex = m.instance.exports;
+  const a = fs.readFileSync(`${S}/multi.pdf`);
+  const b2 = fs.readFileSync(`${S}/korean.pdf`);
+  // 출력 자리를 일부러 빠듯하게 잡는다
+  ex.reserve(a.length, a.length + 256);
+  new Uint8Array(ex.memory.buffer, ex.inputPtr(), a.length).set(a);
+  ex.parse(a.length);
+  const before = ex.pageCount();
+  new Uint8Array(ex.memory.buffer, ex.secondPtr(), b2.length).set(b2);
+  ex.parseSecond(b2.length);
+  const n = ex.merge();
+  ok('이어 붙이기: 자리 모자라면 0', n === 0, n);
+  ok('이어 붙이기: 실패해도 쪽 표가 성하다', ex.pageCount() === before, `${before}→${ex.pageCount()}`);
+}
 // --- 쪽 수 상한이 없다 (예전에는 4096 에서 조용히 잘렸다)
 {
   execFileSync(process.execPath, ['tests/mkbig.mjs', '4200', `${S}/.many.pdf`, '1']);

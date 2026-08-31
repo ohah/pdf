@@ -87,6 +87,8 @@ type Exports = {
   maxSecond: () => number;
   parseSecond: (len: number) => number;
   secondPageCount: () => number;
+  outCapacity: () => number;
+  inputLen: () => number;
   merge: () => number;
   clearWatermark: () => void;
   addWatermarkChar: (c: number) => void;
@@ -801,6 +803,17 @@ async function seal(bytes: Uint8Array, pw: string) {
 async function merge(bytes: Uint8Array) {
   const e = await engine();
   if (bytes.byteLength > e.maxSecond()) return null;
+  // 이어 붙인 결과는 두 문서를 합친 크기다. 열 때 잡아 둔 출력 자리는 첫
+  // 문서 기준이라 모자랄 수 있다 — 모자라면 자리를 다시 잡고 문서를 다시
+  // 읽는다. 원본 바이트는 아직 입력 자리에 그대로 있다.
+  const need = e.inputLen() + bytes.byteLength + 1024 * 1024;
+  if (e.outCapacity() < need) {
+    const src = new Uint8Array(e.memory.buffer, e.inputPtr(), e.inputLen()).slice();
+    if (!e.reserve(src.length, need)) return null;
+    new Uint8Array(e.memory.buffer, e.inputPtr(), src.length).set(src);
+    if (!e.parse(src.length)) return null;
+    await loadCmaps(e);
+  }
   new Uint8Array(e.memory.buffer, e.secondPtr(), bytes.byteLength).set(bytes);
   if (!e.parseSecond(bytes.byteLength)) return null;
   const n = e.merge();

@@ -121,19 +121,38 @@ const t = (name, cond, got) => {
   B.close();
 }
 
-// 쪽이 너무 많으면 잘랐다고 알린다 (같은 쪽을 백 번 가리키는 문서로 만든다)
+// 쪽이 너무 많으면 잘랐다고 알린다.
+//
+// 같은 쪽을 여러 번 가리키는 정도로는 안 잘린다(파일 크기로 천장을 잡으므로
+// 늘 넉넉하다). 잘리는 건 쪽 나무가 저를 다시 가리켜 쪽 수가 파일 크기와
+// 상관없이 불어나는 문서다 — 그런 것에 끝까지 매달리지 않으려는 천장이다.
 {
-  const one = [
-    "%PDF-1.7", "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj",
-    `2 0 obj\n<< /Type /Pages /Count 100 /Kids [${Array(100).fill("4 0 R").join(" ")}] >>\nendobj`,
-    "3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj",
-    "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>\nendobj",
-    "5 0 obj\n<< /Length 44 >>\nstream\nBT /F1 12 Tf 20 100 Td (many) Tj ET\nendstream\nendobj",
-    "trailer\n<< /Size 6 /Root 1 0 R >>", "%%EOF", "",
+  const kids = (n, ref) => Array(n).fill(`${ref} 0 R`).join(" ");
+  const bomb = [
+    "%PDF-1.7",
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj",
+    `2 0 obj\n<< /Type /Pages /Count 400 /Kids [${kids(20, 3)}] >>\nendobj`,
+    `3 0 obj\n<< /Type /Pages /Count 20 /Kids [${kids(20, 4)}] >>\nendobj`,
+    "4 0 obj\n<< /Type /Page /Parent 3 0 R /MediaBox [0 0 200 200] >>\nendobj",
+    "trailer\n<< /Size 5 /Root 1 0 R >>", "%%EOF", "",
   ].join("\n");
-  const many = await PDFDocument.open(new TextEncoder().encode(one));
+  const many = await PDFDocument.open(new TextEncoder().encode(bomb));
   t("쪽이 넘치면 알린다", many.truncated === true && many.pages > 0, `${many.pages}쪽 truncated=${many.truncated}`);
   many.close();
+}
+
+// 같은 쪽을 여러 번 가리키는 문서는 잘리지 않는다
+{
+  const rep = [
+    "%PDF-1.7",
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj",
+    `2 0 obj\n<< /Type /Pages /Count 300 /Kids [${Array(300).fill("4 0 R").join(" ")}] >>\nendobj`,
+    "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>\nendobj",
+    "trailer\n<< /Size 5 /Root 1 0 R >>", "%%EOF", "",
+  ].join("\n");
+  const d = await PDFDocument.open(new TextEncoder().encode(rep));
+  t("같은 쪽 300번: 다 센다", d.pages === 300 && d.truncated === false, `${d.pages}쪽 truncated=${d.truncated}`);
+  d.close();
 }
 
 // 캔버스를 주면 Node 에서도 그린다 (@napi-rs/canvas 가 있을 때만 본다)
