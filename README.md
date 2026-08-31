@@ -19,6 +19,16 @@ pdf.close();
 `pdf.wasm` 과 `cmaps/` 는 정적 파일이다. 꾸러미에서 꺼내 웹에서 받을 수 있는
 자리에 두고 그 주소를 `wasm`·`cmaps` 로 알려 준다.
 
+주소로 열면 받는 동안 진행률이 온다:
+
+```js
+const pdf = await PDFDocument.open("/big.pdf", {
+  wasm: "/pdf.wasm",
+  onProgress: ({ loaded, total }) => setBar(total ? loaded / total : 0),
+  signal: ac.signal,          // 그만두기
+});
+```
+
 ```bash
 cp node_modules/@ohah/pdf/dist/pdf.wasm public/
 cp -r node_modules/@ohah/pdf/cmaps public/
@@ -101,7 +111,7 @@ const { doc } = usePdf(file, { wasm: "/pdf.wasm" });
 
 | | |
 |---|---|
-| `PDFDocument.open(bytes, opts)` | 문서를 연다. 암호가 필요하면 `PasswordNeeded` 를 던진다 |
+| `PDFDocument.open(src, opts)` | 문서를 연다 — 바이트·`Blob`·`Response`·**주소** 모두. 암호가 필요하면 `PasswordNeeded` |
 | `pdf.pages` · `outline` · `info` · `layers` · `attachments` · `isXfa` · `locked` | 문서 정보 |
 | `pdf.permissions` | 인쇄·복사·고침 … 문서가 허락한 것들 (`/P`) |
 | `pdf.pageLabels` | 쪽 라벨 — 표지가 i, ii 이고 본문이 1부터인 문서 |

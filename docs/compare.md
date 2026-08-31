@@ -22,7 +22,7 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 | `data` · `password` | ✅ |
 | `cMapUrl` / `cMapPacked` | ✅ `paths.cmaps` |
 | `url` + `range`·`disableStream`·`disableAutoFetch` | ❌ 전체 바이트를 받아야 시작 |
-| `onProgress` | ❌ |
+| `onProgress` | ✅ `open(url, { onProgress, signal })` |
 | `standardFontDataUrl` (표준 14종 실제 글꼴) | ❌ 시스템 글꼴로 대체 — 자간이 원본과 다르다 |
 | `disableFontFace` · `useSystemFonts` · `fontExtraProperties` | ❌ (거절당하면 자동 대체) |
 | `maxImageSize` · `canvasMaxAreaInBytes` · `enableHWA` | ❌ 내부 고정 |
@@ -95,6 +95,6 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 
 이 표에서 ❌ 인 것 중 뷰어에 먼저 아쉬운 순서:
 
-1. 스트리밍/진행률 (큰 파일 첫 쪽을 빨리)
-2. 표준 14종 실제 글꼴 데이터 (자간 정확도)
-3. Node.js 실행 (캔버스 팩토리 교체)
+1. 표준 14종 실제 글꼴 데이터 (자간 정확도)
+2. Node.js 실행 (캔버스 팩토리 교체)
+3. range 요청으로 첫 쪽 먼저 (엔진의 색인 방식을 바꿔야 한다)

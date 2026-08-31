@@ -26,6 +26,74 @@ export { makeViewport, type Viewport } from "./viewport.js";
 export { toScreen, placeRect, type PageBox, type Placed } from "./place.js";
 export { PDFClient } from "./client.js";
 
+/**
+ * 무엇을 주든 바이트로 바꾼다. 주소면 받아 오면서 진행률을 알린다.
+ *
+ * pdf.js 는 range 요청으로 앞부분만 받아 첫 쪽을 먼저 그린다. 우리 엔진은
+ * 파일 전체로 객체 색인을 만들기 때문에 아직 그렇게 못 한다 — 대신 받는
+ * 동안 얼마나 왔는지 알려 주고, 중간에 그만둘 수 있게 한다.
+ */
+async function toBytes(src: Source, opts: OpenOpts): Promise<Uint8Array> {
+  if (src instanceof Uint8Array) return src;
+  if (src instanceof ArrayBuffer) return new Uint8Array(src);
+  if (typeof Blob !== "undefined" && src instanceof Blob) {
+    return new Uint8Array(await src.arrayBuffer());
+  }
+  const res = src instanceof Response
+    ? src
+    : await fetch(String(src), { signal: opts.signal });
+  if (!res.ok) throw new Error(`could not fetch the PDF (HTTP ${res.status})`);
+  const total = Number(res.headers.get("content-length") ?? 0);
+  const kind = res.headers.get("content-type") ?? "";
+  if (!res.body || !opts.onProgress) {
+    const buf = new Uint8Array(await res.arrayBuffer());
+    opts.onProgress?.({ loaded: buf.length, total: total || buf.length });
+    return sniff(buf, kind);
+  }
+  // 조각을 받을 때마다 알린다
+  const reader = res.body.getReader();
+  const parts: Uint8Array[] = [];
+  let loaded = 0;
+  for (;;) {
+    if (opts.signal?.aborted) {
+      await reader.cancel().catch(() => {});
+      throw new Error("loading was cancelled");
+    }
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+    loaded += value.length;
+    opts.onProgress({ loaded, total });
+  }
+  const out = new Uint8Array(loaded);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return sniff(out, kind);
+}
+
+/**
+ * 받아 온 것이 PDF 가 맞는지 살짝 본다.
+ *
+ * 주소를 잘못 적으면 서버가 404 대신 안내 쪽(HTML)을 200 으로 주는 일이
+ * 흔하다. 그걸 그대로 엔진에 넘기면 "PDF 를 읽지 못했습니다" 라는 엉뚱한
+ * 말이 나온다 — 무엇이 왔는지 알려 준다. 머리글이 없어도 살릴 수 있는
+ * 문서가 있으므로, HTML 이 분명할 때만 막는다.
+ */
+function sniff(buf: Uint8Array, kind: string): Uint8Array {
+  const head = new TextDecoder("latin1").decode(buf.subarray(0, 1024));
+  if (head.includes("%PDF")) return buf;
+  if (/html|xml|json|text\/plain/i.test(kind) || /^\s*<(!doctype|html)/i.test(head)) {
+    throw new Error(
+      `the server did not return a PDF (content-type: ${kind || "unknown"}). ` +
+      "check the URL",
+    );
+  }
+  return buf;
+}
+
 /** 구조 나무의 마디 하나 */
 export type StructNode = {
   /** Document·H1·P·Table … (/S). 뿌리는 "Root" */
@@ -42,7 +110,18 @@ export type StructNode = {
 export type OpenOpts = Paths & {
   /** 잠긴 문서의 암호. 틀리면 needPassword 가 선다. */
   password?: string;
+  /**
+   * 내려받는 동안 얼마나 왔는지 알려 준다. 주소로 열 때만 부른다.
+   *
+   * `total` 은 서버가 길이를 안 알려 주면 0 이다(그럴 때도 loaded 는 는다).
+   */
+  onProgress?: (p: { loaded: number; total: number }) => void;
+  /** 내려받기를 그만둔다 */
+  signal?: AbortSignal;
 };
+
+/** 열 수 있는 것들. 주소를 주면 받아 오면서 진행률을 알려 준다. */
+export type Source = Uint8Array | ArrayBuffer | Blob | Response | string | URL;
 
 export type RenderOpts = {
   /** 1 이면 PDF 자리 그대로(72dpi). 화면 밀도는 알아서 곱한다. */
@@ -194,8 +273,8 @@ export class PDFDocument {
    *
    * 암호가 틀리면 PasswordNeeded 를 던진다 — 받아서 다시 부르면 된다.
    */
-  static async open(bytes: Uint8Array | ArrayBuffer, opts: OpenOpts = {}) {
-    const raw = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  static async open(src: Source, opts: OpenOpts = {}) {
+    const raw = await toBytes(src, opts);
     const keep = raw.slice();
     const cl = new PDFClient(opts);
     const r = await cl.open(raw.slice(), opts.password ?? "");

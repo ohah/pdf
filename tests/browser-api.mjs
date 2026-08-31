@@ -207,6 +207,38 @@ const r = await p.evaluate(async (doc) => {
     nd.close();
   }
 
+  // 5.10) 주소로 열기 · 진행률 · 중단
+  {
+    const steps = [];
+    const ud = await PDFDocument.open('/fixtures/multi.pdf', {
+      wasm: '/pdf.wasm', cmaps: '/cmaps',
+      onProgress: (p) => steps.push(p),
+    });
+    ok('주소로 연다', ud.pages > 0, ud.pages);
+    ok('진행률을 알린다', steps.length > 0 && steps[steps.length - 1].loaded > 0, steps.length);
+    // 서버가 길이를 안 알려 주면 total 은 0 이다 — 그때도 loaded 는 는다
+    ok('받은 만큼이 는다', steps[steps.length - 1].loaded >= steps[0].loaded, steps[steps.length - 1]);
+    ud.close();
+
+    // Blob·Response 도 받는다
+    const blob = await (await fetch('/fixtures/korean.pdf')).blob();
+    const bd = await PDFDocument.open(blob, { wasm: '/pdf.wasm', cmaps: '/cmaps' });
+    ok('Blob 도 연다', bd.pages === 1, bd.pages);
+    bd.close();
+
+    // 이미 끊긴 신호면 받지 않는다
+    const ac = new AbortController();
+    ac.abort();
+    const e = await PDFDocument.open('/fixtures/korean.pdf', { wasm: '/pdf.wasm', cmaps: '/cmaps', signal: ac.signal })
+      .then(() => null, (x) => x);
+    ok('중단하면 오류', e !== null, e && String(e).slice(0, 40));
+
+    // 없는 주소는 또렷한 오류
+    const e2 = await PDFDocument.open('/fixtures/없는파일.pdf', { wasm: '/pdf.wasm', cmaps: '/cmaps' })
+      .then(() => null, (x) => String(x));
+    ok('PDF 가 아니면 그렇다고 한다', typeof e2 === 'string' && /HTTP|did not return a PDF/i.test(e2), e2);
+  }
+
   // 6) data()
   {
     const d1 = pdf.data(); d1[0] = 0;
