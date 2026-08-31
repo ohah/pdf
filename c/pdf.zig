@@ -244,11 +244,23 @@ fn trailerKey(b: []const u8, key: []const u8) ?usize {
         if (seen > 32) break; // 갱신이 끝없이 얽힌 파일에서 멈추기 위한 것
         at = prevTrailer(b, ts, te);
     }
-    if (at == null and seen == 0) {
-        // trailer 를 못 잡았다 — 옛 방식으로
+    if (seen == 0) {
+        // trailer 를 못 잡았다 — 옛 방식으로 통째로 훑는다
         return rfind(b, key, b.len - 1);
     }
     return null;
+}
+
+/// trailer 에 없으면 파일 전체에서 한 번 더 찾는다.
+///
+/// /Root 처럼 없으면 문서를 못 여는 키에 쓴다. 멀쩡한 문서는 trailer 에
+/// 반드시 있으므로 이 되돌아가는 길은 거의 밟히지 않는다 — 망가진 문서만
+/// 예전처럼 훑어 살려 낸다. /Encrypt·/Info·/ID 는 trailer 에 없으면 정말
+/// 없는 것이므로 여기 쓰지 않는다(그게 34MB 를 훑던 값이었다).
+fn trailerKeyOrScan(b: []const u8, key: []const u8) ?usize {
+    if (trailerKey(b, key)) |at| return at;
+    if (b.len == 0) return null;
+    return rfind(b, key, b.len - 1);
 }
 
 /// 파일 끝의 trailer 딕셔너리가 시작하는 자리.
@@ -285,7 +297,26 @@ fn dictEndFrom(b: []const u8, ds: usize) usize {
     var depth: u32 = 0;
     var r = ds;
     while (r + 1 < b.len) : (r += 1) {
+        // 글자열 안의 부등호는 구조가 아니다 — /Title (a >> b) 같은 것
+        if (b[r] == '(') {
+            var par: u32 = 1;
+            r += 1;
+            while (r < b.len and par > 0) : (r += 1) {
+                if (b[r] == '\\') { r += 1; continue; }
+                if (b[r] == '(') par += 1;
+                if (b[r] == ')') par -= 1;
+            }
+            if (r == 0) return b.len;
+            r -= 1; // for 의 증가분을 되돌린다
+            continue;
+        }
         if (b[r] == '<' and b[r + 1] == '<') { depth += 1; r += 1; continue; }
+        if (b[r] == '<') {
+            // 16진 글자열 <AB12>
+            r += 1;
+            while (r < b.len and b[r] != '>') r += 1;
+            continue;
+        }
         if (b[r] == '>' and b[r + 1] == '>') {
             if (depth > 0) depth -= 1;
             r += 1;
@@ -695,7 +726,7 @@ export fn parse(len: usize) u32 {
 
     // trailer 나 Catalog 에서 /Root 를 찾는다
     var root: u32 = 0;
-    if (trailerKey(b[0..total], "/Root")) |at| {
+    if (trailerKeyOrScan(b[0..total], "/Root")) |at| {
         var p = at + 5;
         root = readUint(b, &p);
     }
@@ -2554,7 +2585,7 @@ export fn apply() usize {
         prev = readUint(b, &p);
     }
     var root: u32 = 0;
-    if (trailerKey(b, "/Root")) |at| {
+    if (trailerKeyOrScan(b, "/Root")) |at| {
         var p = at + 5;
         root = readUint(b, &p);
     }
@@ -7141,7 +7172,7 @@ export fn permissions() i32 { return doc_perm; }
 
 /// 카탈로그(/Root) 딕셔너리 자리.
 fn catalogRange(b: []const u8) ?struct { s: usize, e: usize } {
-    const at = trailerKey(b, "/Root") orelse return null;
+    const at = trailerKeyOrScan(b, "/Root") orelse return null;
     var p2 = at + 5;
     while (p2 < b.len and isSpace(b[p2])) p2 += 1;
     if (p2 >= b.len or !isDigit(b[p2])) return null;
@@ -11804,7 +11835,7 @@ export fn parseSecond(len: usize) u32 {
 
     // 페이지 트리
     var root: u32 = 0;
-    if (trailerKey(b, "/Root")) |at| {
+    if (trailerKeyOrScan(b, "/Root")) |at| {
         var p = at + 5;
         root = readUint(b, &p);
     }
@@ -12574,7 +12605,7 @@ export fn compact() usize {
     if (pages_obj < reach.len) reach[pages_obj] = true;
 
     var root: u32 = 0;
-    if (trailerKey(b, "/Root")) |at| {
+    if (trailerKeyOrScan(b, "/Root")) |at| {
         var p = at + 5;
         root = readUint(b, &p);
     }
