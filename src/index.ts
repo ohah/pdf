@@ -138,7 +138,11 @@ export class PDFDocument {
     }
     if (r.err || !r.pages) {
       cl.close();
-      throw new Error(r.err === "큼" ? "파일이 너무 큽니다" : "PDF 를 읽지 못했습니다");
+      throw new Error(
+        r.err === "too-large" ? "the file is too large"
+        : r.err === "no-memory" ? "could not reserve memory"
+        : "could not read the PDF",
+      );
     }
     return new PDFDocument(cl, r, keep);
   }
@@ -252,7 +256,7 @@ export class PDFDocument {
       try {
         out.push({ ...one, ...(await checkSignature(this.raw, g.der, g.range, g.covers)) });
       } catch {
-        out.push({ ...one, ...({ ok: false, note: "확인하지 못했습니다" } as SigCheck) });
+        out.push({ ...one, ...({ ok: false, note: "could not be checked" } as SigCheck) });
       }
     }
     return out;
@@ -316,7 +320,7 @@ export function safeUrl(uri: string): string | null {
 /** 렌더를 그만뒀다. `signal` 로 끊었거나 `renderTask().cancel()` 을 불렀을 때다. */
 export class RenderCancelled extends Error {
   constructor() {
-    super("렌더를 그만뒀습니다");
+    super("rendering was cancelled");
     this.name = "RenderCancelled";
   }
 }
@@ -328,7 +332,7 @@ function stopIfAborted(signal?: AbortSignal) {
 /** 암호가 있어야 열리는 문서다. 암호를 받아 다시 open 을 부른다. */
 export class PasswordNeeded extends Error {
   constructor() {
-    super("암호가 필요합니다");
+    super("a password is required");
     this.name = "PasswordNeeded";
   }
 }

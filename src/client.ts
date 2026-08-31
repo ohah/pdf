@@ -68,7 +68,7 @@ export class PDFClient {
     };
     this.tellPaths(paths);
     this.w.onerror = (ev) => {
-      for (const [, slot] of this.waiting) slot.no(new Error(String(ev.message ?? "워커 오류")));
+      for (const [, slot] of this.waiting) slot.no(new Error(String(ev.message ?? "worker error")));
       this.waiting.clear();
     };
   }
@@ -84,7 +84,7 @@ export class PDFClient {
   private call<T>(t: string, a: unknown, move: Transferable[] = []): Promise<T> {
     // 닫힌 뒤에 부르면 워커가 없어 대답이 영영 안 온다. 그대로 두면 부르는
     // 쪽 await 가 매달린다 — 바로 알려 준다.
-    if (this.gone) return Promise.reject(new Error("문서를 이미 닫았습니다"));
+    if (this.gone) return Promise.reject(new Error("the document is already closed"));
     const id = ++this.seq;
     return new Promise<T>((ok, no) => {
       this.waiting.set(id, { ok: ok as (v: unknown) => void, no });
@@ -96,7 +96,7 @@ export class PDFClient {
     if (this.gone) return;
     this.gone = true;
     // 답을 기다리던 것들도 함께 끊는다
-    for (const [, slot] of this.waiting) slot.no(new Error("문서를 닫았습니다"));
+    for (const [, slot] of this.waiting) slot.no(new Error("the document was closed"));
     this.waiting.clear();
     this.w.terminate();
   }

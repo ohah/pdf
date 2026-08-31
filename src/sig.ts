@@ -161,29 +161,29 @@ export async function checkSignature(
   const fail = (why: string) => { out.note = why; return out; };
 
   // 서명 대상 바이트 — 구멍 앞뒤를 이어 붙인다
-  if (range.length < 4) return fail("바이트 범위가 없습니다");
+  if (range.length < 4) return fail("no byte range");
   const [a, la, c, lc] = range;
-  if (a + la > file.length || c + lc > file.length) return fail("바이트 범위가 파일 밖을 가리킵니다");
+  if (a + la > file.length || c + lc > file.length) return fail("the byte range points outside the file");
   const signed = new Uint8Array(la + lc);
   signed.set(file.subarray(a, a + la), 0);
   signed.set(file.subarray(c, c + lc), la);
 
   // PKCS#7 뜯기
   const root = tlv(der, 0);
-  if (!root) return fail("뭉치를 읽지 못했습니다");
+  if (!root) return fail("could not parse the PKCS#7 blob");
   const rk = kids(der, root);
   const wrap = rk.find((k) => k.tag === 0xa0);
-  if (!wrap) return fail("SignedData 가 없습니다");
+  if (!wrap) return fail("no SignedData");
   const sd = tlv(der, wrap.start);
-  if (!sd) return fail("SignedData 가 깨졌습니다");
+  if (!sd) return fail("malformed SignedData");
   const sdk = kids(der, sd);
   const certsBag = sdk.find((k) => k.tag === 0xa0);
   // SignedData 안의 SET 은 둘이다 — 앞의 것은 요약 알고리즘 목록,
   // 마지막 것이 서명자 정보다.
   const siSet = sdk.filter((k) => k.tag === 0x31).pop();
-  if (!siSet) return fail("서명자 정보가 없습니다");
+  if (!siSet) return fail("no SignerInfo");
   const si = kids(der, siSet)[0];
-  if (!si) return fail("서명자 정보가 비었습니다");
+  if (!si) return fail("empty SignerInfo");
   const sik = kids(der, si);
 
   // [version, sid, digestAlgorithm, (A0 signedAttrs), sigAlgorithm, signature, (A1)]
@@ -192,13 +192,13 @@ export async function checkSignature(
   const hashName = HASH[digOid];
   // 모르는 알고리즘을 SHA-256 으로 치면, 멀쩡한 서명이 "고쳐졌습니다" 로 나온다.
   // 모르면 모른다고 한다.
-  if (!hashName) return fail(`모르는 요약 알고리즘입니다 (${digOid})`);
+  if (!hashName) return fail(`unknown digest algorithm (${digOid})`);
   out.hash = hashName;
   const attrs = sik.find((k) => k.tag === 0xa0);
   const after = sik.filter((k) => k.start > (attrs ?? digAlg).end);
   const sigAlgSeq = after.find((k) => k.tag === 0x30);
   const sigVal = after.find((k) => k.tag === 0x04);
-  if (!sigAlgSeq || !sigVal) return fail("서명 값이 없습니다");
+  if (!sigAlgSeq || !sigVal) return fail("no signature value");
   const sigOid = oid(der, kids(der, sigAlgSeq)[0]);
 
   // 요약값 맞대기
@@ -212,7 +212,7 @@ export async function checkSignature(
       const v = kids(der, kk[1])[0];
       if (v) found = der.subarray(v.start, v.end);
     }
-    if (!found) return fail("요약값 항목이 없습니다");
+    if (!found) return fail("no messageDigest attribute");
     out.digestOk = same(dig, found);
     // 서명은 서명 속성 뭉치에 대해 만든다. 담길 때는 [0] 이지만 서명할
     // 때는 SET(0x31) 꼴이라, 첫 바이트만 바꿔 다시 만든다.
@@ -230,7 +230,7 @@ export async function checkSignature(
   if (certsBag) {
     // 인증서 뭉치는 SET 이라 차례가 정해져 있지 않다. 앞의 것을 그냥 집으면
     // 체인을 CA 부터 담는 도구(BouncyCastle 등)에서 CA 의 열쇠로 맞춰 보다
-    // "서명이 인증서와 맞지 않습니다" 가 나온다. SignerIdentifier 가 가리키는
+    // "the signature does not match the certificate" 가 나온다. SignerIdentifier 가 가리키는
     // 것을 골라야 한다 — issuerAndSerialNumber 면 발급자+일련번호로 맞댄다.
     const cert = pickSigner(der, kids(der, certsBag), sik[1]);
     if (cert) {
@@ -260,7 +260,7 @@ export async function checkSignature(
       }
     }
   }
-  if (!spki) return fail("인증서를 찾지 못했습니다");
+  if (!spki) return fail("no certificate found");
 
   // 서명 맞추기
   try {
@@ -269,7 +269,7 @@ export async function checkSignature(
       out.algo = `ECDSA ${curve || "?"}`;
       const size = curve === "P-384" ? 48 : curve === "P-521" ? 66 : 32;
       const raw = ecdsaRaw(der, val, size);
-      if (!raw) return fail("ECDSA 서명 값을 읽지 못했습니다");
+      if (!raw) return fail("could not read the ECDSA signature");
       const key = await crypto.subtle.importKey("spki", spki as BufferSource,
         { name: "ECDSA", namedCurve: curve || "P-256" }, false, ["verify"]);
       out.cryptoOk = await crypto.subtle.verify({ name: "ECDSA", hash: hashName }, key,
@@ -289,14 +289,14 @@ export async function checkSignature(
         val as BufferSource, toVerify as BufferSource);
     }
   } catch (e) {
-    return fail(`확인하지 못했습니다: ${String(e)}`);
+    return fail(`could not verify: ${String(e)}`);
   }
 
   out.ok = out.digestOk && out.cryptoOk && out.covers;
-  if (!out.digestOk) out.note = "서명한 뒤 내용이 바뀌었습니다";
-  else if (!out.cryptoOk) out.note = "서명이 인증서와 맞지 않습니다";
-  else if (!out.covers) out.note = "서명 뒤에 덧붙은 고침이 있습니다";
-  else out.note = "서명한 그대로입니다";
+  if (!out.digestOk) out.note = "the content changed after signing";
+  else if (!out.cryptoOk) out.note = "the signature does not match the certificate";
+  else if (!out.covers) out.note = "there are changes appended after the signature";
+  else out.note = "unchanged since signing";
   return out;
 }
 

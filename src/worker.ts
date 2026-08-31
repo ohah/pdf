@@ -293,8 +293,8 @@ function chars(e: Exports, s: string, put: (c: number) => void) {
 
 async function open(bytes: Uint8Array, pw: string) {
   const e = await engine();
-  if (bytes.byteLength > e.maxInput()) return { err: "큼", max: e.maxInput() };
-  if (!e.reserve(bytes.byteLength, bytes.byteLength + 1024 * 1024)) return { err: "메모리" };
+  if (bytes.byteLength > e.maxInput()) return { err: "too-large", max: e.maxInput() };
+  if (!e.reserve(bytes.byteLength, bytes.byteLength + 1024 * 1024)) return { err: "no-memory" };
   new Uint8Array(e.memory.buffer, e.inputPtr(), bytes.byteLength).set(bytes);
   e.clearPassword?.();
   chars(e, pw, (c) => e.addPasswordChar?.(c));
