@@ -79,6 +79,12 @@ export type OpenMsg = {
   lang?: string;
   /** 쪽 라벨(i, ii, A-1 …). 없으면 빈 배열 */
   labels?: string[];
+  /** 이름 목적지 — 목차·링크가 이름으로 가리키는 자리 */
+  dests?: { name: string; page: number }[];
+  /** 뷰어 설정 (/ViewerPreferences) */
+  prefs?: Record<string, string>;
+  /** XMP 메타데이터 원문 (RDF/XML). 없으면 빈 문자열 */
+  xmp?: string;
   sigs?: {
     name: string; date: string; reason: string; sub: string;
     der: Uint8Array; range: number[]; covers: boolean;

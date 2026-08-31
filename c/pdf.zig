@@ -640,6 +640,9 @@ export fn parse(len: usize) u32 {
     if (root != 0) collectOutline(b, root);
     collectInfo(b);
     collectMeta(b);
+    collectDests(b);
+    collectViewPrefs(b);
+    collectXmp(b);
     collectLabels(b);
     return if (page_count > 0) 1 else 0;
 }
@@ -7420,6 +7423,268 @@ fn walkNameAt(b: []const u8, ob: usize, oe: usize, name: []const u8, depth: u8) 
 }
 
 /// "(이름) 값" 이 늘어선 자리에서 이름을 찾아 그 값의 쪽을 준다.
+// ===== 이름 목적지 · 뷰어 설정 · XMP =====
+//
+// 목차와 링크가 "3쪽" 대신 이름으로 가리키는 문서가 흔하다. 이름을 물어보면
+// 풀어 주는 길은 있었는데(destByName) 목록을 통째로 내어 주는 길이 없었다.
+var dest_buf: [8192]u8 = undefined;
+var dest_off: [256]u32 = undefined;
+var dest_len: [256]u8 = undefined;
+var dest_page: [256]i32 = undefined;
+var dest_n: u32 = 0;
+var dest_used: u32 = 0;
+
+export fn destCount() u32 { return dest_n; }
+export fn destNameOff(i: u32) u32 { return if (i < dest_n) dest_off[i] else 0; }
+export fn destNameLen(i: u32) u32 { return if (i < dest_n) dest_len[i] else 0; }
+export fn destPageOf(i: u32) i32 { return if (i < dest_n) dest_page[i] else -1; }
+export fn destTextPtr() [*]u8 { return &dest_buf; }
+
+fn addDest(name: []const u8, page: i32) void {
+    if (dest_n >= dest_off.len or name.len == 0 or name.len > 255) return;
+    if (dest_used + name.len > dest_buf.len) return;
+    dest_off[dest_n] = dest_used;
+    dest_len[dest_n] = @intCast(name.len);
+    dest_page[dest_n] = page;
+    @memcpy(dest_buf[dest_used..][0..name.len], name);
+    dest_used += @intCast(name.len);
+    dest_n += 1;
+}
+
+/// `(이름) [3 0 R /XYZ …]` 쌍을 죽 훑어 담는다. 이름 나무의 /Names 배열과
+/// 옛 /Dests 사전이 같은 모양이라 한 함수로 본다.
+fn scanDestPairs(b: []const u8, from: usize, to: usize) void {
+    var p = from;
+    var guard: u32 = 0;
+    while (p < to and guard < 4096 and dest_n < dest_off.len) : (guard += 1) {
+        while (p < to and b[p] != '(' and b[p] != '/') p += 1;
+        if (p >= to) break;
+        var key: [128]u8 = undefined;
+        var kn: u32 = 0;
+        if (b[p] == '(') {
+            p += 1;
+            while (p < to and b[p] != ')' and kn < key.len) : (p += 1) {
+                if (b[p] == '\\' and p + 1 < to) p += 1;
+                key[kn] = b[p];
+                kn += 1;
+            }
+            p += 1;
+        } else {
+            p += 1;
+            while (p < to and !isSpace(b[p]) and b[p] != '/' and b[p] != '(' and
+                b[p] != '[' and b[p] != '<' and kn < key.len) : (p += 1)
+            {
+                key[kn] = b[p];
+                kn += 1;
+            }
+        }
+        if (kn == 0) continue;
+        // 나무 자체의 낱말은 목적지 이름이 아니다
+        if (txEq(key[0..kn], "Names") or txEq(key[0..kn], "Kids") or txEq(key[0..kn], "Limits")) continue;
+        var page: i32 = -1;
+        while (p < to and isSpace(b[p])) p += 1;
+        if (p < to and b[p] == '[') {
+            page = destArray(b, p, to);
+            p = arrayEnd(b, p, to);
+        } else if (p < to and b[p] == '<') {
+            const de = dictEnd(b, p, to);
+            if (find(b[p..de], "/D", 0)) |dd| {
+                var q = p + dd + 2;
+                while (q < de and isSpace(b[q])) q += 1;
+                if (q < de and b[q] == '[') page = destArray(b, q, de);
+            }
+            p = de;
+        } else if (p < to and isDigit(b[p])) {
+            const n = readUint(b, &p);
+            if (findObj(b, n)) |ob| {
+                const oe = objDictEnd(b, ob);
+                var q = ob;
+                while (q < oe and isSpace(b[q])) q += 1;
+                if (q < oe and b[q] == '[') {
+                    page = destArray(b, q, oe);
+                } else if (find(b[ob..oe], "/D", 0)) |dd| {
+                    var q2 = ob + dd + 2;
+                    while (q2 < oe and isSpace(b[q2])) q2 += 1;
+                    if (q2 < oe and b[q2] == '[') page = destArray(b, q2, oe);
+                }
+            }
+            // "3 0 R" 의 나머지를 건너뛴다
+            while (p < to and isSpace(b[p])) p += 1;
+            if (p < to and isDigit(b[p])) _ = readUint(b, &p);
+            while (p < to and isSpace(b[p])) p += 1;
+            if (p < to and b[p] == 'R') p += 1;
+        } else continue;
+        addDest(key[0..kn], page);
+    }
+}
+
+fn walkDestTree(b: []const u8, ob: usize, oe: usize, depth: u8) void {
+    if (depth > 8) return;
+    if (find(b[ob..oe], "/Names", 0)) |na| {
+        var q = ob + na + 6;
+        while (q < oe and b[q] != '[') q += 1;
+        if (q < oe) scanDestPairs(b, q + 1, arrayEnd(b, q, oe));
+    }
+    if (find(b[ob..oe], "/Kids", 0)) |ka| {
+        var q = ob + ka + 5;
+        while (q < oe and b[q] != '[') q += 1;
+        const end = arrayEnd(b, q, oe);
+        q += 1;
+        var guard: u32 = 0;
+        while (q < end and guard < 256) : (guard += 1) {
+            while (q < end and isSpace(b[q])) q += 1;
+            if (q >= end or !isDigit(b[q])) break;
+            const kid = readUint(b, &q);
+            while (q < end and isSpace(b[q])) q += 1;
+            if (q < end and isDigit(b[q])) _ = readUint(b, &q);
+            while (q < end and isSpace(b[q])) q += 1;
+            if (q < end and b[q] == 'R') q += 1;
+            if (findObj(b, kid)) |kb| walkDestTree(b, kb, objDictEnd(b, kb), depth + 1);
+        }
+    }
+}
+
+fn collectDests(b: []const u8) void {
+    dest_n = 0;
+    dest_used = 0;
+    const cat = catalogRange(b) orelse return;
+    // 요즘 방식(/Names 이름 나무)을 **먼저** 본다. 카탈로그 안의 /Dests 는
+    // 그 나무를 가리키는 것일 수도 있어(/Names << /Dests 7 0 R >>), 옛 방식으로
+    // 잘못 읽으면 "Names" 같은 낱말이 목적지로 섞여 들어온다.
+    if (keyPos(b, cat.s, cat.e, "/Names")) |na| {
+        var q = na + 6;
+        while (q < cat.e and isSpace(b[q])) q += 1;
+        var ns = q;
+        var ne = cat.e;
+        if (q < cat.e and isDigit(b[q])) {
+            const n = readUint(b, &q);
+            if (findObj(b, n)) |ob| { ns = ob; ne = objDictEnd(b, ob); }
+        }
+        if (keyPos(b, ns, ne, "/Dests")) |dd| {
+            var q2 = dd + 6;
+            while (q2 < ne and isSpace(b[q2])) q2 += 1;
+            if (q2 < ne and isDigit(b[q2])) {
+                const n2 = readUint(b, &q2);
+                if (findObj(b, n2)) |ob2| walkDestTree(b, ob2, objDictEnd(b, ob2), 0);
+            } else if (q2 < ne and b[q2] == '<') {
+                walkDestTree(b, q2, dictEnd(b, q2, ne), 0);
+            }
+        }
+    }
+    if (dest_n > 0) return;
+    // 옛 방식 — /Dests 사전을 그대로 둔다
+    if (keyPos(b, cat.s, cat.e, "/Dests")) |da| {
+        var q = da + 6;
+        while (q < cat.e and isSpace(b[q])) q += 1;
+        if (q < cat.e and isDigit(b[q])) {
+            const n = readUint(b, &q);
+            if (findObj(b, n)) |ob| scanDestPairs(b, ob, objDictEnd(b, ob));
+        } else if (q < cat.e and b[q] == '<') {
+            scanDestPairs(b, q, dictEnd(b, q, cat.e));
+        }
+    }
+}
+
+// 뷰어 설정 — 도구줄을 감출지, 제목을 창에 띄울지 같은 것.
+var vp_buf: [1024]u8 = undefined;
+var vp_koff: [24]u32 = undefined;
+var vp_klen: [24]u8 = undefined;
+var vp_voff: [24]u32 = undefined;
+var vp_vlen: [24]u8 = undefined;
+var vp_n: u32 = 0;
+
+export fn viewPrefCount() u32 { return vp_n; }
+export fn viewPrefKeyOff(i: u32) u32 { return if (i < vp_n) vp_koff[i] else 0; }
+export fn viewPrefKeyLen(i: u32) u32 { return if (i < vp_n) vp_klen[i] else 0; }
+export fn viewPrefValOff(i: u32) u32 { return if (i < vp_n) vp_voff[i] else 0; }
+export fn viewPrefValLen(i: u32) u32 { return if (i < vp_n) vp_vlen[i] else 0; }
+export fn viewPrefTextPtr() [*]u8 { return &vp_buf; }
+
+fn collectViewPrefs(b: []const u8) void {
+    vp_n = 0;
+    var used: u32 = 0;
+    const cat = catalogRange(b) orelse return;
+    const va = keyPos(b, cat.s, cat.e, "/ViewerPreferences") orelse return;
+    var q = va + 18;
+    while (q < cat.e and isSpace(b[q])) q += 1;
+    var vs = q;
+    var ve = cat.e;
+    if (q < cat.e and isDigit(b[q])) {
+        const n = readUint(b, &q);
+        if (findObj(b, n)) |ob| { vs = ob; ve = objDictEnd(b, ob); }
+    } else if (q < cat.e and b[q] == '<') {
+        vs = q;
+        ve = dictEnd(b, q, cat.e);
+    } else return;
+
+    var p = vs;
+    while (p < ve and vp_n < vp_koff.len) {
+        while (p < ve and b[p] != '/') p += 1;
+        if (p >= ve) break;
+        p += 1;
+        var key: [32]u8 = undefined;
+        var kn: u32 = 0;
+        while (p < ve and !isSpace(b[p]) and b[p] != '/' and b[p] != '>' and b[p] != '[' and kn < key.len) : (p += 1) {
+            key[kn] = b[p];
+            kn += 1;
+        }
+        if (kn == 0) continue;
+        while (p < ve and isSpace(b[p])) p += 1;
+        var val: [48]u8 = undefined;
+        var vn: u32 = 0;
+        if (p < ve and b[p] == '/') {
+            p += 1;
+            while (p < ve and !isSpace(b[p]) and b[p] != '/' and b[p] != '>' and vn < val.len) : (p += 1) {
+                val[vn] = b[p];
+                vn += 1;
+            }
+        } else if (p < ve and b[p] == '[') {
+            // 배열은 그대로 옮긴다 (/PrintPageRange 등)
+            const ae = arrayEnd(b, p, ve);
+            while (p <= ae and vn < val.len) : (p += 1) { val[vn] = b[p]; vn += 1; }
+        } else {
+            while (p < ve and !isSpace(b[p]) and b[p] != '/' and b[p] != '>' and vn < val.len) : (p += 1) {
+                val[vn] = b[p];
+                vn += 1;
+            }
+        }
+        if (vn == 0 or used + kn + vn > vp_buf.len) continue;
+        vp_koff[vp_n] = used;
+        vp_klen[vp_n] = @intCast(kn);
+        @memcpy(vp_buf[used..][0..kn], key[0..kn]);
+        used += kn;
+        vp_voff[vp_n] = used;
+        vp_vlen[vp_n] = @intCast(vn);
+        @memcpy(vp_buf[used..][0..vn], val[0..vn]);
+        used += vn;
+        vp_n += 1;
+    }
+}
+
+// XMP — 요즘 문서는 제목·지은이를 여기에도 적는다(RDF/XML 덩어리).
+// 통째로 내어 주고 뜯는 것은 쓰는 쪽에 맡긴다.
+var xmp_n: u32 = 0;
+var xmp_at: u32 = 0;
+export fn xmpLen() u32 { return xmp_n; }
+export fn xmpPtr() [*]const u8 {
+    return @as([*]const u8, @ptrFromInt(xmp_at));
+}
+
+fn collectXmp(b: []const u8) void {
+    xmp_n = 0;
+    xmp_at = 0;
+    const cat = catalogRange(b) orelse return;
+    const ma = keyPos(b, cat.s, cat.e, "/Metadata") orelse return;
+    var q = ma + 9;
+    while (q < cat.e and isSpace(b[q])) q += 1;
+    if (q >= cat.e or !isDigit(b[q])) return;
+    const num = readUint(b, &q);
+    const data = streamOf(b, num) orelse return;
+    if (data.len == 0) return;
+    xmp_at = @intFromPtr(data.ptr);
+    xmp_n = @intCast(data.len);
+}
+
 fn findKeyDest(b: []const u8, from: usize, to: usize, name: []const u8) ?i32 {
     var p = from;
     var guard: u32 = 0;

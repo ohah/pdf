@@ -116,6 +116,19 @@ type Exports = {
   setWatermarkMask?: (w: number, h: number, len: number, pw: number, ph: number) => number;
   isXfa?: () => number;
   permissions?: () => number;
+  destCount?: () => number;
+  destNameOff?: (i: number) => number;
+  destNameLen?: (i: number) => number;
+  destPageOf?: (i: number) => number;
+  destTextPtr?: () => number;
+  viewPrefCount?: () => number;
+  viewPrefKeyOff?: (i: number) => number;
+  viewPrefKeyLen?: (i: number) => number;
+  viewPrefValOff?: (i: number) => number;
+  viewPrefValLen?: (i: number) => number;
+  viewPrefTextPtr?: () => number;
+  xmpLen?: () => number;
+  xmpPtr?: () => number;
   annCount?: () => number;
   annObj?: (i: number) => number;
   annFlags?: (i: number) => number;
@@ -387,7 +400,33 @@ async function open(bytes: Uint8Array, pw: string) {
       ? dec.decode(new Uint8Array(e.memory.buffer, e.pageLabelPtr!() + e.pageLabelOff!(i), n))
       : "");
   }
+  // 이름 목적지 — 목차·링크가 "3쪽" 대신 이름으로 가리키는 문서용
+  const dests: { name: string; page: number }[] = [];
+  for (let i = 0; i < (e.destCount?.() ?? 0); i++) {
+    const n = e.destNameLen!(i);
+    dests.push({
+      name: n > 0
+        ? dec.decode(new Uint8Array(e.memory.buffer, e.destTextPtr!() + e.destNameOff!(i), n))
+        : "",
+      page: e.destPageOf!(i),
+    });
+  }
+  // 뷰어 설정 — 도구줄을 감출지, 제목을 창에 띄울지 …
+  const prefs: Record<string, string> = {};
+  for (let i = 0; i < (e.viewPrefCount?.() ?? 0); i++) {
+    const T = (off: number, len: number) =>
+      len > 0 ? dec.decode(new Uint8Array(e.memory.buffer, e.viewPrefTextPtr!() + off, len)) : "";
+    const k = T(e.viewPrefKeyOff!(i), e.viewPrefKeyLen!(i));
+    if (k) prefs[k] = T(e.viewPrefValOff!(i), e.viewPrefValLen!(i));
+  }
+  // XMP — 통째로 옮긴다. 뜯는 것은 쓰는 쪽 몫이다.
+  const xn = e.xmpLen?.() ?? 0;
+  const xmp = xn > 0
+    ? dec.decode(new Uint8Array(e.memory.buffer, e.xmpPtr!(), xn))
+    : "";
+
   return {
+    dests, prefs, xmp,
     pages: e.pageCount(), locked: (e.isEncrypted?.() ?? 0) === 1,
     outline: marks, info, sigs, layers, atts,
     xfa: (e.isXfa?.() ?? 0) === 1,

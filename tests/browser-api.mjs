@@ -166,6 +166,17 @@ const r = await p.evaluate(async (doc) => {
     ad.close();
   }
 
+  // 5.8) 이름 목적지 · 뷰어 설정 · XMP
+  {
+    const dd = await PDFDocument.open(new Uint8Array(await (await fetch('/fixtures/dests.pdf')).arrayBuffer()), { wasm: '/pdf.wasm', cmaps: '/cmaps' });
+    const names = dd.destinations.map((x) => `${x.name}:${x.page}`).join(',');
+    ok('이름 목적지', names === 'chapter1:0,chapter2:1,last:2', names);
+    ok('뷰어 설정', dd.viewerPreferences.HideToolbar === 'true' && dd.viewerPreferences.Direction === 'R2L', JSON.stringify(dd.viewerPreferences));
+    ok('XMP 원문', dd.xmp.includes('xmpmeta') && dd.xmp.includes('XMP 제목'), dd.xmp.slice(0, 40));
+    ok('목적지 없는 문서는 빈 배열', (await (async () => { const k = await PDFDocument.open(new Uint8Array(await (await fetch('/fixtures/korean.pdf')).arrayBuffer()), { wasm: '/pdf.wasm', cmaps: '/cmaps' }); const n = k.destinations.length; k.close(); return n; })()) === 0);
+    dd.close();
+  }
+
   // 6) data()
   {
     const d1 = pdf.data(); d1[0] = 0;

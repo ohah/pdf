@@ -35,13 +35,14 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 |---|---|
 | `numPages` · `getOutline` · `getAttachments` · `getOptionalContentConfig` | ✅ `pages`·`outline`·`attachments`·`layers`/`setLayers` |
 | `getSignatures` · `getSignatureData` | ✅ `signatures()` — 검증까지 |
-| `getMetadata` (Info) | ✅ `info` · XMP 은 ❌ |
+| `getMetadata` (Info · XMP) | ✅ `info` · `xmp`(원문) |
 | `getData` | ✅ `data()` |
 | `getPermissions` | ✅ `permissions` — 인쇄·복사·고침 … |
 | `getPageLabels` | ✅ `pageLabels` |
-| `getDestinations` / `getDestination` | ❌ (엔진엔 있고 API 가 없다) |
+| `getDestinations` / `getDestination` | ✅ `destinations` |
 | `getPageMode` · `getPageLayout` | ✅ `pageMode` · `pageLayout` (덤으로 `lang`) |
-| `getViewerPreferences` · `getOpenAction` | ❌ |
+| `getViewerPreferences` | ✅ `viewerPreferences` |
+| `getOpenAction` | ❌ |
 | `fingerprints` | ✅ `fingerprint` |
 | `getMarkInfo` | ✅ `tagged` |
 | `getFieldObjects` (문서 전체) | ⚠️ 쪽 단위 `fields(page)` 만 |
@@ -94,8 +95,7 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 
 이 표에서 ❌ 인 것 중 뷰어에 먼저 아쉬운 순서:
 
-1. 이름 목적지 · 뷰어 설정 · XMP
-2. 글자 항목의 글꼴 이름·줄 끝 표시, 구조 나무
-3. 스트리밍/진행률 (큰 파일 첫 쪽을 빨리)
-4. 표준 14종 실제 글꼴 데이터 (자간 정확도)
-5. Node.js 실행 (캔버스 팩토리 교체)
+1. 글자 항목의 글꼴 이름·줄 끝 표시, 구조 나무
+2. 스트리밍/진행률 (큰 파일 첫 쪽을 빨리)
+3. 표준 14종 실제 글꼴 데이터 (자간 정확도)
+4. Node.js 실행 (캔버스 팩토리 교체)

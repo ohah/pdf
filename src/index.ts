@@ -130,6 +130,15 @@ export class PDFDocument {
   readonly lang: string;
   /** 쪽 라벨(i, ii, A-1 …). 문서가 안 적어 두면 빈 배열 */
   readonly pageLabels: string[];
+  /**
+   * 이름 목적지. 목차·링크가 "3쪽" 대신 이름으로 가리키는 문서가 흔하다.
+   * `page` 는 0부터이고, 못 풀면 -1 이다.
+   */
+  readonly destinations: { name: string; page: number }[];
+  /** 뷰어 설정 (/ViewerPreferences) — HideToolbar·Direction·PrintScaling … */
+  readonly viewerPreferences: Record<string, string>;
+  /** XMP 메타데이터 원문(RDF/XML). 문서에 없으면 빈 문자열 */
+  readonly xmp: string;
   private sigsRaw: NonNullable<OpenMsg["sigs"]>;
 
   private constructor(cl: PDFClient, r: OpenMsg, raw: Uint8Array) {
@@ -159,6 +168,9 @@ export class PDFDocument {
     this.tagged = r.tagged === true;
     this.lang = r.lang ?? "";
     this.pageLabels = r.labels ?? [];
+    this.destinations = r.dests ?? [];
+    this.viewerPreferences = r.prefs ?? {};
+    this.xmp = r.xmp ?? "";
     this.sigsRaw = r.sigs ?? [];
   }
 

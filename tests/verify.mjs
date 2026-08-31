@@ -1160,6 +1160,27 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   ok('자리를 읽는다', e.annRect(0, 0) === 100 && e.annRect(0, 3) === 720, [e.annRect(0, 0), e.annRect(0, 3)]);
 }
 
+// 이름 목적지 · 뷰어 설정 · XMP
+{
+  const r = await load('dests.pdf');
+  const e = r.ex;
+  const S = (ptr, off, len) => (len > 0 ? dec.decode(new Uint8Array(e.memory.buffer, ptr + off, len)) : '');
+  const names = [];
+  for (let i = 0; i < e.destCount(); i++) names.push(`${S(e.destTextPtr(), e.destNameOff(i), e.destNameLen(i))}:${e.destPageOf(i)}`);
+  ok('이름 목적지 셋', names.join(',') === 'chapter1:0,chapter2:1,last:2', names.join(','));
+  const prefs = {};
+  for (let i = 0; i < e.viewPrefCount(); i++) {
+    prefs[S(e.viewPrefTextPtr(), e.viewPrefKeyOff(i), e.viewPrefKeyLen(i))] =
+      S(e.viewPrefTextPtr(), e.viewPrefValOff(i), e.viewPrefValLen(i));
+  }
+  ok('뷰어 설정: 참/거짓', prefs.HideToolbar === 'true', JSON.stringify(prefs));
+  ok('뷰어 설정: 이름값', prefs.Direction === 'R2L' && prefs.PrintScaling === 'None', JSON.stringify(prefs));
+  const xl = e.xmpLen();
+  const xmp = xl > 0 ? dec.decode(new Uint8Array(e.memory.buffer, e.xmpPtr(), xl)) : '';
+  ok('XMP 를 통째로 준다', xmp.includes('x:xmpmeta'), xl);
+  ok('XMP 안 한글이 살아 있다', xmp.includes('XMP 제목'), xmp.slice(0, 40));
+}
+
 console.log(`  기능 단언 ${pass + fail}개 중 통과 ${pass}, 실패 ${fail}`);
 if (bad.length) bad.forEach((b3) => console.log('    ✗ ' + b3));
 process.exit(fail ? 1 : 0);
