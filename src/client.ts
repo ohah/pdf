@@ -16,6 +16,23 @@ export type PageMsg = {
   drw: Uint8Array;
   rtx: Uint8Array;
   links: { x0: number; y0: number; x1: number; y1: number; uri: string; page: number }[];
+  /** 쪽에 달린 주석 — 종류를 가리지 않는다(링크·위젯도 들어 있다) */
+  annots: {
+    obj: number;
+    /** Highlight·Text·Square·Ink·Link·Widget … (/Subtype) */
+    subtype: string;
+    rect: [number, number, number, number];
+    /** 주석에 적힌 글 (/Contents) */
+    contents: string;
+    /** 쓴 사람 (/T) */
+    author: string;
+    /** 적힌 시각 (/M, 예: D:20260901120000+09'00') */
+    date: string;
+    /** 테두리 색 0~1. 없으면 null */
+    color: [number, number, number] | null;
+    /** 2=숨김, 4=인쇄됨 … (/F) */
+    flags: number;
+  }[];
   inline: Uint8Array;
   fields: {
     obj: number; kind: number; flags: number; maxLen: number; size: number; align: number;

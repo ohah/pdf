@@ -109,6 +109,7 @@ const { doc } = usePdf(file, { wasm: "/pdf.wasm" });
 | `pdf.render(page, canvas, opts)` | 쪽을 그린다. 글자 자리(`runs`)를 돌려주므로 투명 글자층을 직접 얹을 수 있다 |
 | `pdf.text(page)` | 쪽의 글자 |
 | `pdf.fields(page)` · `links(page)` | 입력 칸 · 링크 |
+| `pdf.annotations(page)` | 쪽에 달린 주석 전부 — 종류·글·쓴이·날짜·색·깃발 |
 | `pdf.signatures()` | 전자 서명을 WebCrypto 로 맞춰 본다 |
 | `pdf.attachment(i)` | 딸린 파일 바이트 |
 | `pdf.setLayers(on[])` | 레이어를 켜고 끈다 |

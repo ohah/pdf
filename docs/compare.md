@@ -61,7 +61,7 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 | render 옵션 `intent:'print'` · `annotationMode` · `transform` · `pageColors` · `isEditing` | ❌ |
 | `getTextContent()` | ⚠️ `text(page)` 와 `render()` 의 `runs`(x·y·w·h·angle·text). `fontName`·`hasEOL`·`dir` 없음 |
 | `streamTextContent()` | ❌ |
-| `getAnnotations()` 전체 주석 | ⚠️ `links(page)`·`fields(page)` 만. 그리기는 `/AP` 로 다 된다 |
+| `getAnnotations()` 전체 주석 | ✅ `annotations(page)` — 종류·글·쓴이·날짜·색·깃발 |
 | `getOperatorList()` · `recordImages` | ❌ 내부에만 있다 |
 | `getStructTree()` | ❌ |
 | `view`(MediaBox) · `userUnit` · `ref` · `clone()` | ⚠️ `viewport` 가 쪽 크기를 준다 |
@@ -94,7 +94,7 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 
 이 표에서 ❌ 인 것 중 뷰어에 먼저 아쉬운 순서:
 
-1. 주석 전체 열거 + 주석 층
+1. 주석 층(자리 잡아 얹어 주는 도구) — 열거는 됐다
 2. 이름 목적지 · 뷰어 설정 · XMP
 3. 글자 항목의 글꼴 이름·줄 끝 표시, 구조 나무
 4. 스트리밍/진행률 (큰 파일 첫 쪽을 빨리)

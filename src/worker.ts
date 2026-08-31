@@ -116,6 +116,21 @@ type Exports = {
   setWatermarkMask?: (w: number, h: number, len: number, pw: number, ph: number) => number;
   isXfa?: () => number;
   permissions?: () => number;
+  annCount?: () => number;
+  annObj?: (i: number) => number;
+  annFlags?: (i: number) => number;
+  annRect?: (i: number, k: number) => number;
+  annHasColor?: (i: number) => number;
+  annColor?: (i: number, k: number) => number;
+  annTextPtr?: () => number;
+  annSubOff?: (i: number) => number;
+  annSubLen?: (i: number) => number;
+  annBodyOff?: (i: number) => number;
+  annBodyLen?: (i: number) => number;
+  annAuthorOff?: (i: number) => number;
+  annAuthorLen?: (i: number) => number;
+  annDateOff?: (i: number) => number;
+  annDateLen?: (i: number) => number;
   metaCount?: () => number;
   metaOff?: (i: number) => number;
   metaLen?: (i: number) => number;
@@ -482,6 +497,26 @@ async function page(i: number, formOn: boolean, light = false) {
       page: e.linkPage!(li),
     });
   }
+  // 주석 — 종류 가리지 않고 걷는다. 뷰어가 목록·툴팁을 만들 거리다.
+  const annots = [];
+  {
+    const T = (off: number, len: number) =>
+      len > 0 ? dec.decode(new Uint8Array(e.memory.buffer, e.annTextPtr!() + off, len)) : "";
+    for (let ai = 0; ai < (e.annCount?.() ?? 0); ai++) {
+      annots.push({
+        obj: e.annObj!(ai),
+        subtype: T(e.annSubOff!(ai), e.annSubLen!(ai)),
+        rect: [0, 1, 2, 3].map((k) => e.annRect!(ai, k)) as [number, number, number, number],
+        contents: T(e.annBodyOff!(ai), e.annBodyLen!(ai)),
+        author: T(e.annAuthorOff!(ai), e.annAuthorLen!(ai)),
+        date: T(e.annDateOff!(ai), e.annDateLen!(ai)),
+        color: e.annHasColor!(ai) === 1
+          ? ([0, 1, 2].map((k) => e.annColor!(ai, k)) as [number, number, number])
+          : null,
+        flags: e.annFlags!(ai),
+      });
+    }
+  }
   let inlMax = 0;
   for (let k = 0; k + 1 < ops.length;) {
     const argc = ops[k + 1];
@@ -511,7 +546,7 @@ async function page(i: number, formOn: boolean, light = false) {
   }
   return {
     w: e.pageWidth(), h: e.pageHeight(), x0: e.pageOriginX?.() ?? 0, y0: e.pageOriginY?.() ?? 0,
-    rot: e.pageRotate?.() ?? 0, items, ops, txt, drw, rtx, links, inline, fields,
+    rot: e.pageRotate?.() ?? 0, items, ops, txt, drw, rtx, links, annots, inline, fields,
     fonts, bitmaps, stencils, bitmap, images: e.imageCount(), forms: e.formCount?.() ?? 0,
     light,
   };

@@ -1,0 +1,52 @@
+%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R /Annots [6 0 R 7 0 R 8 0 R 9 0 R 10 0 R] >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 37 >>
+stream
+BT /F1 12 Tf 40 750 Td (annots) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Annot /Subtype /Highlight /Rect [100 700 300 720] /C [1 1 0] /Contents <feffc911c694d55c0020acf3> /T <feffc724bcf4acbd> /M (D:20260901120000+09'00') /F 4 >>
+endobj
+7 0 obj
+<< /Type /Annot /Subtype /Text /Rect [50 600 70 620] /Contents <feffba54baa80020b0b4c6a9> /T <feffb2e4b9780020c0acb78c> /C [1 0 0] >>
+endobj
+8 0 obj
+<< /Type /Annot /Subtype /Square /Rect [200 400 380 500] /C [0 0 1] >>
+endobj
+9 0 obj
+<< /Type /Annot /Subtype /Link /Rect [50 300 200 320] /A << /S /URI /URI (https://example.com) >> >>
+endobj
+10 0 obj
+<< /Type /Annot /Subtype /StrikeOut /Rect [50 200 250 216] /C [0.5] /Contents <feffc9c0c6b40020c904> >>
+endobj
+xref
+0 11
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000282 00000 n 
+0000000352 00000 n 
+0000000439 00000 n 
+0000000621 00000 n 
+0000000770 00000 n 
+0000000856 00000 n 
+0000000972 00000 n 
+trailer
+<< /Size 11 /Root 1 0 R >>
+startxref
+1092
+%%EOF

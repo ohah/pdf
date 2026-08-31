@@ -1143,6 +1143,23 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   ok('권한 제한 문서도 열린다', r.text.includes('permission'), r.text.slice(0, 20));
 }
 
+// 주석 열거 — 종류·글·쓴이·색·깃발
+{
+  const r = await load('annots.pdf');
+  const e = r.ex;
+  const S = (o, l) => (l > 0 ? dec.decode(new Uint8Array(e.memory.buffer, e.annTextPtr() + o, l)) : '');
+  ok('주석 다섯을 걷는다', e.annCount() === 5, e.annCount());
+  const subs = [];
+  for (let i = 0; i < e.annCount(); i++) subs.push(S(e.annSubOff(i), e.annSubLen(i)));
+  ok('종류를 읽는다', subs.join(',') === 'Highlight,Text,Square,Link,StrikeOut', subs.join(','));
+  ok('한글 글이 살아 있다', S(e.annBodyOff(0), e.annBodyLen(0)) === '중요한 곳', S(e.annBodyOff(0), e.annBodyLen(0)));
+  ok('쓴이(/T)가 /Type 에 안 걸린다', S(e.annAuthorOff(0), e.annAuthorLen(0)) === '윤보경', S(e.annAuthorOff(0), e.annAuthorLen(0)));
+  ok('색(/C)이 /Contents 에 안 걸린다', e.annHasColor(1) === 1 && e.annColor(1, 0) === 1 && e.annColor(1, 1) === 0);
+  ok('회색 하나도 색으로 읽는다', Math.abs(e.annColor(4, 0) - 0.5) < 1e-6, e.annColor(4, 0));
+  ok('깃발(/F)을 읽는다', e.annFlags(0) === 4, e.annFlags(0));
+  ok('자리를 읽는다', e.annRect(0, 0) === 100 && e.annRect(0, 3) === 720, [e.annRect(0, 0), e.annRect(0, 3)]);
+}
+
 console.log(`  기능 단언 ${pass + fail}개 중 통과 ${pass}, 실패 ${fail}`);
 if (bad.length) bad.forEach((b3) => console.log('    ✗ ' + b3));
 process.exit(fail ? 1 : 0);

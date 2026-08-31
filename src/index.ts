@@ -287,6 +287,17 @@ export class PDFDocument {
     return (await this.get(page, true)).links;
   }
 
+  /**
+   * 쪽에 달린 주석을 모두 준다 — 형광펜·메모·네모·잉크·도장·링크·위젯까지.
+   *
+   * 그리는 것은 `render()` 가 /AP 겉모습으로 이미 한다. 이건 목록·툴팁·
+   * 뛰어가기처럼 **다루기 위한** 정보다(pdf.js 의 getAnnotations 자리).
+   * 숨김 깃발(2)이 선 것도 그대로 준다 — 거르는 것은 쓰는 쪽 몫이다.
+   */
+  async annotations(page: number) {
+    return (await this.get(page, true)).annots;
+  }
+
   /** 전자 서명을 확인한다. 브라우저 WebCrypto 로 맞춰 본다. */
   async signatures(): Promise<(SigCheck & { name: string; date: string; reason: string })[]> {
     const out = [];

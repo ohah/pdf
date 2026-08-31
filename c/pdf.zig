@@ -4809,6 +4809,7 @@ export fn renderPage(idx: u32) u32 {
     collectFields(b, body, end);
     drawAnnots(b, body, end);
     collectLinks(b, body, end);
+    collectAnnots(b, body, end);
     return item_n;
 }
 
@@ -7681,6 +7682,165 @@ fn destPage(b: []const u8, s2: usize, e: usize) i32 {
 }
 
 /// 쪽의 링크 주석을 모은다.
+// ===== 주석 =====
+//
+// 링크·위젯만 따로 걷던 것을 넘어, 쪽에 달린 주석을 종류 가리지 않고 모은다.
+// 뷰어가 주석 목록을 만들고 마우스를 올리면 내용을 보여 줄 수 있게 —
+// pdf.js 의 getAnnotations 자리다.
+const Ann = struct {
+    rect: [4]f32 = .{ 0, 0, 0, 0 },
+    flags: u32 = 0,
+    color: [3]f32 = .{ 0, 0, 0 },
+    has_color: bool = false,
+    sub_off: u32 = 0,
+    sub_len: u32 = 0,
+    txt_off: u32 = 0,
+    txt_len: u32 = 0,
+    au_off: u32 = 0,
+    au_len: u32 = 0,
+    dt_off: u32 = 0,
+    dt_len: u32 = 0,
+    obj: u32 = 0,
+};
+var anns: [256]Ann = undefined;
+var ann_n: u32 = 0;
+var ann_buf: [16384]u8 = undefined;
+var ann_used: u32 = 0;
+
+export fn annCount() u32 { return ann_n; }
+export fn annObj(i: u32) u32 { return if (i < ann_n) anns[i].obj else 0; }
+export fn annFlags(i: u32) u32 { return if (i < ann_n) anns[i].flags else 0; }
+export fn annRect(i: u32, k: u32) f32 { return if (i < ann_n and k < 4) anns[i].rect[k] else 0; }
+export fn annHasColor(i: u32) u32 { return if (i < ann_n and anns[i].has_color) 1 else 0; }
+export fn annColor(i: u32, k: u32) f32 { return if (i < ann_n and k < 3) anns[i].color[k] else 0; }
+export fn annTextPtr() [*]u8 { return &ann_buf; }
+export fn annSubOff(i: u32) u32 { return if (i < ann_n) anns[i].sub_off else 0; }
+export fn annSubLen(i: u32) u32 { return if (i < ann_n) anns[i].sub_len else 0; }
+export fn annBodyOff(i: u32) u32 { return if (i < ann_n) anns[i].txt_off else 0; }
+export fn annBodyLen(i: u32) u32 { return if (i < ann_n) anns[i].txt_len else 0; }
+export fn annAuthorOff(i: u32) u32 { return if (i < ann_n) anns[i].au_off else 0; }
+export fn annAuthorLen(i: u32) u32 { return if (i < ann_n) anns[i].au_len else 0; }
+export fn annDateOff(i: u32) u32 { return if (i < ann_n) anns[i].dt_off else 0; }
+export fn annDateLen(i: u32) u32 { return if (i < ann_n) anns[i].dt_len else 0; }
+
+/// 이름이 **그 자리에서 끝나는** 첫 자리. /T 가 /Type 에, /C 가 /Contents 에
+/// 걸려 엉뚱한 값을 읽던 것을 막는다.
+fn keyPos(b: []const u8, from: usize, to: usize, key: []const u8) ?usize {
+    var at_from: usize = 0;
+    while (find(b[from..to], key, at_from)) |at| {
+        const q = from + at + key.len;
+        const c = if (q < to) b[q] else ' ';
+        if (!((c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9'))) {
+            return from + at;
+        }
+        at_from = at + 1;
+    }
+    return null;
+}
+
+/// 쪽에 달린 주석을 모두 걷는다. 링크·위젯도 포함한다 — 쓰는 쪽이 가린다.
+fn collectAnnots(b: []const u8, body: usize, end: usize) void {
+    ann_n = 0;
+    ann_used = 0;
+    const aa = find(b[body..end], "/Annots", 0) orelse return;
+    var p = body + aa + 7;
+    while (p < end and isSpace(b[p])) p += 1;
+    var as2 = p;
+    var ae = end;
+    if (p < end and b[p] == '[') {
+        as2 = p + 1;
+        ae = arrayEnd(b, p, end);
+    } else if (p < end and isDigit(b[p])) {
+        const an = readUint(b, &p);
+        if (findObj(b, an)) |ab| {
+            const abe = find(b, "endobj", ab) orelse b.len;
+            var q = ab;
+            while (q < abe and b[q] != '[') q += 1;
+            as2 = q + 1;
+            ae = arrayEnd(b, q, abe);
+        } else return;
+    } else return;
+
+    var q = as2;
+    while (q < ae and ann_n < anns.len) {
+        while (q < ae and isSpace(b[q])) q += 1;
+        if (q >= ae or b[q] == ']') break;
+        if (!isDigit(b[q])) { q += 1; continue; }
+        const num = readUint(b, &q);
+        while (q < ae and isSpace(b[q])) q += 1;
+        if (q < ae and isDigit(b[q])) _ = readUint(b, &q);
+        while (q < ae and isSpace(b[q])) q += 1;
+        if (q < ae and b[q] == 'R') q += 1;
+
+        const ab = findObj(b, num) orelse continue;
+        const abe = objDictEnd(b, ab);
+        var a: Ann = .{};
+        a.obj = num;
+
+        var name: [32]u8 = undefined;
+        const nn = nameAfter(b, ab, abe, "/Subtype", &name);
+        if (nn > 0 and ann_used + nn <= ann_buf.len) {
+            a.sub_off = ann_used;
+            a.sub_len = nn;
+            @memcpy(ann_buf[ann_used..][0..nn], name[0..nn]);
+            ann_used += nn;
+        }
+        if (find(b[ab..abe], "/Rect", 0)) |ra| {
+            var rp = ab + ra + 5;
+            while (rp < abe and b[rp] != '[') rp += 1;
+            rp += 1;
+            var i: u32 = 0;
+            while (i < 4 and rp < abe) : (i += 1) a.rect[i] = readFloat(b, &rp);
+            if (a.rect[2] < a.rect[0]) { const t = a.rect[0]; a.rect[0] = a.rect[2]; a.rect[2] = t; }
+            if (a.rect[3] < a.rect[1]) { const t = a.rect[1]; a.rect[1] = a.rect[3]; a.rect[3] = t; }
+        }
+        if (intAfter(b, ab, abe, "/F")) |fl| a.flags = fl;
+        // /C [r g b] — 회색 하나나 CMYK 넷으로 적히기도 한다
+        if (keyPos(b, ab, abe, "/C")) |ca| {
+            var cp = ca + 2;
+            {
+                while (cp < abe and b[cp] != '[' and b[cp] != '/' and b[cp] != '>') cp += 1;
+                if (cp < abe and b[cp] == '[') {
+                    cp += 1;
+                    var vals: [4]f32 = .{ 0, 0, 0, 0 };
+                    var n2: u32 = 0;
+                    while (n2 < 4 and cp < abe) {
+                        while (cp < abe and isSpace(b[cp])) cp += 1;
+                        if (cp >= abe or b[cp] == ']') break;
+                        vals[n2] = readFloat(b, &cp);
+                        n2 += 1;
+                    }
+                    if (n2 == 1) { a.color = .{ vals[0], vals[0], vals[0] }; a.has_color = true; }
+                    if (n2 == 3) { a.color = .{ vals[0], vals[1], vals[2] }; a.has_color = true; }
+                    if (n2 == 4) {
+                        a.color = .{
+                            (1 - @min(1, vals[0] + vals[3])),
+                            (1 - @min(1, vals[1] + vals[3])),
+                            (1 - @min(1, vals[2] + vals[3])),
+                        };
+                        a.has_color = true;
+                    }
+                }
+            }
+        }
+        // 글(/Contents) · 쓴 이(/T) · 날짜(/M)
+        if (find(b[ab..abe], "/Contents", 0)) |ta| {
+            const n2 = copyPdfText(b, ab + ta + 9, abe, &ann_buf, ann_used);
+            if (n2 > 0) { a.txt_off = ann_used; a.txt_len = n2; ann_used += n2; }
+        }
+        if (keyPos(b, ab, abe, "/T")) |ta| {
+            const n2 = copyPdfText(b, ta + 2, abe, &ann_buf, ann_used);
+            if (n2 > 0) { a.au_off = ann_used; a.au_len = n2; ann_used += n2; }
+        }
+        if (keyPos(b, ab, abe, "/M")) |da| {
+            const n2 = copyPdfText(b, da + 2, abe, &ann_buf, ann_used);
+            if (n2 > 0) { a.dt_off = ann_used; a.dt_len = n2; ann_used += n2; }
+        }
+        anns[ann_n] = a;
+        ann_n += 1;
+    }
+}
+
 fn collectLinks(b: []const u8, body: usize, end: usize) void {
     link_n = 0;
     link_buf_n = 0;
