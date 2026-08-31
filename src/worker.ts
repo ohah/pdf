@@ -115,6 +115,15 @@ type Exports = {
   setLabelMask?: (w: number, h: number, len: number, pw: number, ph: number) => number;
   setWatermarkMask?: (w: number, h: number, len: number, pw: number, ph: number) => number;
   isXfa?: () => number;
+  permissions?: () => number;
+  metaCount?: () => number;
+  metaOff?: (i: number) => number;
+  metaLen?: (i: number) => number;
+  metaTextPtr?: () => number;
+  pageLabelCount?: () => number;
+  pageLabelOff?: (i: number) => number;
+  pageLabelLen?: (i: number) => number;
+  pageLabelPtr?: () => number;
   attCount?: () => number;
   attTextPtr?: () => number;
   attNameOff?: (i: number) => number;
@@ -348,10 +357,29 @@ async function open(bytes: Uint8Array, pw: string) {
       on: e.ocIsOn!(i) === 1,
     });
   }
+  // 문서 한 벌 정보 — 뷰어가 처음 열 때 쓰는 것들
+  const meta = (i: number) => {
+    const n = e.metaLen?.(i) ?? 0;
+    return n > 0
+      ? dec.decode(new Uint8Array(e.memory.buffer, e.metaTextPtr!() + e.metaOff!(i), n))
+      : "";
+  };
+  // 쪽 라벨(i, ii, A-1 …). 없으면 빈 배열이고 쓰는 쪽이 쪽 번호를 그대로 쓴다.
+  const labels: string[] = [];
+  for (let i = 0; i < (e.pageLabelCount?.() ?? 0); i++) {
+    const n = e.pageLabelLen!(i);
+    labels.push(n > 0
+      ? dec.decode(new Uint8Array(e.memory.buffer, e.pageLabelPtr!() + e.pageLabelOff!(i), n))
+      : "");
+  }
   return {
     pages: e.pageCount(), locked: (e.isEncrypted?.() ?? 0) === 1,
     outline: marks, info, sigs, layers, atts,
     xfa: (e.isXfa?.() ?? 0) === 1,
+    perm: e.permissions?.() ?? -1,
+    pageMode: meta(0), pageLayout: meta(1), fingerprint: meta(2),
+    tagged: meta(3) === "1", lang: meta(4),
+    labels: labels.some((t) => t.length > 0) ? labels : [],
   };
 }
 

@@ -103,6 +103,9 @@ const { doc } = usePdf(file, { wasm: "/pdf.wasm" });
 |---|---|
 | `PDFDocument.open(bytes, opts)` | 문서를 연다. 암호가 필요하면 `PasswordNeeded` 를 던진다 |
 | `pdf.pages` · `outline` · `info` · `layers` · `attachments` · `isXfa` · `locked` | 문서 정보 |
+| `pdf.permissions` | 인쇄·복사·고침 … 문서가 허락한 것들 (`/P`) |
+| `pdf.pageLabels` | 쪽 라벨 — 표지가 i, ii 이고 본문이 1부터인 문서 |
+| `pdf.pageMode` · `pageLayout` · `lang` · `tagged` · `fingerprint` | 열 때 설정·언어·태그 여부·문서 지문 |
 | `pdf.render(page, canvas, opts)` | 쪽을 그린다. 글자 자리(`runs`)를 돌려주므로 투명 글자층을 직접 얹을 수 있다 |
 | `pdf.text(page)` | 쪽의 글자 |
 | `pdf.fields(page)` · `links(page)` | 입력 칸 · 링크 |

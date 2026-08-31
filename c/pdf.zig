@@ -639,6 +639,8 @@ export fn parse(len: usize) u32 {
     collectPages(b, pages_obj, 0);
     if (root != 0) collectOutline(b, root);
     collectInfo(b);
+    collectMeta(b);
+    collectLabels(b);
     return if (page_count > 0) 1 else 0;
 }
 
@@ -6613,6 +6615,7 @@ fn setupEncryption(b: []const u8) void {
     enc_aes = false;
     enc_key_len = 0;
     enc_obj = 0;
+    doc_perm = -1;
     const ea = rfind(b, "/Encrypt", b.len - 1) orelse return;
     var p = ea + 8;
     while (p < b.len and isSpace(b[p])) p += 1;
@@ -6620,6 +6623,10 @@ fn setupEncryption(b: []const u8) void {
     enc_obj = readUint(b, &p);
     const eb = findObj(b, enc_obj) orelse return;
     const ee = objDictEnd(b, eb);
+
+    // 권한 비트(/P). 판을 가리지 않고 담아 둔다 — 뷰어가 인쇄·복사 단추를
+    // 흐리게 하려면 알아야 한다. 음수로 적히는 것이 보통이다.
+    doc_perm = signedAfter(b, eb, ee, "/P") orelse -1;
 
     const v = intAfter(b, eb, ee, "/V") orelse 1;
     const r = intAfter(b, eb, ee, "/R") orelse 2;
@@ -6885,6 +6892,296 @@ fn fixLength(b: []u8, from: usize, to: usize, val: u32) void {
 }
 
 // ===== 문서 속성 =====
+
+/// 딕셔너리에서 음수도 되는 정수 하나. /P 처럼 음수로 적히는 값에 쓴다.
+fn signedAfter(b: []const u8, from: usize, to: usize, key: []const u8) ?i32 {
+    const at = find(b[from..to], key, 0) orelse return null;
+    var q = from + at + key.len;
+    // 이름이 그 자리에서 끝나야 한다 (/P 가 /Parent 에 걸리지 않게)
+    if (q < to and ((b[q] >= 'a' and b[q] <= 'z') or (b[q] >= 'A' and b[q] <= 'Z'))) return null;
+    while (q < to and isSpace(b[q])) q += 1;
+    var neg = false;
+    if (q < to and b[q] == '-') { neg = true; q += 1; }
+    if (q >= to or !isDigit(b[q])) return null;
+    const v: i64 = readUint(b, &q);
+    return @as(i32, @truncate(if (neg) -v else v));
+}
+
+/// 암호 사전의 권한 비트(/P). 암호가 없으면 -1 — 다 된다는 뜻이다.
+var doc_perm: i32 = -1;
+export fn permissions() i32 { return doc_perm; }
+
+/// 카탈로그(/Root) 딕셔너리 자리.
+fn catalogRange(b: []const u8) ?struct { s: usize, e: usize } {
+    const at = rfind(b, "/Root", b.len - 1) orelse return null;
+    var p2 = at + 5;
+    while (p2 < b.len and isSpace(b[p2])) p2 += 1;
+    if (p2 >= b.len or !isDigit(b[p2])) return null;
+    const num = readUint(b, &p2);
+    const cb = findObj(b, num) orelse return null;
+    return .{ .s = cb, .e = objDictEnd(b, cb) };
+}
+
+// 문서 한 벌 정보 — 뷰어가 처음 열 때 쓰는 것들.
+//
+//   0 /PageMode      (UseOutlines·UseThumbs·FullScreen…) — 열 때 옆판을 펼칠지
+//   1 /PageLayout    (SinglePage·TwoColumnLeft…)         — 한 쪽·두 쪽 보기
+//   2 파일 지문       (/ID 첫 문자열, 16진수)              — 문서별 상태 저장 열쇠
+//   3 태그 PDF 인가   ("1"·"0", /MarkInfo /Marked)
+//   4 문서 언어       (/Lang)
+var meta_buf: [512]u8 = undefined;
+var meta_off: [5]u32 = undefined;
+var meta_len: [5]u32 = undefined;
+var meta_n: u32 = 0;
+export fn metaCount() u32 { return meta_n; }
+export fn metaOff(i: u32) u32 { return if (i < meta_n) meta_off[i] else 0; }
+export fn metaLen(i: u32) u32 { return if (i < meta_n) meta_len[i] else 0; }
+export fn metaTextPtr() [*]u8 { return &meta_buf; }
+
+fn metaPut(used: *u32, i: usize, txt: []const u8) void {
+    if (used.* + txt.len > meta_buf.len) return;
+    meta_off[i] = used.*;
+    meta_len[i] = @intCast(txt.len);
+    @memcpy(meta_buf[used.*..][0..txt.len], txt);
+    used.* += @intCast(txt.len);
+}
+
+/// 딕셔너리에서 /Key 뒤의 이름(/Foo)을 그대로 읽는다. 슬래시는 뺀다.
+fn nameAfter(b: []const u8, from: usize, to: usize, key: []const u8, out: []u8) u32 {
+    const at = find(b[from..to], key, 0) orelse return 0;
+    var q = from + at + key.len;
+    if (q < to and ((b[q] >= 'a' and b[q] <= 'z') or (b[q] >= 'A' and b[q] <= 'Z'))) return 0;
+    while (q < to and isSpace(b[q])) q += 1;
+    if (q >= to or b[q] != '/') return 0;
+    q += 1;
+    var n: u32 = 0;
+    while (q < to and n < out.len and !isSpace(b[q]) and b[q] != '/' and b[q] != '>' and b[q] != ']') {
+        out[n] = b[q];
+        n += 1;
+        q += 1;
+    }
+    return n;
+}
+
+// 쪽 라벨 — 표지가 i, ii, iii 이고 본문이 1 부터인 문서가 흔하다.
+// /PageLabels 는 번호 나무다: [ 0 << /S /r >> 4 << /S /D /St 1 >> ] 처럼
+// "이 쪽부터 이 방식" 을 적어 둔다.
+var label_buf: [16384]u8 = undefined;
+var label_off: [4096]u32 = undefined;
+var label_len: [4096]u8 = undefined;
+var label_n: u32 = 0;
+export fn pageLabelCount() u32 { return label_n; }
+export fn pageLabelOff(i: u32) u32 { return if (i < label_n) label_off[i] else 0; }
+export fn pageLabelLen(i: u32) u32 { return if (i < label_n) label_len[i] else 0; }
+export fn pageLabelPtr() [*]u8 { return &label_buf; }
+
+/// 로마 숫자. 1~3999 만 다룬다(그 밖은 십진수로 떨어뜨린다).
+fn roman(n0: u32, upper: bool, out: []u8) u32 {
+    if (n0 == 0 or n0 > 3999) return 0;
+    const V = [_]u32{ 1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1 };
+    const SU = [_][]const u8{ "M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I" };
+    const SL = [_][]const u8{ "m", "cm", "d", "cd", "c", "xc", "l", "xl", "x", "ix", "v", "iv", "i" };
+    var n = n0;
+    var w: u32 = 0;
+    var i: usize = 0;
+    while (i < V.len) : (i += 1) {
+        while (n >= V[i]) {
+            const t = if (upper) SU[i] else SL[i];
+            if (w + t.len > out.len) return w;
+            @memcpy(out[w..][0..t.len], t);
+            w += @intCast(t.len);
+            n -= V[i];
+        }
+    }
+    return w;
+}
+
+/// A, B, … Z, AA, BB … (규격이 정한 방식이다 — 27번째는 AA 다)
+fn alphaLabel(n: u32, upper: bool, out: []u8) u32 {
+    if (n == 0) return 0;
+    const idx: u8 = @intCast((n - 1) % 26);
+    const rep: u32 = (n - 1) / 26 + 1;
+    const c: u8 = (if (upper) @as(u8, 'A') else @as(u8, 'a')) + idx;
+    var w: u32 = 0;
+    while (w < rep and w < out.len) : (w += 1) out[w] = c;
+    return w;
+}
+
+fn collectLabels(b: []const u8) void {
+    label_n = 0;
+    const cat = catalogRange(b) orelse return;
+    const pa = find(b[cat.s..cat.e], "/PageLabels", 0) orelse return;
+    // 값이 딴 객체를 가리키면 따라간다
+    var ns = cat.s + pa + 11;
+    var ne = cat.e;
+    while (ns < ne and isSpace(b[ns])) ns += 1;
+    if (ns < ne and isDigit(b[ns])) {
+        var q = ns;
+        const num = readUint(b, &q);
+        const ob = findObj(b, num) orelse return;
+        ns = ob;
+        ne = objDictEnd(b, ob);
+    }
+    const na = find(b[ns..ne], "/Nums", 0) orelse return;
+    var q = ns + na + 5;
+    while (q < ne and b[q] != '[') q += 1;
+    if (q >= ne) return;
+    q += 1;
+
+    const pages = page_count;
+    if (pages == 0 or pages > label_off.len) return;
+    var used: u32 = 0;
+    var page: u32 = 0;
+
+    // 마디를 차례로 읽으며 그 마디가 덮는 쪽들의 라벨을 만든다
+    while (q < ne and page < pages) {
+        while (q < ne and isSpace(b[q])) q += 1;
+        if (q >= ne or b[q] == ']') break;
+        if (!isDigit(b[q])) { q += 1; continue; }
+        const start_page = readUint(b, &q);
+        while (q < ne and isSpace(b[q])) q += 1;
+        if (q >= ne or b[q] != '<') break;
+        const ds = q;
+        // 이 마디의 딕셔너리가 어디서 끝나는지 먼저 잡는다. 어림잡으면
+        // 다음 마디의 /P 접두사가 이 마디까지 새어 들어온다(A-i 처럼).
+        var de = ne;
+        {
+            var r = ds;
+            var depth: u32 = 0;
+            while (r < ne) : (r += 1) {
+                if (b[r] == '<' and r + 1 < ne and b[r + 1] == '<') { depth += 1; r += 1; continue; }
+                if (b[r] == '>' and r + 1 < ne and b[r + 1] == '>') {
+                    if (depth > 0) depth -= 1;
+                    r += 1;
+                    if (depth == 0) break;
+                    continue;
+                }
+            }
+            de = @min(ne, r + 1);
+        }
+        // 이 마디의 스타일
+        var st: [8]u8 = undefined;
+        const sn = nameAfter(b, ds, de, "/S", &st);
+        var pre: [32]u8 = undefined;
+        var pn: u32 = 0;
+        if (find(b[ds..de], "/P", 0)) |ppa| {
+            var pq = ds + ppa + 2;
+            while (pq < de and isSpace(b[pq])) pq += 1;
+            if (pq < de and b[pq] == '(') {
+                pq += 1;
+                while (pq < de and b[pq] != ')' and pn < pre.len) : (pn += 1) { pre[pn] = b[pq]; pq += 1; }
+            }
+        }
+        const first: u32 = if (intAfter(b, ds, de, "/St")) |v| v else 1;
+        // 다음 마디의 시작 쪽까지가 이 마디의 범위다
+        const scan = de;
+        var next_start: u32 = pages;
+        {
+            var t = scan;
+            while (t < ne and isSpace(b[t])) t += 1;
+            if (t < ne and isDigit(b[t])) {
+                var t2 = t;
+                next_start = readUint(b, &t2);
+            }
+        }
+        if (start_page > page) page = start_page;
+        var idx: u32 = 0;
+        while (page < pages and page < next_start) : ({ page += 1; idx += 1; }) {
+            var one: [40]u8 = undefined;
+            var w: u32 = 0;
+            if (pn > 0 and pn <= one.len) {
+                @memcpy(one[0..pn], pre[0..pn]);
+                w = pn;
+            }
+            const nth = first + idx;
+            if (sn > 0) {
+                const c = st[0];
+                if (c == 'D') {
+                    var dtmp: [12]u8 = undefined;
+                    var dn: u32 = 0;
+                    var v = nth;
+                    if (v == 0) { dtmp[0] = '0'; dn = 1; }
+                    while (v > 0) : (v /= 10) { dtmp[dn] = @intCast('0' + v % 10); dn += 1; }
+                    var k: u32 = 0;
+                    while (k < dn and w < one.len) : (k += 1) { one[w] = dtmp[dn - 1 - k]; w += 1; }
+                } else if (c == 'R' or c == 'r') {
+                    w += roman(nth, c == 'R', one[w..]);
+                } else if (c == 'A' or c == 'a') {
+                    w += alphaLabel(nth, c == 'A', one[w..]);
+                }
+            }
+            if (w == 0 or used + w > label_buf.len) {
+                // 스타일이 없으면 접두사만 — 규격이 그렇게 정한다
+                if (w == 0 and pn == 0) { label_off[page] = used; label_len[page] = 0; continue; }
+            }
+            if (used + w <= label_buf.len) {
+                @memcpy(label_buf[used..][0..w], one[0..w]);
+                label_off[page] = used;
+                label_len[page] = @intCast(@min(w, 255));
+                used += w;
+            }
+        }
+        q = scan;
+    }
+    label_n = pages;
+}
+
+fn collectMeta(b: []const u8) void {
+    meta_n = 0;
+    var used: u32 = 0;
+    var i: usize = 0;
+    while (i < 5) : (i += 1) { meta_off[i] = 0; meta_len[i] = 0; }
+    meta_n = 5;
+
+    var tmp: [64]u8 = undefined;
+    if (catalogRange(b)) |cat| {
+        var n = nameAfter(b, cat.s, cat.e, "/PageMode", &tmp);
+        if (n > 0) metaPut(&used, 0, tmp[0..n]);
+        n = nameAfter(b, cat.s, cat.e, "/PageLayout", &tmp);
+        if (n > 0) metaPut(&used, 1, tmp[0..n]);
+        // /MarkInfo << /Marked true >>
+        if (find(b[cat.s..cat.e], "/MarkInfo", 0)) |ma| {
+            const ms = cat.s + ma;
+            const me = @min(cat.e, ms + 120);
+            metaPut(&used, 3, if (find(b[ms..me], "/Marked true", 0) != null) "1" else "0");
+        }
+        // /Lang (문자열)
+        if (find(b[cat.s..cat.e], "/Lang", 0)) |la| {
+            var q = cat.s + la + 5;
+            while (q < cat.e and isSpace(b[q])) q += 1;
+            if (q < cat.e and b[q] == '(') {
+                q += 1;
+                var n2: u32 = 0;
+                while (q < cat.e and b[q] != ')' and n2 < tmp.len) : (n2 += 1) { tmp[n2] = b[q]; q += 1; }
+                if (n2 > 0) metaPut(&used, 4, tmp[0..n2]);
+            }
+        }
+    }
+    // 파일 지문 — /ID 배열의 첫 문자열을 16진수로
+    if (rfind(b, "/ID", b.len - 1)) |ia| {
+        var q = ia + 3;
+        while (q < b.len and b[q] != '[') q += 1;
+        q += 1;
+        while (q < b.len and isSpace(b[q])) q += 1;
+        var hex: [64]u8 = undefined;
+        var hn: u32 = 0;
+        const HEXD = "0123456789abcdef";
+        if (q < b.len and b[q] == '<') {
+            q += 1;
+            while (q < b.len and b[q] != '>' and hn < hex.len) : (hn += 1) { hex[hn] = b[q]; q += 1; }
+        } else if (q < b.len and b[q] == '(') {
+            q += 1;
+            while (q < b.len and b[q] != ')' and hn + 2 <= hex.len) {
+                hex[hn] = HEXD[b[q] >> 4];
+                hex[hn + 1] = HEXD[b[q] & 15];
+                hn += 2;
+                q += 1;
+            }
+        }
+        if (hn > 0) metaPut(&used, 2, hex[0..hn]);
+    }
+}
+
 
 var info_buf: [2048]u8 = undefined;
 var info_off: [8]u32 = undefined;

@@ -107,6 +107,28 @@ export class PDFDocument {
   readonly attachments: { name: string }[];
   /** XFA 양식인가 — 그렇다면 쪽이 거의 비어 있는 것이 정상이다 */
   readonly isXfa: boolean;
+  /**
+   * 문서가 허락한 것들. 암호가 없으면 모두 true 다.
+   *
+   * 강제가 아니라 문서가 밝힌 뜻이다 — 뷰어가 인쇄·복사 단추를 흐리게 하는
+   * 데 쓴다(pdf.js 의 getPermissions 와 같은 비트다).
+   */
+  readonly permissions: {
+    print: boolean; modify: boolean; copy: boolean; annotate: boolean;
+    fillForms: boolean; accessibility: boolean; assemble: boolean; printHighRes: boolean;
+  };
+  /** 열 때 옆판을 어떻게 둘지 — UseOutlines·UseThumbs·FullScreen … (/PageMode) */
+  readonly pageMode: string;
+  /** 한 쪽·두 쪽 보기 — SinglePage·TwoColumnLeft … (/PageLayout) */
+  readonly pageLayout: string;
+  /** 파일 지문(/ID). 문서마다 다른 값이라 마지막 쪽·확대율을 저장하는 열쇠로 쓴다 */
+  readonly fingerprint: string;
+  /** 태그 PDF 인가 — 읽는 차례 정보가 들어 있다는 뜻 */
+  readonly tagged: boolean;
+  /** 문서 언어 (/Lang) */
+  readonly lang: string;
+  /** 쪽 라벨(i, ii, A-1 …). 문서가 안 적어 두면 빈 배열 */
+  readonly pageLabels: string[];
   private sigsRaw: NonNullable<OpenMsg["sigs"]>;
 
   private constructor(cl: PDFClient, r: OpenMsg, raw: Uint8Array) {
@@ -119,6 +141,23 @@ export class PDFDocument {
     this.layers = r.layers ?? [];
     this.attachments = r.atts ?? [];
     this.isXfa = r.xfa === true;
+    // /P 비트. 규격이 정한 자리다(3=인쇄, 4=고침, 5=복사, 6=주석 …).
+    //
+    // 이 값은 **원래 음수로 적힌다** — 위쪽 비트가 다 켜져 있기 때문이다.
+    // 그래서 "음수면 제한 없음" 으로 보면 안 된다. 부호 없는 값으로 바꿔
+    // 비트만 본다. 암호가 없으면 -1 이라 모든 비트가 켜져 저절로 전부 허락이 된다.
+    const p = r.perm ?? -1;
+    const can = (bit: number) => ((p >>> 0) & (1 << (bit - 1))) !== 0;
+    this.permissions = {
+      print: can(3), modify: can(4), copy: can(5), annotate: can(6),
+      fillForms: can(9), accessibility: can(10), assemble: can(11), printHighRes: can(12),
+    };
+    this.pageMode = r.pageMode ?? "";
+    this.pageLayout = r.pageLayout ?? "";
+    this.fingerprint = r.fingerprint ?? "";
+    this.tagged = r.tagged === true;
+    this.lang = r.lang ?? "";
+    this.pageLabels = r.labels ?? [];
     this.sigsRaw = r.sigs ?? [];
   }
 

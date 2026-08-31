@@ -44,6 +44,20 @@ export type OpenMsg = {
   atts?: { name: string }[];
   /** XFA 양식인가 — 우리도 남들도 제대로 못 그린다 */
   xfa?: boolean;
+  /** 암호 사전의 권한 비트(/P). 암호가 없으면 -1 */
+  perm?: number;
+  /** 열 때 옆판을 어떻게 둘지 (/PageMode) */
+  pageMode?: string;
+  /** 한 쪽·두 쪽 보기 (/PageLayout) */
+  pageLayout?: string;
+  /** 파일 지문(/ID 첫 문자열, 16진수) — 문서별 상태 저장 열쇠 */
+  fingerprint?: string;
+  /** 태그 PDF 인가 (/MarkInfo /Marked) */
+  tagged?: boolean;
+  /** 문서 언어 (/Lang) */
+  lang?: string;
+  /** 쪽 라벨(i, ii, A-1 …). 없으면 빈 배열 */
+  labels?: string[];
   sigs?: {
     name: string; date: string; reason: string; sub: string;
     der: Uint8Array; range: number[]; covers: boolean;

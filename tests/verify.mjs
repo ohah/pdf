@@ -1117,6 +1117,32 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
 }
 
 
+// 문서 한 벌 정보 — 쪽 라벨·열 때 설정·지문·권한
+{
+  const r = await load('labels.pdf');
+  const S = (ptr, off, len) => (len > 0 ? dec.decode(new Uint8Array(r.ex.memory.buffer, ptr + off, len)) : '');
+  const e = r.ex;
+  const labs = [];
+  for (let i = 0; i < e.pageLabelCount(); i++) labs.push(S(e.pageLabelPtr(), e.pageLabelOff(i), e.pageLabelLen(i)));
+  ok('쪽 라벨: 로마자와 접두사', JSON.stringify(labs) === '["i","ii","A-1","A-2"]', JSON.stringify(labs));
+  const meta = (i) => S(e.metaTextPtr(), e.metaOff(i), e.metaLen(i));
+  ok('열 때 옆판(/PageMode)', meta(0) === 'UseOutlines', meta(0));
+  ok('쪽 배치(/PageLayout)', meta(1) === 'TwoColumnLeft', meta(1));
+  ok('파일 지문(/ID)', meta(2) === '0102ab', meta(2));
+  ok('태그 PDF(/MarkInfo)', meta(3) === '1', meta(3));
+  ok('문서 언어(/Lang)', meta(4) === 'ko-KR', meta(4));
+  ok('암호 없으면 권한 -1', e.permissions() === -1, e.permissions());
+}
+{
+  const r = await load('enc-perm.pdf');
+  const p2 = r.ex.permissions();
+  const can = (b) => ((p2 >>> 0) & (1 << (b - 1))) !== 0;
+  ok('권한 비트를 읽는다', p2 === -3904, p2);
+  ok('인쇄 금지', !can(3));
+  ok('복사 금지', !can(5));
+  ok('권한 제한 문서도 열린다', r.text.includes('permission'), r.text.slice(0, 20));
+}
+
 console.log(`  기능 단언 ${pass + fail}개 중 통과 ${pass}, 실패 ${fail}`);
 if (bad.length) bad.forEach((b3) => console.log('    ✗ ' + b3));
 process.exit(fail ? 1 : 0);
