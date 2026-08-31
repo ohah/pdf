@@ -209,11 +209,144 @@ fn rfind(h: []const u8, n: []const u8, from: usize) ?usize {
         i -= 1;
     }
 }
+/// 뒤에서 찾되 꼬리부터 본다.
+///
+/// /Root · /Info · /Encrypt · /ID 는 파일 끝의 trailer 에 적힌다. 그런데
+/// rfind 는 못 찾으면 파일 앞까지 내려가므로, 그런 것이 없는 문서에서는
+/// 34MB 를 통째로 훑고 나서 "없다"고 답했다. 꼬리를 먼저 보고 거기 있으면
+/// 그것이 마지막 것이다 — 없을 때만 예전처럼 통째로 훑으므로 답은 같다.
+fn rfindTail(h: []const u8, n: []const u8) ?usize {
+    if (h.len == 0 or n.len == 0) return null;
+    const win: usize = 64 * 1024;
+    if (h.len > win) {
+        const stop = h.len - win;
+        if (rfind(h[stop..], n, win - 1)) |at| return stop + at;
+    }
+    return rfind(h, n, h.len - 1);
+}
+
+/// trailer 딕셔너리 안에서 키를 찾는다. 없으면 파일 전체를 뒤진다.
+///
+/// /Root · /Info · /Encrypt · /ID 는 파일 끝의 trailer 에 적힌다. 예전에는
+/// 파일 전체에서 마지막 것을 찾았는데, 그 키가 없는 문서에서는 없다는 것을
+/// 확인하려고 34MB 를 통째로 훑었다 — 34MB 문서를 여는 값의 절반이 이것이었다.
+///
+/// 이제 trailer 를 먼저 잡고 거기서 본다. 갱신이 여러 번 얹힌 문서는
+/// /Prev 를 따라 이전 trailer 도 본다. trailer 를 못 잡으면 예전처럼
+/// 통째로 훑는다 — 망가진 파일에서 답이 달라지지 않게 하려는 것이다.
+fn trailerKey(b: []const u8, key: []const u8) ?usize {
+    var seen: u32 = 0;
+    var at = trailerStart(b);
+    while (at) |ts| {
+        const te = dictEndFrom(b, ts);
+        if (find(b[ts..te], key, 0)) |k| return ts + k;
+        seen += 1;
+        if (seen > 32) break; // 갱신이 끝없이 얽힌 파일에서 멈추기 위한 것
+        at = prevTrailer(b, ts, te);
+    }
+    if (at == null and seen == 0) {
+        // trailer 를 못 잡았다 — 옛 방식으로
+        return rfind(b, key, b.len - 1);
+    }
+    return null;
+}
+
+/// 파일 끝의 trailer 딕셔너리가 시작하는 자리.
+///
+/// "trailer" 라고 적힌 옛 꼴과, xref 자체가 스트림인 새 꼴 둘 다 본다.
+/// 새 꼴은 startxref 가 가리키는 객체의 딕셔너리가 trailer 다.
+fn trailerStart(b: []const u8) ?usize {
+    if (b.len == 0) return null;
+    const win: usize = 64 * 1024;
+    const from = if (b.len > win) b.len - win else 0;
+    if (rfind(b[from..], "trailer", b.len - from - 1)) |t| {
+        var p = from + t + 7;
+        while (p < b.len and isSpace(b[p])) p += 1;
+        if (p + 1 < b.len and b[p] == '<' and b[p + 1] == '<') return p;
+    }
+    // xref 스트림 — startxref 가 가리키는 객체를 본다
+    if (rfind(b[from..], "startxref", b.len - from - 1)) |sx| {
+        var p = from + sx + 9;
+        const off = readUint(b, &p);
+        if (off > 0 and off < b.len) {
+            // 그 자리에 "N 0 obj" 가 있으면 그 딕셔너리다
+            if (find(b[off..@min(b.len, off + 64)], "obj", 0)) |o| {
+                var q = off + o + 3;
+                while (q < b.len and isSpace(b[q])) q += 1;
+                if (q + 1 < b.len and b[q] == '<' and b[q + 1] == '<') return q;
+            }
+        }
+    }
+    return null;
+}
+
+/// "<<" 에서 시작해 짝이 맞는 ">>" 까지
+fn dictEndFrom(b: []const u8, ds: usize) usize {
+    var depth: u32 = 0;
+    var r = ds;
+    while (r + 1 < b.len) : (r += 1) {
+        if (b[r] == '<' and b[r + 1] == '<') { depth += 1; r += 1; continue; }
+        if (b[r] == '>' and b[r + 1] == '>') {
+            if (depth > 0) depth -= 1;
+            r += 1;
+            if (depth == 0) return @min(b.len, r + 1);
+            continue;
+        }
+    }
+    return b.len;
+}
+
+/// 이 trailer 가 가리키는 이전 xref 의 trailer 시작 자리
+fn prevTrailer(b: []const u8, ts: usize, te: usize) ?usize {
+    const pa = find(b[ts..te], "/Prev", 0) orelse return null;
+    var p = ts + pa + 5;
+    const off = readUint(b, &p);
+    if (off == 0 or off >= b.len) return null;
+    // 옛 꼴이면 그 자리부터 "trailer" 가 곧 나온다
+    const look_end = @min(b.len, off + 1024 * 1024);
+    if (find(b[off..look_end], "trailer", 0)) |t| {
+        var q = off + t + 7;
+        while (q < b.len and isSpace(b[q])) q += 1;
+        if (q + 1 < b.len and b[q] == '<' and b[q + 1] == '<') return q;
+    }
+    // xref 스트림이면 그 객체의 딕셔너리
+    if (find(b[off..@min(b.len, off + 64)], "obj", 0)) |o| {
+        var q = off + o + 3;
+        while (q < b.len and isSpace(b[q])) q += 1;
+        if (q + 1 < b.len and b[q] == '<' and b[q + 1] == '<') return q;
+    }
+    return null;
+}
+
+/// 엔진에서 가장 뜨거운 고리다. 문서 하나를 여는 동안 파일 크기의 몇 배를
+/// 이 함수로 훑는다.
+///
+/// 한 바이트씩 밀며 비교하면 바이트마다 서너 클럭이 든다. 첫 글자만 찾을
+/// 때는 여덟 바이트를 u64 로 한 번에 읽어 본다 — 그 안에 첫 글자가 없으면
+/// 여덟 칸을 통째로 건너뛴다. 찾는 것과 답은 같고 훑는 값만 준다.
 fn find(h: []const u8, n: []const u8, from: usize) ?usize {
     if (n.len == 0 or n.len > h.len) return null;
+    const last = h.len - n.len;
+    const c0 = n[0];
+    const ones: u64 = 0x0101010101010101;
+    const highs: u64 = 0x8080808080808080;
+    const spread: u64 = ones *% @as(u64, c0);
     var i: usize = from;
-    while (i + n.len <= h.len) : (i += 1) {
-        if (std_mem_eq(h[i .. i + n.len], n)) return i;
+    while (i <= last) {
+        // 여덟 바이트 중에 첫 글자가 있는지 — 없으면 여덟 칸 건너뛴다
+        while (i + 8 <= last) {
+            const w: u64 = @bitCast(h[i..][0..8].*);
+            const x = w ^ spread;
+            const hit = (x -% ones) & ~x & highs;
+            if (hit != 0) {
+                i += @ctz(hit) >> 3;
+                break;
+            }
+            i += 8;
+        }
+        if (i > last) return null;
+        if (h[i] == c0 and std_mem_eq(h[i .. i + n.len], n)) return i;
+        i += 1;
     }
     return null;
 }
@@ -242,6 +375,8 @@ fn readUint(b: []const u8, p: *usize) u32 {
 //
 // 순위가 하나 더 있다. 객체 스트림을 풀어 둔 자리는 원본 뒤에 붙지만 새 판이
 // 아니라 원본의 사본이다. 그래서 원본 구간에 평문으로 있는 것을 먼저 본다.
+var max_obj: u32 = 0;
+
 const OBJ_IDX_MAX = 65536;
 var obj_off: [OBJ_IDX_MAX]u32 = undefined;
 var obj_rank: [OBJ_IDX_MAX]u8 = undefined; // 0=없음, 클수록 믿을 만함
@@ -274,7 +409,16 @@ fn objRank(b: []const u8, start: usize) u8 {
 
 fn buildObjIndex(b: []const u8) void {
     @memset(&obj_rank, 0);
-    var i: usize = 0;
+    max_obj = 0;
+    addObjIndex(b, 0);
+}
+
+/// 색인을 from 부터 이어 훑는다. 이미 만든 것을 지우지 않는다.
+///
+/// 가장 큰 객체 번호도 여기서 같이 센다. 예전에는 그것만 보려고 파일을
+/// 한 번 더 훑었는데, 어차피 여기서 객체 머리를 다 읽으므로 덤이다.
+fn addObjIndex(b: []const u8, from: usize) void {
+    var i: usize = from;
     while (i + 4 < b.len) {
         const at = find(b, " obj", i) orelse break;
         if (objHeadAt(b, at)) |h| {
@@ -285,6 +429,8 @@ fn buildObjIndex(b: []const u8) void {
                     obj_off[h.num] = @intCast(at + 4);
                 }
             }
+            // 새로 만드는 객체는 이 뒤에 붙여야 트레일러의 /Size 안에 든다
+            if (h.num > max_obj and h.num < 500000) max_obj = h.num;
         }
         i = at + 4;
     }
@@ -520,14 +666,11 @@ fn expandObjectStreams() void {
     }
 }
 
-var max_obj: u32 = 0;
-
 export fn parse(len: usize) u32 {
     in_len = len;
     obj_idx_len = 0;
     page_count = 0;
     pages_obj = 0;
-    max_obj = 0;
     if (len < 8) return 0;
     {
         const head = inputSlice2(len);
@@ -545,34 +688,14 @@ export fn parse(len: usize) u32 {
     expandObjectStreams();
     layoutScratch();
     const b = searchSlice();
-    buildObjIndex(b);
+    // 원본 쪽 색인은 방금 만든 것 그대로다. 암호가 걸려 스트림을 그 자리에서
+    // 푼 경우에만 바이트가 달라졌으므로 그때만 처음부터 다시 만든다.
+    if (enc_on) buildObjIndex(b) else addObjIndex(b, in_len);
     const total = b.len;
-
-    // 가장 큰 객체 번호. 새로 만드는 객체는 이 뒤에 붙여야 트레일러의
-    // /Size 안에 들어온다 — 범위를 벗어나면 리더가 통째로 무시한다.
-    {
-        var q: usize = 0;
-        while (q + 4 < total) {
-            const at = find(b, " obj", q) orelse break;
-            var j = at;
-            while (j > 0 and isSpace(b[j - 1])) j -= 1;
-            while (j > 0 and b[j - 1] >= '0' and b[j - 1] <= '9') j -= 1;
-            var k = j;
-            while (k > 0 and isSpace(b[k - 1])) k -= 1;
-            var st = k;
-            while (st > 0 and b[st - 1] >= '0' and b[st - 1] <= '9') st -= 1;
-            if (st < k) {
-                var pp: usize = st;
-                const nn = readUint(b, &pp);
-                if (nn > max_obj and nn < 500000) max_obj = nn;
-            }
-            q = at + 4;
-        }
-    }
 
     // trailer 나 Catalog 에서 /Root 를 찾는다
     var root: u32 = 0;
-    if (rfind(b, "/Root", total - 1)) |at| {
+    if (trailerKey(b[0..total], "/Root")) |at| {
         var p = at + 5;
         root = readUint(b, &p);
     }
@@ -2426,12 +2549,12 @@ export fn apply() usize {
 
     // 4) trailer — 이전 xref 를 가리킨다
     var prev: u32 = 0;
-    if (rfind(b[0..in_len], "startxref", in_len - 1)) |at| {
+    if (rfindTail(b[0..in_len], "startxref")) |at| {
         var p = at + 9;
         prev = readUint(b, &p);
     }
     var root: u32 = 0;
-    if (rfind(b, "/Root", b.len - 1)) |at| {
+    if (trailerKey(b, "/Root")) |at| {
         var p = at + 5;
         root = readUint(b, &p);
     }
@@ -6721,7 +6844,7 @@ fn setupEncryption(b: []const u8) void {
     enc_key_len = 0;
     enc_obj = 0;
     doc_perm = -1;
-    const ea = rfind(b, "/Encrypt", b.len - 1) orelse return;
+    const ea = trailerKey(b, "/Encrypt") orelse return;
     var p = ea + 8;
     while (p < b.len and isSpace(b[p])) p += 1;
     if (p >= b.len or !isDigit(b[p])) return;
@@ -6831,7 +6954,7 @@ fn setupEncryption(b: []const u8) void {
     // /ID 배열의 첫 문자열
     var id_buf: [64]u8 = undefined;
     var id_len: u32 = 0;
-    if (rfind(b, "/ID", b.len - 1)) |ia| {
+    if (trailerKey(b, "/ID")) |ia| {
         var q = ia + 3;
         while (q < b.len and b[q] != '[') q += 1;
         q += 1;
@@ -7018,7 +7141,7 @@ export fn permissions() i32 { return doc_perm; }
 
 /// 카탈로그(/Root) 딕셔너리 자리.
 fn catalogRange(b: []const u8) ?struct { s: usize, e: usize } {
-    const at = rfind(b, "/Root", b.len - 1) orelse return null;
+    const at = trailerKey(b, "/Root") orelse return null;
     var p2 = at + 5;
     while (p2 < b.len and isSpace(b[p2])) p2 += 1;
     if (p2 >= b.len or !isDigit(b[p2])) return null;
@@ -7289,7 +7412,7 @@ fn collectMeta(b: []const u8) void {
         }
     }
     // 파일 지문 — /ID 배열의 첫 문자열을 16진수로
-    if (rfind(b, "/ID", b.len - 1)) |ia| {
+    if (trailerKey(b, "/ID")) |ia| {
         var q = ia + 3;
         while (q < b.len and b[q] != '[') q += 1;
         q += 1;
@@ -7332,7 +7455,7 @@ fn collectInfo(b: []const u8) void {
     const keys = [_][]const u8{ "/Title", "/Author", "/Subject", "/Creator", "/Producer", "/CreationDate", "/ModDate" };
     var is: usize = 0;
     var ie: usize = 0;
-    if (rfind(b, "/Info", b.len - 1)) |ia| {
+    if (trailerKey(b, "/Info")) |ia| {
         var p = ia + 5;
         while (p < b.len and isSpace(b[p])) p += 1;
         if (p < b.len and isDigit(b[p])) {
@@ -11681,7 +11804,7 @@ export fn parseSecond(len: usize) u32 {
 
     // 페이지 트리
     var root: u32 = 0;
-    if (rfind(b, "/Root", b.len - 1)) |at| {
+    if (trailerKey(b, "/Root")) |at| {
         var p = at + 5;
         root = readUint(b, &p);
     }
@@ -11947,7 +12070,7 @@ export fn merge() usize {
         appendStr(&pos, " 00000 n \n");
     }
     var prev: u32 = 0;
-    if (rfind(a[0..in_len], "startxref", in_len - 1)) |at| {
+    if (rfindTail(a[0..in_len], "startxref")) |at| {
         var p = at + 9;
         prev = readUint(a, &p);
     }
@@ -12451,7 +12574,7 @@ export fn compact() usize {
     if (pages_obj < reach.len) reach[pages_obj] = true;
 
     var root: u32 = 0;
-    if (rfind(b, "/Root", b.len - 1)) |at| {
+    if (trailerKey(b, "/Root")) |at| {
         var p = at + 5;
         root = readUint(b, &p);
     }
