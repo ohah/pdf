@@ -37,12 +37,13 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 | `getSignatures` · `getSignatureData` | ✅ `signatures()` — 검증까지 |
 | `getMetadata` (Info) | ✅ `info` · XMP 은 ❌ |
 | `getData` | ✅ `data()` |
-| `getPermissions` | ❌ |
-| `getPageLabels` | ❌ |
+| `getPermissions` | ✅ `permissions` — 인쇄·복사·고침 … |
+| `getPageLabels` | ✅ `pageLabels` |
 | `getDestinations` / `getDestination` | ❌ (엔진엔 있고 API 가 없다) |
-| `getPageMode` · `getPageLayout` · `getViewerPreferences` · `getOpenAction` | ❌ |
-| `fingerprints` | ❌ |
-| `getMarkInfo` | ❌ |
+| `getPageMode` · `getPageLayout` | ✅ `pageMode` · `pageLayout` (덤으로 `lang`) |
+| `getViewerPreferences` · `getOpenAction` | ❌ |
+| `fingerprints` | ✅ `fingerprint` |
+| `getMarkInfo` | ✅ `tagged` |
 | `getFieldObjects` (문서 전체) | ⚠️ 쪽 단위 `fields(page)` 만 |
 | `getJSActions` · `hasJSActions` · `getCalculationOrderIds` | ❌ 의도적 미지원 (뷰어가 스크립트를 안 돌린다) |
 | `getPageIndex(ref)` · `cachedPageNumber(ref)` | ❌ 객체 ref 개념 없음 |
@@ -93,9 +94,9 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 
 이 표에서 ❌ 인 것 중 뷰어에 먼저 아쉬운 순서:
 
-1. 문서 검색(정규화 + 하이라이트)
-2. 주석 전체 열거 + 주석 층
-3. 문서 정보 — 권한 · 쪽 라벨 · 이름 목적지 · 뷰어 설정 · fingerprint
+1. 주석 전체 열거 + 주석 층
+2. 이름 목적지 · 뷰어 설정 · XMP
+3. 글자 항목의 글꼴 이름·줄 끝 표시, 구조 나무
 4. 스트리밍/진행률 (큰 파일 첫 쪽을 빨리)
 5. 표준 14종 실제 글꼴 데이터 (자간 정확도)
 6. Node.js 실행 (캔버스 팩토리 교체)
