@@ -200,11 +200,34 @@ fn isSpace(c: u8) bool {
 }
 
 /// haystack 에서 needle 을 뒤에서부터 찾는다.
+/// 뒤에서부터 찾는다. find 와 같은 수를 쓰되 방향만 반대다 —
+/// 여덟 바이트를 한 번에 읽어 첫 글자가 없으면 여덟 칸을 건너뛴다.
+/// /Root · /Encrypt 처럼 파일 끝에 적히는 것을 찾는 데 쓰므로 뜨겁다.
 fn rfind(h: []const u8, n: []const u8, from: usize) ?usize {
     if (n.len == 0 or n.len > h.len) return null;
-    var i: usize = @min(from, h.len - n.len);
+    const last = h.len - n.len;
+    var i: usize = @min(from, last);
+    const c0 = n[0];
+    const ones: u64 = 0x0101010101010101;
+    const highs: u64 = 0x8080808080808080;
+    const spread: u64 = ones *% @as(u64, c0);
     while (true) {
-        if (std_mem_eq(h[i .. i + n.len], n)) return i;
+        var gone = false;
+        while (i >= 7) {
+            const w: u64 = @bitCast(h[i - 7 ..][0..8].*);
+            const x = w ^ spread;
+            const hit = (x -% ones) & ~x & highs;
+            if (hit != 0) {
+                // 켜진 것 중 가장 높은 자리 = 가장 뒤쪽 바이트
+                const b: usize = (63 - @clz(hit)) >> 3;
+                i = i - 7 + b;
+                break;
+            }
+            if (i < 8) { gone = true; break; }
+            i -= 8;
+        }
+        if (gone) return null;
+        if (i <= last and h[i] == c0 and std_mem_eq(h[i .. i + n.len], n)) return i;
         if (i == 0) return null;
         i -= 1;
     }
@@ -241,7 +264,7 @@ fn trailerKey(b: []const u8, key: []const u8) ?usize {
         const te = dictEndFrom(b, ts);
         if (find(b[ts..te], key, 0)) |k| return ts + k;
         seen += 1;
-        if (seen > 32) break; // 갱신이 끝없이 얽힌 파일에서 멈추기 위한 것
+        if (seen > 256) break; // 갱신이 끝없이 얽힌 파일에서 멈추기 위한 것
         at = prevTrailer(b, ts, te);
     }
     if (seen == 0) {
@@ -253,10 +276,19 @@ fn trailerKey(b: []const u8, key: []const u8) ?usize {
 
 /// trailer 에 없으면 파일 전체에서 한 번 더 찾는다.
 ///
-/// /Root 처럼 없으면 문서를 못 여는 키에 쓴다. 멀쩡한 문서는 trailer 에
-/// 반드시 있으므로 이 되돌아가는 길은 거의 밟히지 않는다 — 망가진 문서만
-/// 예전처럼 훑어 살려 낸다. /Encrypt·/Info·/ID 는 trailer 에 없으면 정말
-/// 없는 것이므로 여기 쓰지 않는다(그게 34MB 를 훑던 값이었다).
+/// 틀렸을 때 값이 큰 키에 쓴다.
+///
+///   /Root    — 없으면 문서를 아예 못 연다.
+///   /Encrypt — 놓치면 암호글을 그냥 글로 읽어 깨진 글자를 내놓고, 게다가
+///              "안 잠긴 문서, 인쇄·복사 다 됨" 이라고 답한다. 조용히
+///              틀리는 데다 권한까지 잘못 말한다. 갱신이 얹힌 문서 중에는
+///              새 trailer 에 /Encrypt 를 안 적는 것이 실제로 있다.
+///
+///   /ID      — 암호 열쇠를 만드는 재료다. 놓치면 열쇠가 달라져 맞는 암호를
+///              줘도 안 열린다. 게다가 문서 지문이기도 하다.
+///
+/// /Info 는 여기 쓰지 않는다 — 규격이 trailer 에 적으라고 하고, 놓쳐도
+/// 문서 정보가 비는 정도라 훑는 값을 치를 만하지 않다.
 fn trailerKeyOrScan(b: []const u8, key: []const u8) ?usize {
     if (trailerKey(b, key)) |at| return at;
     if (b.len == 0) return null;
@@ -6875,7 +6907,7 @@ fn setupEncryption(b: []const u8) void {
     enc_key_len = 0;
     enc_obj = 0;
     doc_perm = -1;
-    const ea = trailerKey(b, "/Encrypt") orelse return;
+    const ea = trailerKeyOrScan(b, "/Encrypt") orelse return;
     var p = ea + 8;
     while (p < b.len and isSpace(b[p])) p += 1;
     if (p >= b.len or !isDigit(b[p])) return;
@@ -6985,7 +7017,7 @@ fn setupEncryption(b: []const u8) void {
     // /ID 배열의 첫 문자열
     var id_buf: [64]u8 = undefined;
     var id_len: u32 = 0;
-    if (trailerKey(b, "/ID")) |ia| {
+    if (trailerKeyOrScan(b, "/ID")) |ia| {
         var q = ia + 3;
         while (q < b.len and b[q] != '[') q += 1;
         q += 1;
@@ -7443,7 +7475,7 @@ fn collectMeta(b: []const u8) void {
         }
     }
     // 파일 지문 — /ID 배열의 첫 문자열을 16진수로
-    if (trailerKey(b, "/ID")) |ia| {
+    if (trailerKeyOrScan(b, "/ID")) |ia| {
         var q = ia + 3;
         while (q < b.len and b[q] != '[') q += 1;
         q += 1;
