@@ -182,6 +182,11 @@ type Exports = {
   setOcOn?: (i: number, on: number) => void;
   sigCount?: () => number;
   sigRange?: (i: number, k: number) => number;
+  openPage?: () => number;
+  openKind?: () => number;
+  openX?: () => number;
+  openY?: () => number;
+  openZoom?: () => number;
   sigTextPtr?: () => number;
   sigDerOff?: (i: number) => number;
   sigDerLen?: (i: number) => number;
@@ -535,6 +540,20 @@ async function open(bytes: Uint8Array, pw: string) {
       page: e.destPageOf!(i),
     });
   }
+  // 열 때 갈 자리 — 문서가 "3쪽 이 자리부터" 라고 적어 둔 것
+  const KINDS = ["", "XYZ", "Fit", "FitH", "FitV", "FitR", "FitB", "FitBH", "FitBV"] as const;
+  const okind = e.openKind?.() ?? 0;
+  const num = (v: number) => (Number.isNaN(v) ? null : v);
+  const openAction = okind > 0 && (e.openPage?.() ?? -1) >= 0
+    ? {
+        page: e.openPage!(),
+        kind: KINDS[okind] ?? "Fit",
+        x: num(e.openX?.() ?? NaN),
+        y: num(e.openY?.() ?? NaN),
+        zoom: num(e.openZoom?.() ?? NaN),
+      }
+    : null;
+
   // 뷰어 설정 — 도구줄을 감출지, 제목을 창에 띄울지 …
   const prefs: Record<string, string> = {};
   for (let i = 0; i < (e.viewPrefCount?.() ?? 0); i++) {
@@ -563,7 +582,7 @@ async function open(bytes: Uint8Array, pw: string) {
     });
   }
   return {
-    dests, prefs, xmp, struct,
+    dests, prefs, xmp, struct, openAction,
     pages: e.pageCount(), locked: (e.isEncrypted?.() ?? 0) === 1,
     // 쪽이 너무 많아 뒤를 잘랐는가 — 조용히 잘라 놓고 다 보여 주는 척하지 않는다
     truncated: (e.pagesTruncated?.() ?? 0) === 1,

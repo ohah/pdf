@@ -163,6 +163,20 @@ export type Attachment = { name: string };
 /** 이름 목적지 하나. 못 풀면 `page` 는 -1 */
 export type Destination = { name: string; page: number };
 
+/**
+ * 문서가 적어 둔 "열면 여기부터" (/OpenAction). 쪽은 0부터다.
+ *
+ * 좌표는 쪽 좌표(pt)이고, null 은 "지금 값을 그대로 두라" 는 뜻이다 —
+ * 규격이 그렇게 정한다(12.3.2.2).
+ */
+export type OpenAction = {
+  page: number;
+  kind: "XYZ" | "Fit" | "FitH" | "FitV" | "FitR" | "FitB" | "FitBH" | "FitBV";
+  x: number | null;
+  y: number | null;
+  zoom: number | null;
+};
+
 /** 글자 덩이 하나 — pdf.js 의 TextItem 자리 */
 export type TextItem = {
   str: string; x: number; y: number; size: number;
@@ -301,6 +315,14 @@ export class PDFDocument {
    * `page` 는 0부터이고, 못 풀면 -1 이다.
    */
   readonly destinations: Destination[];
+  /**
+   * 문서가 "열면 여기부터 보여라" 고 적어 둔 자리(/OpenAction). 없으면 null.
+   *
+   * `page` 는 0부터다. `kind` 는 XYZ·Fit·FitH … 이고, 좌표는 쪽 좌표(pt)라
+   * null 이면 "지금 값을 그대로 두라" 는 뜻이다. 갈 데가 없는 동작(문서를
+   * 열 때 실행하는 자바스크립트 따위)은 null 로 온다.
+   */
+  readonly openAction: OpenAction | null;
   /** 뷰어 설정 (/ViewerPreferences) — HideToolbar·Direction·PrintScaling … */
   readonly viewerPreferences: Record<string, string>;
   /** XMP 메타데이터 원문(RDF/XML). 문서에 없으면 빈 문자열 */
@@ -336,6 +358,7 @@ export class PDFDocument {
     this.lang = r.lang ?? "";
     this.pageLabels = r.labels ?? [];
     this.destinations = r.dests ?? [];
+    this.openAction = (r.openAction as OpenAction | null | undefined) ?? null;
     this.viewerPreferences = r.prefs ?? {};
     this.xmp = r.xmp ?? "";
     this.structFlat = r.struct ?? [];

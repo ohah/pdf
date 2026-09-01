@@ -89,6 +89,14 @@ export type OpenMsg = {
   labels?: string[];
   /** 이름 목적지 — 목차·링크가 이름으로 가리키는 자리 */
   dests?: { name: string; page: number }[];
+  /** 열 때 갈 자리 (/OpenAction). 갈 데가 없으면 null */
+  openAction?: {
+    page: number;
+    kind: string;
+    x: number | null;
+    y: number | null;
+    zoom: number | null;
+  } | null;
   /** 뷰어 설정 (/ViewerPreferences) */
   prefs?: Record<string, string>;
   /** XMP 메타데이터 원문 (RDF/XML). 없으면 빈 문자열 */

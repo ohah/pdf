@@ -69,6 +69,21 @@ async function load(file, page = 0, feed = true, formOn = true) {
   return { ex, ops, counts, text, need, drew, slot, fld, pages: ex.pageCount() };
 }
 
+// --- 세는 상한이 없다
+//
+// 예전에는 쪽당 그림 12개·글꼴 32개·명령 524288개로 못박혀 있었다.
+// 그 위는 조용히 빠졌다 — 20만 개짜리 쪽은 절반만 그려졌다.
+{
+  const a = await load('caps-imgs.pdf');
+  ok('상한 없음: 그림 40개', a && a.ex.imageSlots() === 40, a && a.ex.imageSlots());
+  const b = await load('caps-fonts.pdf');
+  ok('상한 없음: 글꼴 40개', b && b.ex.fontCount() === 40, b && b.ex.fontCount());
+  const c = await load('caps-ops.pdf');
+  // 네모 하나에 자리(5)와 채우기(6) 둘
+  ok('상한 없음: 네모 20만 개', c && c.counts[5] >= 200000 && c.counts[6] >= 200000,
+    c && `${c.counts[5]}/${c.counts[6]}`);
+}
+
 // --- 빽빽한 쪽 (작은 파일 + 1MB 내용)
 //
 // 내용을 모으는 자리를 "남은 자리" 에서 잘라 쓰던 때는 이 쪽이 통째로
