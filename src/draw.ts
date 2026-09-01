@@ -115,16 +115,23 @@ function inlineCanvas(
   comps: number, color: string, tag?: string,
   /** 여벌 판을 만들 본보기. Node 에는 document 가 없어 이것이 있어야 만든다 */
   like?: { constructor: unknown } | null,
+  /** 화면에 놓일 크기(화소). 원본이 그보다 크면 줄여 만든다 */
+  fitW = 0, fitH = 0,
 ): HTMLCanvasElement | null {
-  const key = `${tag ?? ""}${off}:${len}:${isMask ? color : ""}`;
+  // 스캔본은 5188x6930(3600만 화소) 같은 그림을 담고 있다. 그걸 원본
+  // 해상도로 펼치면 RGBA 로만 137MB 이고, 캔버스 뒷면까지 치면 그 두 배다 —
+  // 화면에는 595pt 폭으로 그리면서. 놓일 크기에 맞춰 줄여 만든다.
+  const outW = Math.max(1, Math.min(w, fitW > 0 ? Math.ceil(fitW) : w));
+  const outH = Math.max(1, Math.min(h, fitH > 0 ? Math.ceil(fitH) : h));
+  const key = `${tag ?? ""}${off}:${len}:${outW}x${outH}:${isMask ? color : ""}`;
   const hit = inlineCache.get(key);
   if (hit) return hit;
   if (off + len > src.length) return null;
-  const cv = scratch(w, h, like ?? null) as HTMLCanvasElement | null;
+  const cv = scratch(outW, outH, like ?? null) as HTMLCanvasElement | null;
   if (!cv) return null;
   const c = cv.getContext("2d");
   if (!c) return null;
-  const img = c.createImageData(w, h);
+  const img = c.createImageData(outW, outH);
   const row = Math.ceil((w * bpc * comps) / 8);
   let r = 0, g2 = 0, b2 = 0;
   if (isMask) {
@@ -136,22 +143,40 @@ function inlineCanvas(
       if (h) { const v = parseInt(h[1], 16); r = (v >> 16) & 255; g2 = (v >> 8) & 255; b2 = v & 255; }
     }
   }
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const d = (y * w + x) * 4;
+  const shrink = outW !== w || outH !== h;
+  for (let oy = 0; oy < outH; oy++) {
+    const y = outH === h ? oy : Math.min(h - 1, Math.floor((oy * h) / outH));
+    // 줄일 때 이 출력 화소가 덮는 원본 칸
+    const y1 = shrink ? Math.min(h, Math.max(y + 1, Math.ceil(((oy + 1) * h) / outH))) : y + 1;
+    for (let ox = 0; ox < outW; ox++) {
+      const x = outW === w ? ox : Math.min(w - 1, Math.floor((ox * w) / outW));
+      const x1 = shrink ? Math.min(w, Math.max(x + 1, Math.ceil(((ox + 1) * w) / outW))) : x + 1;
+      const d = (oy * outW + ox) * 4;
       if (bpc === 1) {
-        const byte = src[off + y * row + (x >> 3)];
-        const bit = (byte >> (7 - (x & 7))) & 1;
-        // 마스크는 표본이 0 인 곳을 칠한다. Decode [1 0] 이면 반대다.
-        const on = flip ? bit === 1 : bit === 0;
+        // 1비트 마스크를 줄일 때는 덮는 칸에서 켜진 비율을 진하기로 삼는다.
+        // 한 점만 집으면 스캔본의 가는 획이 사라지고, 하나라도 켜졌으면
+        // 켜는 식이면 글자가 뭉개져 새까매진다.
+        let lit = 0;
+        let seen = 0;
+        for (let sy = y; sy < y1; sy++) {
+          for (let sx = x; sx < x1; sx++) {
+            const bt = src[off + sy * row + (sx >> 3)];
+            const b1 = (bt >> (7 - (sx & 7))) & 1;
+            if (flip ? b1 === 1 : b1 === 0) lit += 1;
+            seen += 1;
+          }
+        }
+        const cover = seen > 0 ? lit / seen : 0;
+        const on = cover > 0;
         if (isMask) {
           img.data[d] = r; img.data[d + 1] = g2; img.data[d + 2] = b2;
-          img.data[d + 3] = on ? 255 : 0;
+          img.data[d + 3] = Math.round(cover * 255);
         } else {
-          const v = on ? 0 : 255;
+          const v = Math.round(255 * (1 - cover));
           img.data[d] = img.data[d + 1] = img.data[d + 2] = v;
           img.data[d + 3] = 255;
         }
+        void on;
       } else {
         const s2 = off + y * row + x * comps;
         if (comps >= 3) {
@@ -628,8 +653,12 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
         const w = ops[a], h = ops[a + 1], bpc = ops[a + 2], isMask = ops[a + 3] === 1;
         const off = ops[a + 4], len = ops[a + 5], flip = ops[a + 6] === 1;
         const comps = argc > 7 ? ops[a + 7] : 1;
+        // 지금 변환에서 단위 사각형이 화면에 차지할 크기
+        const mm = g.getTransform();
+        const onW = Math.hypot(mm.a, mm.b);
+        const onH = Math.hypot(mm.c, mm.d);
         const cv = inlineCanvas(src, off, len, w, h, bpc, isMask, flip, comps, fillCss,
-          `${tagOf(src)}${w}x${h}x${bpc}x${comps}:`, canvas);
+          `${tagOf(src)}${w}x${h}x${bpc}x${comps}:`, canvas, onW, onH);
         if (!cv) break;
         g.save();
         g.imageSmoothingEnabled = false;
@@ -643,7 +672,9 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
         const slot = argc > 0 ? ops[a] : 0;
         const st2 = slot > 0 ? input.stencils?.[slot - 1] : undefined;
         if (st2) {
-          const cv = inlineCanvas(st2.bytes, 0, st2.bytes.length, st2.w, st2.h, 1, true, st2.flip, 1, fillCss, st2.key, canvas);
+          const mm = g.getTransform();
+          const cv = inlineCanvas(st2.bytes, 0, st2.bytes.length, st2.w, st2.h, 1, true, st2.flip, 1,
+            fillCss, st2.key, canvas, Math.hypot(mm.a, mm.b), Math.hypot(mm.c, mm.d));
           if (cv) {
             g.save();
             g.imageSmoothingEnabled = false;

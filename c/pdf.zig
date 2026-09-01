@@ -32,6 +32,8 @@ var b2_cap: usize = 0;
 var b2_want: usize = 0;
 /// 페이지에서 꺼낸 그림 한 장을 두는 자리
 var img_off: usize = 0;
+/// JBIG2 낱장 곳간 — 문서마다 한 번 잡는다
+var jb_pool_at: usize = 0;
 var img_cap: usize = 0;
 var font_off: usize = 0;
 var font_cap: usize = 0;
@@ -71,6 +73,7 @@ export fn reserve(want_in: usize, want_out: usize) u32 {
     sub_cap = 6 * 1024 * 1024; // 폼·글리프 그림용, 깊이마다 2MB
     t1_cap = 4 * 1024 * 1024; // Type1 글리프 프로그램
     img_off = 0;
+    jb_pool_at = 0;
     font_off = 0;
     inl_off = 0;
     sub_off = 0;
@@ -3313,9 +3316,12 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
         }
         if (rb * h <= room and
             blk: {
-                // 스캔 문서를 만났을 때만 곳간을 잡는다
-                const at = zoneAlloc(jbig2.POOL) orelse break :blk false;
-                jbig2.setPool(at);
+                // 스캔 문서를 만났을 때만 곳간을 잡는다. 문서마다 한 번만 —
+                // 그릴 때마다 새로 잡았더니 한 쪽을 다섯 번 그리면 메모리가
+                // 90MB 에서 154MB 로 늘었다(자리잡개는 되돌리지 않는다).
+                if (jb_pool_at == 0) jb_pool_at = zoneAlloc(jbig2.POOL) orelse 0;
+                if (jb_pool_at == 0) break :blk false;
+                jbig2.setPool(jb_pool_at);
                 break :blk jbig2.decode(b[data..][0..length], glob, w, h, dst[0 .. rb * h]);
             })
         {

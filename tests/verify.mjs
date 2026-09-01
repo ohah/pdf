@@ -314,6 +314,26 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   const withImg = await floorOf('pdf/scanned.pdf');
   ok('그림 있는 문서: 그때 자리를 잡는다', withImg > plain, `${withImg.toFixed(0)}MB > ${plain.toFixed(0)}MB`);
 }
+// --- 여러 번 그려도 메모리가 안 는다 (자리를 그릴 때마다 새로 잡던 버그)
+{
+  const grow = async (file) => {
+    const m = await WebAssembly.instantiate(wasm, { wasi_snapshot_preview1: new Proxy({}, { get: () => () => 0 }) });
+    const ex = m.instance.exports;
+    const buf = fs.readFileSync(`${S}/${file}`);
+    ex.reserve(buf.length, 1024 * 1024);
+    new Uint8Array(ex.memory.buffer, ex.inputPtr(), buf.length).set(buf);
+    ex.parse(buf.length);
+    ex.renderPage(0);
+    const first = ex.memory.buffer.byteLength;
+    for (let i = 0; i < 5; i++) ex.renderPage(0);
+    return (ex.memory.buffer.byteLength - first) / 1048576;
+  };
+  // JBIG2 는 낱장 곳간 8MB 를 잡는다 — 그릴 때마다 새로 잡으면 그만큼씩 는다
+  const jb = await grow('jb-globals.pdf');
+  ok('여러 번 그려도 안 는다(JBIG2)', jb === 0, `${jb}MB 늘어남`);
+  const img = await grow('pdf/scanned.pdf');
+  ok('여러 번 그려도 안 는다(그림)', img === 0, `${img}MB 늘어남`);
+}
 // --- 세는 상한이 없다: 링크·주석·칸이 많은 쪽
 {
   const refs = [];
