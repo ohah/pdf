@@ -5641,7 +5641,8 @@ fn copyRefsKeeping(b: []const u8, from: usize, to: usize, pos: *usize) void {
 // 자리(/Rect)와 갈래(/FT)와 값(/V)을 들고 있고, 겉모습(/AP /N)은 그 값을
 // 그려 둔 그림이다. 우리는 자리와 값을 꺼내 화면에 진짜 입력 칸을 얹고,
 // 만들 때 값과 겉모습을 다시 써 넣는다.
-const MAX_FIELDS = 512;
+/// 문서의 입력 칸. 512 이던 것을 올렸다 — 세금·보험 서식은 그보다 많다.
+const MAX_FIELDS = 4096;
 const FieldT = struct {
     obj: u32,
     rect: [4]f32,
@@ -5663,7 +5664,7 @@ const FieldT = struct {
 };
 var fields: [MAX_FIELDS]FieldT = undefined;
 var field_n: u32 = 0;
-var fld_buf: [64 * 1024]u8 = undefined;
+var fld_buf: [512 * 1024]u8 = undefined;
 var fld_used: u32 = 0;
 
 export fn fieldCount() u32 { return field_n; }
@@ -5833,7 +5834,10 @@ fn collectFields(b: []const u8, body: usize, end: usize) void {
 
     var q = as2;
     var count: u32 = 0;
-    while (q < ae and count < 1024 and field_n < MAX_FIELDS) {
+    // /Annots 를 훑는 횟수. 1024 이던 것을 올렸다 — 링크·주석이 앞에 많이
+    // 붙은 쪽에서는 뒤에 있는 입력 칸까지 차례가 안 갔다(링크 300 + 주석
+    // 400 이 앞서면 칸은 324 개까지만 걷혔다).
+    while (q < ae and count < 8192 and field_n < MAX_FIELDS) {
         while (q < ae and isSpace(b[q])) q += 1;
         if (q >= ae or b[q] == ']') break;
         if (!isDigit(b[q])) { q += 1; continue; }
@@ -7728,11 +7732,12 @@ fn collectInfo(b: []const u8) void {
 
 // ===== 링크와 목차 =====
 
-const MAX_LINKS = 128;
+/// 쪽 하나의 링크. 128 이던 것을 올렸다 — 목차 쪽·색인 쪽은 쉽게 넘긴다.
+const MAX_LINKS = 1024;
 const Link = struct { rect: [4]f32, off: u32, len: u32, page: i32 };
 var links: [MAX_LINKS]Link = undefined;
 var link_n: u32 = 0;
-var link_buf: [8192]u8 = undefined;
+var link_buf: [64 * 1024]u8 = undefined;
 var link_buf_n: u32 = 0;
 
 export fn linkCount() u32 { return link_n; }
@@ -7936,9 +7941,10 @@ const StructNode = struct {
     alt_off: u32 = 0,
     alt_len: u16 = 0,
 };
-var st_nodes: [2048]StructNode = undefined;
+/// 태그 구조 나무의 마디. 2048 이던 것을 올렸다.
+var st_nodes: [8192]StructNode = undefined;
 var st_n: u32 = 0;
-var st_buf: [16384]u8 = undefined;
+var st_buf: [256 * 1024]u8 = undefined;
 var st_used: u32 = 0;
 
 export fn structCount() u32 { return st_n; }
@@ -8078,9 +8084,10 @@ fn collectStruct(b: []const u8) void {
 //
 // 목차와 링크가 "3쪽" 대신 이름으로 가리키는 문서가 흔하다. 이름을 물어보면
 // 풀어 주는 길은 있었는데(destByName) 목록을 통째로 내어 주는 길이 없었다.
-var dest_buf: [8192]u8 = undefined;
-var dest_off: [256]u32 = undefined;
-var dest_len: [256]u8 = undefined;
+var dest_buf: [128 * 1024]u8 = undefined;
+/// 이름 목적지. 256 이던 것을 올렸다 — 책 한 권은 그보다 많다.
+var dest_off: [4096]u32 = undefined;
+var dest_len: [4096]u8 = undefined;
 var dest_page: [256]i32 = undefined;
 var dest_n: u32 = 0;
 var dest_used: u32 = 0;
@@ -8408,12 +8415,13 @@ fn destArray(b: []const u8, at: usize, to: usize) i32 {
 // 세금계산서나 계약서에 원본 파일을 통째로 넣어 두는 일이 흔하다.
 // 카탈로그의 /Names /EmbeddedFiles 이름나무에 "이름 → 파일 스트림" 으로
 // 들어 있다. 예전에는 아예 안 봐서, 첨부가 있는지조차 알 수 없었다.
-const MAX_ATT = 32;
+/// 딸린 파일. 32 이던 것을 올렸다.
+const MAX_ATT = 256;
 var att_obj: [MAX_ATT]u32 = undefined;
 var att_name_off: [MAX_ATT]u32 = undefined;
 var att_name_len: [MAX_ATT]u32 = undefined;
 var att_n: u32 = 0;
-var att_buf: [4096]u8 = undefined;
+var att_buf: [32 * 1024]u8 = undefined;
 var att_used: u32 = 0;
 
 export fn attCount() u32 { return att_n; }
@@ -8623,9 +8631,10 @@ const Ann = struct {
     dt_len: u32 = 0,
     obj: u32 = 0,
 };
-var anns: [256]Ann = undefined;
+/// 쪽 하나의 주석. 256 이던 것을 올렸다 — 교정지·검수본은 그보다 많다.
+var anns: [2048]Ann = undefined;
 var ann_n: u32 = 0;
-var ann_buf: [16384]u8 = undefined;
+var ann_buf: [256 * 1024]u8 = undefined;
 var ann_used: u32 = 0;
 
 export fn annCount() u32 { return ann_n; }
@@ -8944,7 +8953,8 @@ var tiles: [MAX_TILE]Tile = undefined;
 var tile_n: u32 = 0;
 
 /// 꺼 놓은 레이어(/OCProperties /D /OFF)의 객체 번호
-const MAX_OCG = 64;
+/// 레이어. 64 이던 것을 올렸다 — 도면은 그보다 많다.
+const MAX_OCG = 512;
 var ocg_off_list: [MAX_OCG]u32 = undefined;
 var ocg_off_n: u32 = 0;
 /// 이름 → 레이어 객체 (/Properties)
@@ -8959,7 +8969,7 @@ var oc_name_off: [MAX_OCG]u32 = undefined;
 var oc_name_len: [MAX_OCG]u32 = undefined;
 var oc_on: [MAX_OCG]bool = undefined;
 var oc_n: u32 = 0;
-var oc_buf: [4096]u8 = undefined;
+var oc_buf: [32 * 1024]u8 = undefined;
 var oc_used: u32 = 0;
 
 export fn ocCount() u32 { return oc_n; }
@@ -12443,7 +12453,8 @@ const SigT = struct {
     sub_len: u32,
     covers: bool,
 };
-const MAX_SIGS = 16;
+/// 서명. 16 이던 것을 올렸다 — 결재선이 긴 문서는 그보다 많다.
+const MAX_SIGS = 64;
 var sigs: [MAX_SIGS]SigT = undefined;
 var sig_n: u32 = 0;
 var sig_buf: [1024 * 1024]u8 = undefined;
