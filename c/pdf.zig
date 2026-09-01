@@ -62,13 +62,20 @@ export fn reserve(want_in: usize, want_out: usize) u32 {
     // 보기만 해도 300MB 를 더 들고 있었다 — 붙이지도 않는데. 스트림 하나에
     // 맞춰 잡고, 이어 붙일 때만 setSecondRoom 으로 늘린다.
     b2_cap = @max(@min(want_in + 1024 * 1024, 128 * 1024 * 1024), b2_want);
-    // 그림 한 장을 푼 결과. A4 300dpi 컬러가 대략 25MB 다.
+    // 아래 다섯은 여기서 안 잡는다. 글자만 있는 계약서를 열어도 그림 자리
+    // 48MB 를, 글꼴이 안 박힌 문서도 글꼴 자리 8MB 를 들고 있었다 —
+    // 문서가 실제로 그것을 쓸 때 잡는다(areaOf).
     img_cap = 48 * 1024 * 1024;
     font_cap = 8 * 1024 * 1024;
     inl_cap = 8 * 1024 * 1024;
     sub_cap = 6 * 1024 * 1024; // 폼·글리프 그림용, 깊이마다 2MB
     t1_cap = 4 * 1024 * 1024; // Type1 글리프 프로그램
-    const need = heapBase() + want_in + exp_cap + b2_cap + img_cap + font_cap + inl_cap + sub_cap + t1_cap + want_out;
+    img_off = 0;
+    font_off = 0;
+    inl_off = 0;
+    sub_off = 0;
+    t1_off = 0;
+    const need = heapBase() + want_in + exp_cap + b2_cap + want_out;
     const have = @wasmMemorySize(0) * PAGE;
     if (need > have) {
         const more = (need - have + PAGE - 1) / PAGE;
@@ -76,17 +83,28 @@ export fn reserve(want_in: usize, want_out: usize) u32 {
     }
     exp_off = heapBase() + want_in;
     b2_off = exp_off + exp_cap;
-    img_off = b2_off + b2_cap;
-    font_off = img_off + img_cap;
-    inl_off = font_off + font_cap;
-    sub_off = inl_off + inl_cap;
-    t1_off = sub_off + sub_cap;
-    out_off = t1_off + t1_cap;
+    out_off = b2_off + b2_cap;
     out_cap = want_out;
     return 1;
 }
 
 var out_cap: usize = 0;
+
+/// 그림·글꼴·인라인·폼·Type1 자리를 쓸 때 잡는다.
+///
+/// 예전에는 문서를 보기도 전에 74MB 를 통째로 잡았다. 그림 없는 문서도,
+/// 글꼴이 안 박힌 문서도 그만큼 들고 있었다 — 탭마다 워커가 하나씩 뜨는
+/// 브라우저에서는 그게 곱해진다. 처음 쓸 때 잡고, 문서를 새로 열면 놓는다.
+fn areaOf(off: *usize, cap: usize) usize {
+    if (off.* != 0) return off.*;
+    off.* = zoneAlloc(cap) orelse 0;
+    return off.*;
+}
+fn imgArea() usize { return areaOf(&img_off, img_cap); }
+fn fontArea() usize { return areaOf(&font_off, font_cap); }
+fn inlArea() usize { return areaOf(&inl_off, inl_cap); }
+fn subArea() usize { return areaOf(&sub_off, sub_cap); }
+fn t1Area() usize { return areaOf(&t1_off, t1_cap); }
 
 /// 큰 그림 하나를 푸는 동안만 쓰는 여벌 자리.
 ///
@@ -879,6 +897,16 @@ export fn parse(len: usize) u32 {
     if (len < 8) return 0;
     // 색인도 쪽 표도 이 자리를 쓴다. 문서를 새로 열 때 한 번만 비운다.
     zoneReset();
+    // 자리잡개를 비웠으니 거기서 떼어 쓰던 것들도 다시 잡아야 한다.
+    // 안 그러면 앞 문서가 쓰던 자리를 가리킨 채 새 문서의 색인이 그 위에 얹힌다.
+    img_off = 0;
+    font_off = 0;
+    inl_off = 0;
+    sub_off = 0;
+    t1_off = 0;
+    mask_at = 0;
+    mask_used = 0;
+    att_at = 0;
     {
         const head = inputSlice2(len);
         if (!std_mem_eq(head[0..5], "%PDF-")) return 0;
@@ -1014,9 +1042,6 @@ export fn parse(len: usize) u32 {
     // 본 가장 큰 객체 번호가 상한이 된다. 파일 크기로도 한 번 더 묶는다 —
     // 고리처럼 얽힌 쪽 트리를 만나도 훑는 양이 파일 크기를 넘지 않게 한다.
     // 넉넉히 잡아 채운 뒤 실제로 쓴 만큼으로 줄인다.
-    mask_at = 0;
-    mask_used = 0;
-    att_at = 0;
     pages_cut = false;
     if (!walkStart(total)) return 0;
     page_count = 0;
@@ -3270,7 +3295,7 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
 
     const room = img_cap - img_used;
     if (room < 4096) return null;
-    const dst = @as([*]u8, @ptrFromInt(img_off + img_used));
+    const dst = @as([*]u8, @ptrFromInt(imgArea() + img_used));
     var kind: u32 = 0;
     var got: u32 = 0;
     if (is_jbig2) {
@@ -3560,8 +3585,8 @@ fn stencilAlpha(mi: u32) ?u32 {
     if (px == 0 or px + 4 > img_cap - img_used) return null;
     const stride = (@as(usize, im.w) + 7) / 8;
     if (im.len < stride * im.h) return null;
-    const src = @as([*]const u8, @ptrFromInt(img_off + im.off));
-    const dst = @as([*]u8, @ptrFromInt(img_off + img_used));
+    const src = @as([*]const u8, @ptrFromInt(imgArea() + im.off));
+    const dst = @as([*]u8, @ptrFromInt(imgArea() + img_used));
     var y: u32 = 0;
     while (y < im.h) : (y += 1) {
         var x: u32 = 0;
@@ -3589,8 +3614,8 @@ fn colorKeyMask(slot: u32, lo: []const u32, hi: []const u32) void {
     if (px == 0 or px > img_cap - img_used) return;
     const comps: u32 = if (im.kind == 1) 3 else 1;
     if (lo.len < comps) return;
-    const src = @as([*]const u8, @ptrFromInt(img_off + im.off));
-    const dst = @as([*]u8, @ptrFromInt(img_off + img_used));
+    const src = @as([*]const u8, @ptrFromInt(imgArea() + im.off));
+    const dst = @as([*]u8, @ptrFromInt(imgArea() + img_used));
     if (im.len < px * comps) return;
     var i: usize = 0;
     while (i < px) : (i += 1) {
@@ -3624,8 +3649,8 @@ export fn formCount() u32 { return form_n; }
 export fn imageWidth() u32 { return img_w; }
 export fn imageHeight() u32 { return img_h; }
 export fn imageKind() u32 { return img_kind; }
-export fn imagePtr() usize { return img_off + img_off_first; }
-export fn imageAreaPtr() usize { return img_off; }
+export fn imagePtr() usize { return (if (img_off == 0) heapBase() else img_off) + img_off_first; }
+export fn imageAreaPtr() usize { return if (img_off == 0) heapBase() else img_off; }
 var img_off_first: u32 = 0;
 export fn imageLen() usize { return img_len; }
 export fn itemX(i: u32) f32 { return items[i].x; }
@@ -3665,8 +3690,8 @@ export fn fontGlyphs(i: u32) u32 { return if (i < font_n) fonts[i].wn else 0; }
 export fn fontCount() u32 { return font_n; }
 export fn fontFileOff(i: u32) u32 { return if (i < font_n) fonts[i].file_off else 0; }
 export fn fontFileLen(i: u32) u32 { return if (i < font_n) fonts[i].file_len else 0; }
-export fn fontAreaPtr() usize { return font_off; }
-export fn inlinePtr() usize { return inl_off; }
+export fn fontAreaPtr() usize { return if (font_off == 0) heapBase() else font_off; }
+export fn inlinePtr() usize { return if (inl_off == 0) heapBase() else inl_off; }
 export fn pageOriginX() f32 { return page_x0; }
 export fn pageOriginY() f32 { return page_y0; }
 export fn pageRotate() i32 { return page_rotate; }
@@ -4079,7 +4104,7 @@ fn inlineImage(b: []const u8, p: *usize) void {
     const need = row * h;
     if (need == 0 or inl_used + need > inl_cap) return;
 
-    const dst = @as([*]u8, @ptrFromInt(inl_off + inl_used))[0..(inl_cap - inl_used)];
+    const dst = @as([*]u8, @ptrFromInt(inlArea() + inl_used))[0..(inl_cap - inl_used)];
     var got: u32 = 0;
     if (flate) {
         const r = pw_inflate(raw.ptr, @intCast(raw.len), dst.ptr, @intCast(dst.len));
@@ -4107,11 +4132,11 @@ var doc: []const u8 = &[_]u8{};
 /// 겹쳐 부르는 스트림을 담을 자리. 깊이마다 따로 둔다 — 같은 자리를 쓰면
 /// 바깥에서 훑던 내용이 안쪽에서 덮인다.
 fn subStream(num: u32, depth: u32) ?[]const u8 {
-    if (depth >= 3 or sub_off == 0) return null;
+    if (depth >= 3 or subArea() == 0) return null;
     const slot = sub_cap / 3;
     const cs = streamOf(doc, num) orelse return null;
     const n = @min(cs.len, slot);
-    const dst = @as([*]u8, @ptrFromInt(sub_off + depth * slot));
+    const dst = @as([*]u8, @ptrFromInt(subArea() + depth * slot));
     @memcpy(dst[0..n], cs[0..n]);
     return dst[0..n];
 }
@@ -10417,7 +10442,7 @@ fn t1Entry(d: []const u8, p: *usize) ?struct { name: []const u8, off: usize, len
 
 /// Type1 프로그램을 읽어 글리프 프로그램을 풀어 둔다.
 fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) void {
-    if (font_n == 0 or t1_off == 0) return;
+    if (font_n == 0 or t1Area() == 0) return;
     const f = &fonts[font_n - 1];
     if (data.len < 64) return;
 
@@ -10429,7 +10454,7 @@ fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) void 
 
     const room = t1_cap - t1_used;
     if (room < 65536) return;
-    const area = @as([*]u8, @ptrFromInt(t1_off + t1_used))[0..room];
+    const area = @as([*]u8, @ptrFromInt(t1Area() + t1_used))[0..room];
 
     // 16진으로 적힌 것도 있다
     var enc_src = data[es..];
@@ -10677,8 +10702,8 @@ fn t1PsPop(s: *T1State) f32 {
 }
 
 fn t1Slice(r: T1Range) []const u8 {
-    if (r.len == 0 or t1_off == 0) return &[_]u8{};
-    return @as([*]const u8, @ptrFromInt(t1_off + r.off))[0..r.len];
+    if (r.len == 0 or t1Area() == 0) return &[_]u8{};
+    return @as([*]const u8, @ptrFromInt(t1Area() + r.off))[0..r.len];
 }
 
 /// 이동 — flex 중이면 점만 모은다
@@ -11235,11 +11260,11 @@ fn buildOtto(cff: []const u8, f: *FontMap, dst: []u8) u32 {
 
 /// 방금 등록한 글꼴에 파일을 붙인다.
 fn attachFontFile(data: []const u8, is_cff: bool) void {
-    if (font_n == 0 or font_off == 0) return;
+    if (font_n == 0 or fontArea() == 0) return;
     const f = &fonts[font_n - 1];
     const room = font_cap - font_used;
     if (room < 4096) return;
-    const area = @as([*]u8, @ptrFromInt(font_off + font_used))[0..room];
+    const area = @as([*]u8, @ptrFromInt(fontArea() + font_used))[0..room];
     var n: u32 = 0;
     if (is_cff) {
         n = buildOtto(data, f, area);

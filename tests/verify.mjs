@@ -294,6 +294,25 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   }
   ok('병합(170쪽): 쪽이 제자리', wrong === 0, `어긋난 쪽 ${wrong}개`);
 }
+// --- 안 쓰는 자리는 안 잡는다 (그림·글꼴 자리를 미리 잡던 것)
+{
+  // load() 는 시험용으로 출력 자리를 192MB 나 잡아 두므로 여기서는 직접 연다 —
+  // 화면 쪽(worker)이 하는 것과 같게, 파일 크기 + 1MB 만 잡는다.
+  const floorOf = async (file) => {
+    const m = await WebAssembly.instantiate(wasm, { wasi_snapshot_preview1: new Proxy({}, { get: () => () => 0 }) });
+    const ex = m.instance.exports;
+    const buf = fs.readFileSync(`${S}/${file}`);
+    if (!ex.reserve(buf.length, 1024 * 1024)) return -1;
+    new Uint8Array(ex.memory.buffer, ex.inputPtr(), buf.length).set(buf);
+    if (!ex.parse(buf.length)) return -1;
+    ex.renderPage(0);
+    return ex.memory.buffer.byteLength / 1048576;
+  };
+  const plain = await floorOf('multi.pdf');
+  ok('글자만 있는 문서: 바닥이 낮다', plain > 0 && plain < 60, `${plain.toFixed(0)}MB`);
+  const withImg = await floorOf('pdf/scanned.pdf');
+  ok('그림 있는 문서: 그때 자리를 잡는다', withImg > plain, `${withImg.toFixed(0)}MB > ${plain.toFixed(0)}MB`);
+}
 // --- 세는 상한이 없다: 링크·주석·칸이 많은 쪽
 {
   const refs = [];
