@@ -502,6 +502,31 @@ fn objRankTable() []u8 {
 
 /// num 번까지 담을 자리를 마련한다. 못 늘리면 false — 그 번호는 색인에
 /// 안 들어가고 찾을 때 훑는다(예전과 같은 길).
+
+/// 표 하나를 문서에 맞춰 늘린다.
+///
+/// 고정 배열로 두면 그 숫자가 곧 상한이 되고, 넘는 문서는 뒤가 조용히
+/// 잘린다. 자리잡개에서 떼어 쓰고 모자라면 배로 늘린다 — 늘릴 때 앞자리는
+/// 버리므로 최대 두 배까지 더 쓰지만, 세는 상한이 사라진다.
+/// (pdf.js 는 JS 배열이라 이런 상한이 아예 없다.)
+fn growTable(at: *usize, cap: *u32, want: u32, elem: usize, start: u32) bool {
+    if (want < cap.*) return true;
+    const LIMIT: u32 = 1 << 22;
+    if (want >= LIMIT) return false;
+    var n: u32 = if (cap.* == 0) start else cap.*;
+    while (n <= want) : (n *|= 2) {
+        if (n >= LIMIT) return false;
+    }
+    const fresh = zoneAlloc(@as(usize, n) * elem) orelse return false;
+    if (cap.* > 0 and at.* != 0) {
+        const old = @as([*]const u8, @ptrFromInt(at.*))[0 .. @as(usize, cap.*) * elem];
+        @memcpy(@as([*]u8, @ptrFromInt(fresh))[0..old.len], old);
+    }
+    at.* = fresh;
+    cap.* = n;
+    return true;
+}
+
 fn growIndex(num: u32) bool {
     if (num < obj_cap) return true;
     if (num >= OBJ_IDX_LIMIT) return false;
@@ -941,7 +966,8 @@ export fn parse(len: usize) u32 {
                         if (findObj(b, num8)) |gb| {
                             const ge = objDictEnd(b, gb);
                             if (find(b[gb..ge], "/Name", 0)) |na| {
-                                const r2 = sigPutStrTo(b, gb + na + 5, ge, &oc_buf, &oc_used);
+                                _ = oc_bufRoom(oc_used + 4096);
+                                const r2 = sigPutStrTo(b, gb + na + 5, ge, oc_buf(), &oc_used);
                                 noff = r2[0];
                                 nlen = r2[1];
                             }
@@ -1152,7 +1178,13 @@ const LabelT = struct {
     /// 이 그림에 준 객체 번호 (만들 때 채운다)
     mobj: u32 = 0,
 };
-var labs: [MAX_LABELS]LabelT = undefined;
+/// 사용자가 더한 것 — 세는 상한은 없다(자리잡개에서 늘어난다)
+var labs_at: usize = 0;
+var labs_cap: u32 = 0;
+fn labs() []LabelT {
+    if (labs_at == 0 or labs_cap == 0) return &[_]LabelT{};
+    return @as([*]LabelT, @ptrFromInt(labs_at))[0..labs_cap];
+}
 var lab_n: u32 = 0;
 var lab_cp: [4096]u32 = undefined;
 var lab_cn: u32 = 0;
@@ -1160,8 +1192,8 @@ var lab_body: [16384]u8 = undefined;
 
 export fn clearLabels() void { lab_n = 0; lab_cn = 0; }
 export fn addLabel(page: u32, x: f32, y: f32, size: f32, r: f32, g: f32, bb: f32) u32 {
-    if (lab_n >= MAX_LABELS) return 0;
-    labs[lab_n] = .{
+    if (!growTable(&labs_at, &labs_cap, lab_n, @sizeOf(LabelT), 32)) return 0;
+    labs()[lab_n] = .{
         .page = page, .x = x, .y = y, .size = size,
         .col = .{ r, g, bb }, .off = @intCast(lab_cn), .n = 0,
     };
@@ -1172,7 +1204,7 @@ export fn addLabel(page: u32, x: f32, y: f32, size: f32, r: f32, g: f32, bb: f32
 export fn setLabelMask(w: u32, h: u32, len: u32, pw: f32, ph: f32) u32 {
     if (lab_n == 0) return 0;
     const at = maskAlloc(len, w, h) orelse return 0;
-    const L = &labs[lab_n - 1];
+    const L = &labs()[lab_n - 1];
     L.mw = w;
     L.mh = h;
     L.moff = at;
@@ -1206,12 +1238,12 @@ export fn addLabelChar(c: u32) void {
     if (lab_n == 0 or lab_cn >= lab_cp.len) return;
     lab_cp[lab_cn] = c;
     lab_cn += 1;
-    labs[lab_n - 1].n += 1;
+    labs()[lab_n - 1].n += 1;
 }
 
 fn pageHasLabels(page: u32) bool {
     var i: u32 = 0;
-    while (i < lab_n) : (i += 1) if (labs[i].page == page and labs[i].n > 0) return true;
+    while (i < lab_n) : (i += 1) if (labs()[i].page == page and labs()[i].n > 0) return true;
     return false;
 }
 
@@ -1229,7 +1261,7 @@ fn buildLabelStream(page: u32) usize {
     bl += 2;
     var li: u32 = 0;
     while (li < lab_n) : (li += 1) {
-        const L = labs[li];
+        const L = labs()[li];
         if (L.page != page or L.n == 0) continue;
         if (bl + 512 > dst.len) break;
 
@@ -1467,7 +1499,10 @@ export fn apply() usize {
     // 쪽마다 하나씩, 라벨·주석·칸까지 더해 잡는다. 다 쓰면 되돌린다.
     const xr_keep = zoneTop();
     defer zoneShrink(xr_keep);
-    const xr = xrefTables(pick_n * 3 + @as(usize, edit_n) + note_n + newf_n + 64) orelse return 0;
+    // 하나가 객체 여럿을 낳는다 — 주석은 겉모습 스트림까지 둘, 새 칸도
+    // 마찬가지다. 넉넉히 잡지 않으면 뒤가 조용히 빠진다(주석 2000개 중
+    // 1038개만 나갔다).
+    const xr = xrefTables(pick_n * 4 + @as(usize, edit_n) * 2 + note_n * 3 + newf_n * 3 + 128) orelse return 0;
     const new_offsets = xr.offs;
     const new_nums = xr.nums;
     var new_n: usize = 0;
@@ -1550,11 +1585,11 @@ export fn apply() usize {
         }.f;
         var mi: u32 = 0;
         while (mi < lab_n) : (mi += 1) {
-            if (labs[mi].mlen == 0) continue;
-            labs[mi].mobj = mask_next;
+            if (labs()[mi].mlen == 0) continue;
+            labs()[mi].mobj = mask_next;
             mask_next += 1;
             any_mask = true;
-            writeMask(labs[mi].mobj, labs[mi].mw, labs[mi].mh, labs[mi].moff, labs[mi].mlen,
+            writeMask(labs()[mi].mobj, labs()[mi].mw, labs()[mi].mh, labs()[mi].moff, labs()[mi].mlen,
                 new_offsets, new_nums, &new_n, &pos);
         }
         if (wm_mlen > 0) {
@@ -1697,7 +1732,7 @@ export fn apply() usize {
     if (has_notes) {
         var ni: u32 = 0;
         while (ni < note_n and new_n + 3 < new_nums.len and outRoom(pos, 8192)) : (ni += 1) {
-            const t = &notes[ni];
+            const t = &notes()[ni];
             const w = t.rect[2] - t.rect[0];
             const h = t.rect[3] - t.rect[1];
             if (w < 1 or h < 1) continue;
@@ -1971,7 +2006,7 @@ export fn apply() usize {
         appendStr(&pos, " 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\nendobj\n");
         var fi: u32 = 0;
         while (fi < newf_n and new_n + 2 < new_nums.len and outRoom(pos, 2048)) : (fi += 1) {
-            const f = &newf[fi];
+            const f = &newf()[fi];
             if (f.page >= page_count) continue;
             f.obj = mask_next;
             mask_next += 1;
@@ -2117,16 +2152,16 @@ export fn apply() usize {
                 }
                 var nk: u32 = 0;
                 while (nk < note_n) : (nk += 1) {
-                    if (notes[nk].page != pick()[i] or notes[nk].obj == 0) continue;
+                    if (notes()[nk].page != pick()[i] or notes()[nk].obj == 0) continue;
                     appendStr(&pos, " ");
-                    appendNum(&pos, notes[nk].obj);
+                    appendNum(&pos, notes()[nk].obj);
                     appendStr(&pos, " 0 R");
                 }
                 var nf: u32 = 0;
                 while (nf < newf_n) : (nf += 1) {
-                    if (newf[nf].page != pick()[i] or newf[nf].obj == 0) continue;
+                    if (newf()[nf].page != pick()[i] or newf()[nf].obj == 0) continue;
                     appendStr(&pos, " ");
-                    appendNum(&pos, newf[nf].obj);
+                    appendNum(&pos, newf()[nf].obj);
                     appendStr(&pos, " 0 R");
                 }
                 appendStr(&pos, " ]");
@@ -2333,7 +2368,7 @@ export fn apply() usize {
                     var size: f32 = 0;
                     if (fieldLookup(b, e.obj, "/DA", 0)) |r| {
                         const da = fldPutStr(b, r[0], r[1]);
-                        const txt = fld_buf[da[0]..][0..da[1]];
+                        const txt = fld_buf()[da[0]..][0..da[1]];
                         if (findIn(txt, " Tf", 0)) |ti| {
                             var dx: usize = ti;
                             while (dx > 0 and isSpace(txt[dx - 1])) dx -= 1;
@@ -2538,9 +2573,9 @@ export fn apply() usize {
                         appendStr(&pos, " /AcroForm << /Fields [");
                         var nf0: u32 = 0;
                         while (nf0 < newf_n) : (nf0 += 1) {
-                            if (newf[nf0].obj == 0) continue;
+                            if (newf()[nf0].obj == 0) continue;
                             appendStr(&pos, " ");
-                            appendNum(&pos, newf[nf0].obj);
+                            appendNum(&pos, newf()[nf0].obj);
                             appendStr(&pos, " 0 R");
                         }
                         appendStr(&pos, " ] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv ");
@@ -2606,9 +2641,9 @@ export fn apply() usize {
                                     }
                                     var nf2: u32 = 0;
                                     while (nf2 < newf_n) : (nf2 += 1) {
-                                        if (newf[nf2].obj == 0) continue;
+                                        if (newf()[nf2].obj == 0) continue;
                                         appendStr(&pos, " ");
-                                        appendNum(&pos, newf[nf2].obj);
+                                        appendNum(&pos, newf()[nf2].obj);
                                         appendStr(&pos, " 0 R");
                                     }
                                     appendStr(&pos, " ]");
@@ -2719,11 +2754,11 @@ export fn apply() usize {
                 appendStr(&pos, " /XObject <<");
                 var mj: u32 = 0;
                 while (mj < lab_n) : (mj += 1) {
-                    if (labs[mj].mobj == 0) continue;
+                    if (labs()[mj].mobj == 0) continue;
                     appendStr(&pos, " /PdLb");
                     appendNum(&pos, mj);
                     appendStr(&pos, " ");
-                    appendNum(&pos, labs[mj].mobj);
+                    appendNum(&pos, labs()[mj].mobj);
                     appendStr(&pos, " 0 R");
                 }
                 if (wm_mobj != 0) {
@@ -5291,7 +5326,13 @@ const NoteT = struct {
     /// 만들 때 준 객체 번호
     obj: u32 = 0,
 };
-var notes: [MAX_NOTES]NoteT = undefined;
+/// 사용자가 더한 것 — 세는 상한은 없다(자리잡개에서 늘어난다)
+var notes_at: usize = 0;
+var notes_cap: u32 = 0;
+fn notes() []NoteT {
+    if (notes_at == 0 or notes_cap == 0) return &[_]NoteT{};
+    return @as([*]NoteT, @ptrFromInt(notes_at))[0..notes_cap];
+}
 var note_n: u32 = 0;
 var note_buf: [64 * 1024]u8 = undefined;
 var note_used: u32 = 0;
@@ -5302,21 +5343,21 @@ export fn clearNotes() void { note_n = 0; note_used = 0; note_pt_n = 0; }
 export fn addNote(kind: u32, page: u32, x0: f32, y0: f32, x1: f32, y1: f32,
     r: f32, g: f32, b: f32) u32
 {
-    if (note_n >= MAX_NOTES) return 0;
-    notes[note_n] = .{
+    if (!growTable(&notes_at, &notes_cap, note_n, @sizeOf(NoteT), 64)) return 0;
+    notes()[note_n] = .{
         .kind = @intCast(@min(kind, 6)), .page = page,
         .rect = .{ @min(x0, x1), @min(y0, y1), @max(x0, x1), @max(y0, y1) },
         .col = .{ @max(0, @min(1, r)), @max(0, @min(1, g)), @max(0, @min(1, b)) },
         .off = note_used, .len = 0, .pts = 0, .obj = 0,
     };
-    if (notes[note_n].kind == 6) notes[note_n].off = note_pt_n;
+    if (notes()[note_n].kind == 6) notes()[note_n].off = note_pt_n;
     note_n += 1;
     return 1;
 }
 /// 메모 글 한 글자 (utf-8 로 담는다)
 export fn addNoteChar(c: u32) void {
     if (note_n == 0) return;
-    const t = &notes[note_n - 1];
+    const t = &notes()[note_n - 1];
     if (c < 0x80) {
         if (note_used + 1 > note_buf.len) return;
         note_buf[note_used] = @intCast(c);
@@ -5343,12 +5384,12 @@ export fn addNotePoint(x: f32, y: f32) void {
     note_pts[note_pt_n] = x;
     note_pts[note_pt_n + 1] = y;
     note_pt_n += 2;
-    notes[note_n - 1].pts += 1;
+    notes()[note_n - 1].pts += 1;
 }
 
 fn notesOnPage(page: u32) bool {
     var i: u32 = 0;
-    while (i < note_n) : (i += 1) if (notes[i].page == page) return true;
+    while (i < note_n) : (i += 1) if (notes()[i].page == page) return true;
     return false;
 }
 
@@ -5484,7 +5525,13 @@ const NewFieldT = struct {
     /// 적으면서 붙인 객체 번호
     obj: u32,
 };
-var newf: [MAX_NEWF]NewFieldT = undefined;
+/// 사용자가 더한 것 — 세는 상한은 없다(자리잡개에서 늘어난다)
+var newf_at: usize = 0;
+var newf_cap: u32 = 0;
+fn newf() []NewFieldT {
+    if (newf_at == 0 or newf_cap == 0) return &[_]NewFieldT{};
+    return @as([*]NewFieldT, @ptrFromInt(newf_at))[0..newf_cap];
+}
 var newf_n: u32 = 0;
 var newf_buf: [16 * 1024]u8 = undefined;
 var newf_used: u32 = 0;
@@ -5495,7 +5542,7 @@ export fn clearNewFields() void {
 }
 
 export fn addNewField(page: u32, kind: u32, x0: f32, y0: f32, x1: f32, y1: f32) u32 {
-    if (newf_n >= MAX_NEWF) return 0;
+    if (!growTable(&newf_at, &newf_cap, newf_n, @sizeOf(NewFieldT), 32)) return 0;
     // 없는 쪽에 달라고 하면 그냥 안 단다. 예전에는 쪽 표가 [4096] 고정이라
     // 빈 자리(0)를 읽었지만, 지금은 그 뒤가 다른 표라 엉뚱한 번호를 집는다.
     if (page >= page_count) return 0;
@@ -5504,7 +5551,7 @@ export fn addNewField(page: u32, kind: u32, x0: f32, y0: f32, x1: f32, y1: f32) 
     const lo_y = @min(y0, y1);
     const hi_y = @max(y0, y1);
     if (!(hi_x - lo_x > 1) or !(hi_y - lo_y > 1)) return 0;
-    newf[newf_n] = .{
+    newf()[newf_n] = .{
         .page = page, .kind = @intCast(@min(kind, 1)),
         .rect = .{ lo_x, lo_y, hi_x, hi_y },
         .off = newf_used, .len = 0, .obj = 0,
@@ -5516,7 +5563,7 @@ export fn addNewField(page: u32, kind: u32, x0: f32, y0: f32, x1: f32, y1: f32) 
 /// 방금 만든 칸의 이름에 글자 하나를 잇는다 (utf-8 로 담는다).
 export fn addNewFieldChar(c: u32) void {
     if (newf_n == 0) return;
-    const f = &newf[newf_n - 1];
+    const f = &newf()[newf_n - 1];
     var tmp: [4]u8 = undefined;
     var n: u32 = 0;
     if (c < 0x80) {
@@ -5641,8 +5688,9 @@ fn copyRefsKeeping(b: []const u8, from: usize, to: usize, pos: *usize) void {
 // 자리(/Rect)와 갈래(/FT)와 값(/V)을 들고 있고, 겉모습(/AP /N)은 그 값을
 // 그려 둔 그림이다. 우리는 자리와 값을 꺼내 화면에 진짜 입력 칸을 얹고,
 // 만들 때 값과 겉모습을 다시 써 넣는다.
-/// 문서의 입력 칸. 512 이던 것을 올렸다 — 세금·보험 서식은 그보다 많다.
-const MAX_FIELDS = 4096;
+/// 문서의 입력 칸. 세는 상한은 없다.
+var field_at: usize = 0;
+var field_cap: u32 = 0;
 const FieldT = struct {
     obj: u32,
     rect: [4]f32,
@@ -5662,34 +5710,47 @@ const FieldT = struct {
     opts_len: u32,
     checked: bool,
 };
-var fields: [MAX_FIELDS]FieldT = undefined;
+fn fields() []FieldT {
+    if (field_at == 0 or field_cap == 0) return &[_]FieldT{};
+    return @as([*]FieldT, @ptrFromInt(field_at))[0..field_cap];
+}
 var field_n: u32 = 0;
-var fld_buf: [512 * 1024]u8 = undefined;
+/// fld_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
+var fld_buf_at: usize = 0;
+var fld_buf_cap: u32 = 0;
+fn fld_buf() []u8 {
+    if (fld_buf_at == 0 or fld_buf_cap == 0) return &[_]u8{};
+    return @as([*]u8, @ptrFromInt(fld_buf_at))[0..fld_buf_cap];
+}
+fn fld_bufRoom(want: u32) bool {
+    return growTable(&fld_buf_at, &fld_buf_cap, want, 1, 65536);
+}
 var fld_used: u32 = 0;
 
 export fn fieldCount() u32 { return field_n; }
-export fn fieldObj(i: u32) u32 { return if (i < field_n) fields[i].obj else 0; }
-export fn fieldRect(i: u32, k: u32) f32 { return if (i < field_n and k < 4) fields[i].rect[k] else 0; }
-export fn fieldKind(i: u32) u32 { return if (i < field_n) fields[i].kind else 0; }
-export fn fieldFlags(i: u32) u32 { return if (i < field_n) fields[i].flags else 0; }
-export fn fieldMaxLen(i: u32) u32 { return if (i < field_n) fields[i].maxlen else 0; }
-export fn fieldSize(i: u32) f32 { return if (i < field_n) fields[i].size else 0; }
-export fn fieldAlign(i: u32) u32 { return if (i < field_n) fields[i].align_ else 0; }
-export fn fieldChecked(i: u32) u32 { return if (i < field_n and fields[i].checked) 1 else 0; }
-export fn fieldTextPtr() [*]u8 { return &fld_buf; }
-export fn fieldNameOff(i: u32) u32 { return if (i < field_n) fields[i].name_off else 0; }
-export fn fieldNameLen(i: u32) u32 { return if (i < field_n) fields[i].name_len else 0; }
-export fn fieldValOff(i: u32) u32 { return if (i < field_n) fields[i].val_off else 0; }
-export fn fieldValLen(i: u32) u32 { return if (i < field_n) fields[i].val_len else 0; }
-export fn fieldOnOff(i: u32) u32 { return if (i < field_n) fields[i].on_off else 0; }
-export fn fieldOnLen(i: u32) u32 { return if (i < field_n) fields[i].on_len else 0; }
-export fn fieldOptsOff(i: u32) u32 { return if (i < field_n) fields[i].opts_off else 0; }
-export fn fieldOptsLen(i: u32) u32 { return if (i < field_n) fields[i].opts_len else 0; }
+export fn fieldObj(i: u32) u32 { return if (i < field_n) fields()[i].obj else 0; }
+export fn fieldRect(i: u32, k: u32) f32 { return if (i < field_n and k < 4) fields()[i].rect[k] else 0; }
+export fn fieldKind(i: u32) u32 { return if (i < field_n) fields()[i].kind else 0; }
+export fn fieldFlags(i: u32) u32 { return if (i < field_n) fields()[i].flags else 0; }
+export fn fieldMaxLen(i: u32) u32 { return if (i < field_n) fields()[i].maxlen else 0; }
+export fn fieldSize(i: u32) f32 { return if (i < field_n) fields()[i].size else 0; }
+export fn fieldAlign(i: u32) u32 { return if (i < field_n) fields()[i].align_ else 0; }
+export fn fieldChecked(i: u32) u32 { return if (i < field_n and fields()[i].checked) 1 else 0; }
+export fn fieldTextPtr() [*]u8 { return @ptrFromInt(if (fld_buf_at == 0) heapBase() else fld_buf_at); }
+export fn fieldNameOff(i: u32) u32 { return if (i < field_n) fields()[i].name_off else 0; }
+export fn fieldNameLen(i: u32) u32 { return if (i < field_n) fields()[i].name_len else 0; }
+export fn fieldValOff(i: u32) u32 { return if (i < field_n) fields()[i].val_off else 0; }
+export fn fieldValLen(i: u32) u32 { return if (i < field_n) fields()[i].val_len else 0; }
+export fn fieldOnOff(i: u32) u32 { return if (i < field_n) fields()[i].on_off else 0; }
+export fn fieldOnLen(i: u32) u32 { return if (i < field_n) fields()[i].on_len else 0; }
+export fn fieldOptsOff(i: u32) u32 { return if (i < field_n) fields()[i].opts_off else 0; }
+export fn fieldOptsLen(i: u32) u32 { return if (i < field_n) fields()[i].opts_len else 0; }
 
 fn fldPut(bytes: []const u8) [2]u32 {
-    const n: u32 = @intCast(@min(bytes.len, fld_buf.len - fld_used));
+    _ = fld_bufRoom(fld_used + @as(u32, @intCast(bytes.len)) + 64);
+    const n: u32 = @intCast(@min(bytes.len, fld_buf().len - fld_used));
     if (n == 0) return .{ fld_used, 0 };
-    @memcpy(fld_buf[fld_used..][0..n], bytes[0..n]);
+    @memcpy(fld_buf()[fld_used..][0..n], bytes[0..n]);
     const off = fld_used;
     fld_used += n;
     return .{ off, n };
@@ -5837,7 +5898,7 @@ fn collectFields(b: []const u8, body: usize, end: usize) void {
     // /Annots 를 훑는 횟수. 1024 이던 것을 올렸다 — 링크·주석이 앞에 많이
     // 붙은 쪽에서는 뒤에 있는 입력 칸까지 차례가 안 갔다(링크 300 + 주석
     // 400 이 앞서면 칸은 324 개까지만 걷혔다).
-    while (q < ae and count < 8192 and field_n < MAX_FIELDS) {
+    while (q < ae and count < 1 << 20) {
         while (q < ae and isSpace(b[q])) q += 1;
         if (q >= ae or b[q] == ']') break;
         if (!isDigit(b[q])) { q += 1; continue; }
@@ -5854,7 +5915,8 @@ fn collectFields(b: []const u8, body: usize, end: usize) void {
         if (intAfter(b, ab, abe, "/F")) |fl| {
             if ((fl & 2) != 0) continue; // 숨김
         }
-        const f = &fields[field_n];
+        if (!growTable(&field_at, &field_cap, field_n, @sizeOf(FieldT), 64)) break;
+        const f = &fields()[field_n];
         f.* = .{
             .obj = num, .rect = .{ 0, 0, 0, 0 }, .kind = 0, .flags = 0, .maxlen = 0,
             .size = 0, .align_ = 0, .name_off = 0, .name_len = 0, .val_off = 0,
@@ -5910,7 +5972,7 @@ fn collectFields(b: []const u8, body: usize, end: usize) void {
         // /DA 에서 글자 크기 — "/Helv 9 Tf 0 g"
         if (fieldLookup(b, num, "/DA", 0)) |r| {
             const da = fldPutStr(b, r[0], r[1]);
-            const txt = fld_buf[da[0]..][0..da[1]];
+            const txt = fld_buf()[da[0]..][0..da[1]];
             if (findIn(txt, " Tf", 0)) |ti| {
                 var j: usize = ti;
                 while (j > 0 and (isSpace(txt[j - 1]))) j -= 1;
@@ -7732,35 +7794,62 @@ fn collectInfo(b: []const u8) void {
 
 // ===== 링크와 목차 =====
 
-/// 쪽 하나의 링크. 128 이던 것을 올렸다 — 목차 쪽·색인 쪽은 쉽게 넘긴다.
-const MAX_LINKS = 1024;
+/// 쪽 하나의 링크. 세는 상한은 없다 — 필요한 만큼 늘어난다.
+var link_at: usize = 0;
+var link_cap: u32 = 0;
+fn links() []Link {
+    if (link_at == 0 or link_cap == 0) return &[_]Link{};
+    return @as([*]Link, @ptrFromInt(link_at))[0..link_cap];
+}
 const Link = struct { rect: [4]f32, off: u32, len: u32, page: i32 };
-var links: [MAX_LINKS]Link = undefined;
+
 var link_n: u32 = 0;
-var link_buf: [64 * 1024]u8 = undefined;
+/// link_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
+var link_buf_at: usize = 0;
+var link_buf_cap: u32 = 0;
+fn link_buf() []u8 {
+    if (link_buf_at == 0 or link_buf_cap == 0) return &[_]u8{};
+    return @as([*]u8, @ptrFromInt(link_buf_at))[0..link_buf_cap];
+}
+fn link_bufRoom(want: u32) bool {
+    return growTable(&link_buf_at, &link_buf_cap, want, 1, 16384);
+}
 var link_buf_n: u32 = 0;
 
 export fn linkCount() u32 { return link_n; }
-export fn linkRect(i: u32, k: u32) f32 { return if (i < link_n and k < 4) links[i].rect[k] else 0; }
-export fn linkOff(i: u32) u32 { return if (i < link_n) links[i].off else 0; }
-export fn linkLen(i: u32) u32 { return if (i < link_n) links[i].len else 0; }
-export fn linkPage(i: u32) i32 { return if (i < link_n) links[i].page else -1; }
-export fn linkTextPtr() [*]u8 { return &link_buf; }
+export fn linkRect(i: u32, k: u32) f32 { return if (i < link_n and k < 4) links()[i].rect[k] else 0; }
+export fn linkOff(i: u32) u32 { return if (i < link_n) links()[i].off else 0; }
+export fn linkLen(i: u32) u32 { return if (i < link_n) links()[i].len else 0; }
+export fn linkPage(i: u32) i32 { return if (i < link_n) links()[i].page else -1; }
+export fn linkTextPtr() [*]u8 { return @ptrFromInt(if (link_buf_at == 0) heapBase() else link_buf_at); }
 
-/// 목차 줄 수. 256 이던 것을 올렸다 — 책 한 권의 차례는 쉽게 넘긴다.
-const MAX_OUT = 4096;
+/// 목차 줄 수. 세는 상한은 없다.
+var mark_at: usize = 0;
+var mark_cap: u32 = 0;
 const Bookmark = struct { depth: u8, off: u32, len: u32, page: i32 };
-var marks: [MAX_OUT]Bookmark = undefined;
+fn marks() []Bookmark {
+    if (mark_at == 0 or mark_cap == 0) return &[_]Bookmark{};
+    return @as([*]Bookmark, @ptrFromInt(mark_at))[0..mark_cap];
+}
 var mark_n: u32 = 0;
-var mark_buf: [128 * 1024]u8 = undefined;
+/// mark_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
+var mark_buf_at: usize = 0;
+var mark_buf_cap: u32 = 0;
+fn mark_buf() []u8 {
+    if (mark_buf_at == 0 or mark_buf_cap == 0) return &[_]u8{};
+    return @as([*]u8, @ptrFromInt(mark_buf_at))[0..mark_buf_cap];
+}
+fn mark_bufRoom(want: u32) bool {
+    return growTable(&mark_buf_at, &mark_buf_cap, want, 1, 32768);
+}
 var mark_buf_n: u32 = 0;
 
 export fn outlineCount() u32 { return mark_n; }
-export fn outlineDepth(i: u32) u32 { return if (i < mark_n) marks[i].depth else 0; }
-export fn outlineOff(i: u32) u32 { return if (i < mark_n) marks[i].off else 0; }
-export fn outlineLen(i: u32) u32 { return if (i < mark_n) marks[i].len else 0; }
-export fn outlinePage(i: u32) i32 { return if (i < mark_n) marks[i].page else -1; }
-export fn outlineTextPtr() [*]u8 { return &mark_buf; }
+export fn outlineDepth(i: u32) u32 { return if (i < mark_n) marks()[i].depth else 0; }
+export fn outlineOff(i: u32) u32 { return if (i < mark_n) marks()[i].off else 0; }
+export fn outlineLen(i: u32) u32 { return if (i < mark_n) marks()[i].len else 0; }
+export fn outlinePage(i: u32) i32 { return if (i < mark_n) marks()[i].page else -1; }
+export fn outlineTextPtr() [*]u8 { return @ptrFromInt(if (mark_buf_at == 0) heapBase() else mark_buf_at); }
 
 /// 쪽 객체 번호를 쪽 차례로 바꾼다.
 fn pageIndexOf(obj: u32) i32 {
@@ -7941,33 +8030,49 @@ const StructNode = struct {
     alt_off: u32 = 0,
     alt_len: u16 = 0,
 };
-/// 태그 구조 나무의 마디. 2048 이던 것을 올렸다.
-var st_nodes: [8192]StructNode = undefined;
+/// 태그 구조 나무의 마디. 세는 상한은 없다.
+var st_at: usize = 0;
+var st_cap: u32 = 0;
+fn st_nodes() []StructNode {
+    if (st_at == 0 or st_cap == 0) return &[_]StructNode{};
+    return @as([*]StructNode, @ptrFromInt(st_at))[0..st_cap];
+}
 var st_n: u32 = 0;
-var st_buf: [256 * 1024]u8 = undefined;
+/// st_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
+var st_buf_at: usize = 0;
+var st_buf_cap: u32 = 0;
+fn st_buf() []u8 {
+    if (st_buf_at == 0 or st_buf_cap == 0) return &[_]u8{};
+    return @as([*]u8, @ptrFromInt(st_buf_at))[0..st_buf_cap];
+}
+fn st_bufRoom(want: u32) bool {
+    return growTable(&st_buf_at, &st_buf_cap, want, 1, 32768);
+}
 var st_used: u32 = 0;
 
 export fn structCount() u32 { return st_n; }
-export fn structDepth(i: u32) u32 { return if (i < st_n) st_nodes[i].depth else 0; }
-export fn structPageOf(i: u32) i32 { return if (i < st_n) st_nodes[i].page else -1; }
-export fn structMcid(i: u32) i32 { return if (i < st_n) st_nodes[i].mcid else -1; }
-export fn structRoleOff(i: u32) u32 { return if (i < st_n) st_nodes[i].role_off else 0; }
-export fn structRoleLen(i: u32) u32 { return if (i < st_n) st_nodes[i].role_len else 0; }
-export fn structAltOff(i: u32) u32 { return if (i < st_n) st_nodes[i].alt_off else 0; }
-export fn structAltLen(i: u32) u32 { return if (i < st_n) st_nodes[i].alt_len else 0; }
-export fn structTextPtr() [*]u8 { return &st_buf; }
+export fn structDepth(i: u32) u32 { return if (i < st_n) st_nodes()[i].depth else 0; }
+export fn structPageOf(i: u32) i32 { return if (i < st_n) st_nodes()[i].page else -1; }
+export fn structMcid(i: u32) i32 { return if (i < st_n) st_nodes()[i].mcid else -1; }
+export fn structRoleOff(i: u32) u32 { return if (i < st_n) st_nodes()[i].role_off else 0; }
+export fn structRoleLen(i: u32) u32 { return if (i < st_n) st_nodes()[i].role_len else 0; }
+export fn structAltOff(i: u32) u32 { return if (i < st_n) st_nodes()[i].alt_off else 0; }
+export fn structAltLen(i: u32) u32 { return if (i < st_n) st_nodes()[i].alt_len else 0; }
+export fn structTextPtr() [*]u8 { return @ptrFromInt(if (st_buf_at == 0) heapBase() else st_buf_at); }
 
 fn stPut(txt: []const u8) struct { off: u32, len: u16 } {
-    if (txt.len == 0 or st_used + txt.len > st_buf.len or txt.len > 65535) return .{ .off = 0, .len = 0 };
+    _ = st_bufRoom(st_used + @as(u32, @intCast(txt.len)) + 64);
+    if (txt.len == 0 or st_used + txt.len > st_buf().len or txt.len > 65535) return .{ .off = 0, .len = 0 };
     const off = st_used;
-    @memcpy(st_buf[off..][0..txt.len], txt);
+    @memcpy(st_buf()[off..][0..txt.len], txt);
     st_used += @intCast(txt.len);
     return .{ .off = off, .len = @intCast(txt.len) };
 }
 
 /// 구조 요소 하나와 그 아래를 훑는다. /K 는 숫자(MCID)·딕셔너리·배열 셋 다 온다.
 fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) void {
-    if (depth > 32 or st_n >= st_nodes.len) return;
+    if (depth > 32) return;
+    if (!growTable(&st_at, &st_cap, st_n, @sizeOf(StructNode), 256)) return;
     var node: StructNode = .{ .depth = depth, .page = page_hint };
 
     var tmp: [64]u8 = undefined;
@@ -7984,7 +8089,8 @@ fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) vo
     }
     // 대체 글(/Alt) — 그림에 붙는 설명이다
     if (keyPos(b, ob, oe, "/Alt")) |aa| {
-        const n2 = copyPdfText(b, aa + 4, oe, &st_buf, st_used);
+        _ = st_bufRoom(st_used + 8192);
+        const n2 = copyPdfText(b, aa + 4, oe, st_buf(), st_used);
         if (n2 > 0) {
             node.alt_off = st_used;
             node.alt_len = @intCast(n2);
@@ -8000,7 +8106,7 @@ fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) vo
     }
     node.page = page;
     const me = st_n;
-    st_nodes[st_n] = node;
+    st_nodes()[st_n] = node;
     st_n += 1;
 
     // 아래를 훑는다
@@ -8019,7 +8125,7 @@ fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) vo
         if (is_ref) {
             if (findObj(b, v)) |kb| walkStruct(b, kb, objDictEnd(b, kb), depth + 1, page);
         } else {
-            st_nodes[me].mcid = @intCast(v);
+            st_nodes()[me].mcid = @intCast(v);
         }
         return;
     }
@@ -8031,7 +8137,7 @@ fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) vo
     const end = arrayEnd(b, q, oe);
     q += 1;
     var guard: u32 = 0;
-    while (q < end and guard < 4096 and st_n < st_nodes.len) : (guard += 1) {
+    while (q < end and guard < 65536) : (guard += 1) {
         while (q < end and isSpace(b[q])) q += 1;
         if (q >= end or b[q] == ']') break;
         if (isDigit(b[q])) {
@@ -8048,9 +8154,9 @@ fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) vo
             } else {
                 // 그냥 MCID — 잎으로 담는다
                 var leaf: StructNode = .{ .depth = depth + 1, .page = page, .mcid = @intCast(v) };
-                leaf.role_off = st_nodes[me].role_off;
-                leaf.role_len = st_nodes[me].role_len;
-                st_nodes[st_n] = leaf;
+                leaf.role_off = st_nodes()[me].role_off;
+                leaf.role_len = st_nodes()[me].role_len;
+                st_nodes()[st_n] = leaf;
                 st_n += 1;
             }
             continue;
@@ -8084,7 +8190,16 @@ fn collectStruct(b: []const u8) void {
 //
 // 목차와 링크가 "3쪽" 대신 이름으로 가리키는 문서가 흔하다. 이름을 물어보면
 // 풀어 주는 길은 있었는데(destByName) 목록을 통째로 내어 주는 길이 없었다.
-var dest_buf: [128 * 1024]u8 = undefined;
+/// dest_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
+var dest_buf_at: usize = 0;
+var dest_buf_cap: u32 = 0;
+fn dest_buf() []u8 {
+    if (dest_buf_at == 0 or dest_buf_cap == 0) return &[_]u8{};
+    return @as([*]u8, @ptrFromInt(dest_buf_at))[0..dest_buf_cap];
+}
+fn dest_bufRoom(want: u32) bool {
+    return growTable(&dest_buf_at, &dest_buf_cap, want, 1, 32768);
+}
 /// 이름 목적지. 256 이던 것을 올렸다 — 책 한 권은 그보다 많다.
 var dest_off: [4096]u32 = undefined;
 var dest_len: [4096]u8 = undefined;
@@ -8096,15 +8211,16 @@ export fn destCount() u32 { return dest_n; }
 export fn destNameOff(i: u32) u32 { return if (i < dest_n) dest_off[i] else 0; }
 export fn destNameLen(i: u32) u32 { return if (i < dest_n) dest_len[i] else 0; }
 export fn destPageOf(i: u32) i32 { return if (i < dest_n) dest_page[i] else -1; }
-export fn destTextPtr() [*]u8 { return &dest_buf; }
+export fn destTextPtr() [*]u8 { return @ptrFromInt(if (dest_buf_at == 0) heapBase() else dest_buf_at); }
 
 fn addDest(name: []const u8, page: i32) void {
     if (dest_n >= dest_off.len or name.len == 0 or name.len > 255) return;
-    if (dest_used + name.len > dest_buf.len) return;
+    _ = dest_bufRoom(dest_used + @as(u32, @intCast(name.len)) + 64);
+    if (dest_used + name.len > dest_buf().len) return;
     dest_off[dest_n] = dest_used;
     dest_len[dest_n] = @intCast(name.len);
     dest_page[dest_n] = page;
-    @memcpy(dest_buf[dest_used..][0..name.len], name);
+    @memcpy(dest_buf()[dest_used..][0..name.len], name);
     dest_used += @intCast(name.len);
     dest_n += 1;
 }
@@ -8421,11 +8537,20 @@ var att_obj: [MAX_ATT]u32 = undefined;
 var att_name_off: [MAX_ATT]u32 = undefined;
 var att_name_len: [MAX_ATT]u32 = undefined;
 var att_n: u32 = 0;
-var att_buf: [32 * 1024]u8 = undefined;
+/// att_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
+var att_buf_at: usize = 0;
+var att_buf_cap: u32 = 0;
+fn att_buf() []u8 {
+    if (att_buf_at == 0 or att_buf_cap == 0) return &[_]u8{};
+    return @as([*]u8, @ptrFromInt(att_buf_at))[0..att_buf_cap];
+}
+fn att_bufRoom(want: u32) bool {
+    return growTable(&att_buf_at, &att_buf_cap, want, 1, 8192);
+}
 var att_used: u32 = 0;
 
 export fn attCount() u32 { return att_n; }
-export fn attTextPtr() usize { return @intFromPtr(&att_buf); }
+export fn attTextPtr() usize { return (if (att_buf_at == 0) heapBase() else att_buf_at); }
 export fn attNameOff(i: u32) u32 { return if (i < att_n) att_name_off[i] else 0; }
 export fn attNameLen(i: u32) u32 { return if (i < att_n) att_name_len[i] else 0; }
 
@@ -8476,7 +8601,8 @@ fn walkAttAt(b: []const u8, ob: usize, oe: usize, depth: u8) void {
         while (q < end and att_n < MAX_ATT and guard < 256) : (guard += 1) {
             while (q < end and b[q] != '(' and b[q] != '<') q += 1;
             if (q >= end) break;
-            const nm = sigPutStrTo(b, q, end, &att_buf, &att_used);
+            _ = att_bufRoom(att_used + 4096);
+            const nm = sigPutStrTo(b, q, end, att_buf(), &att_used);
             // 이름 뒤의 값이 파일 명세다
             q = skipVal(b, q, end);
             while (q < end and isSpace(b[q])) q += 1;
@@ -8631,27 +8757,41 @@ const Ann = struct {
     dt_len: u32 = 0,
     obj: u32 = 0,
 };
-/// 쪽 하나의 주석. 256 이던 것을 올렸다 — 교정지·검수본은 그보다 많다.
-var anns: [2048]Ann = undefined;
+/// 쪽 하나의 주석. 세는 상한은 없다.
+var ann_at: usize = 0;
+var ann_cap: u32 = 0;
+fn anns() []Ann {
+    if (ann_at == 0 or ann_cap == 0) return &[_]Ann{};
+    return @as([*]Ann, @ptrFromInt(ann_at))[0..ann_cap];
+}
 var ann_n: u32 = 0;
-var ann_buf: [256 * 1024]u8 = undefined;
+/// ann_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
+var ann_buf_at: usize = 0;
+var ann_buf_cap: u32 = 0;
+fn ann_buf() []u8 {
+    if (ann_buf_at == 0 or ann_buf_cap == 0) return &[_]u8{};
+    return @as([*]u8, @ptrFromInt(ann_buf_at))[0..ann_buf_cap];
+}
+fn ann_bufRoom(want: u32) bool {
+    return growTable(&ann_buf_at, &ann_buf_cap, want, 1, 65536);
+}
 var ann_used: u32 = 0;
 
 export fn annCount() u32 { return ann_n; }
-export fn annObj(i: u32) u32 { return if (i < ann_n) anns[i].obj else 0; }
-export fn annFlags(i: u32) u32 { return if (i < ann_n) anns[i].flags else 0; }
-export fn annRect(i: u32, k: u32) f32 { return if (i < ann_n and k < 4) anns[i].rect[k] else 0; }
-export fn annHasColor(i: u32) u32 { return if (i < ann_n and anns[i].has_color) 1 else 0; }
-export fn annColor(i: u32, k: u32) f32 { return if (i < ann_n and k < 3) anns[i].color[k] else 0; }
-export fn annTextPtr() [*]u8 { return &ann_buf; }
-export fn annSubOff(i: u32) u32 { return if (i < ann_n) anns[i].sub_off else 0; }
-export fn annSubLen(i: u32) u32 { return if (i < ann_n) anns[i].sub_len else 0; }
-export fn annBodyOff(i: u32) u32 { return if (i < ann_n) anns[i].txt_off else 0; }
-export fn annBodyLen(i: u32) u32 { return if (i < ann_n) anns[i].txt_len else 0; }
-export fn annAuthorOff(i: u32) u32 { return if (i < ann_n) anns[i].au_off else 0; }
-export fn annAuthorLen(i: u32) u32 { return if (i < ann_n) anns[i].au_len else 0; }
-export fn annDateOff(i: u32) u32 { return if (i < ann_n) anns[i].dt_off else 0; }
-export fn annDateLen(i: u32) u32 { return if (i < ann_n) anns[i].dt_len else 0; }
+export fn annObj(i: u32) u32 { return if (i < ann_n) anns()[i].obj else 0; }
+export fn annFlags(i: u32) u32 { return if (i < ann_n) anns()[i].flags else 0; }
+export fn annRect(i: u32, k: u32) f32 { return if (i < ann_n and k < 4) anns()[i].rect[k] else 0; }
+export fn annHasColor(i: u32) u32 { return if (i < ann_n and anns()[i].has_color) 1 else 0; }
+export fn annColor(i: u32, k: u32) f32 { return if (i < ann_n and k < 3) anns()[i].color[k] else 0; }
+export fn annTextPtr() [*]u8 { return @ptrFromInt(if (ann_buf_at == 0) heapBase() else ann_buf_at); }
+export fn annSubOff(i: u32) u32 { return if (i < ann_n) anns()[i].sub_off else 0; }
+export fn annSubLen(i: u32) u32 { return if (i < ann_n) anns()[i].sub_len else 0; }
+export fn annBodyOff(i: u32) u32 { return if (i < ann_n) anns()[i].txt_off else 0; }
+export fn annBodyLen(i: u32) u32 { return if (i < ann_n) anns()[i].txt_len else 0; }
+export fn annAuthorOff(i: u32) u32 { return if (i < ann_n) anns()[i].au_off else 0; }
+export fn annAuthorLen(i: u32) u32 { return if (i < ann_n) anns()[i].au_len else 0; }
+export fn annDateOff(i: u32) u32 { return if (i < ann_n) anns()[i].dt_off else 0; }
+export fn annDateLen(i: u32) u32 { return if (i < ann_n) anns()[i].dt_len else 0; }
 
 
 /// 쪽에 달린 주석을 모두 걷는다. 링크·위젯도 포함한다 — 쓰는 쪽이 가린다.
@@ -8678,7 +8818,8 @@ fn collectAnnots(b: []const u8, body: usize, end: usize) void {
     } else return;
 
     var q = as2;
-    while (q < ae and ann_n < anns.len) {
+    while (q < ae) {
+        if (!growTable(&ann_at, &ann_cap, ann_n, @sizeOf(Ann), 128)) break;
         while (q < ae and isSpace(b[q])) q += 1;
         if (q >= ae or b[q] == ']') break;
         if (!isDigit(b[q])) { q += 1; continue; }
@@ -8695,10 +8836,11 @@ fn collectAnnots(b: []const u8, body: usize, end: usize) void {
 
         var name: [32]u8 = undefined;
         const nn = nameAfter(b, ab, abe, "/Subtype", &name);
-        if (nn > 0 and ann_used + nn <= ann_buf.len) {
+        _ = ann_bufRoom(ann_used + nn + 64);
+        if (nn > 0 and ann_used + nn <= ann_buf().len) {
             a.sub_off = ann_used;
             a.sub_len = nn;
-            @memcpy(ann_buf[ann_used..][0..nn], name[0..nn]);
+            @memcpy(ann_buf()[ann_used..][0..nn], name[0..nn]);
             ann_used += nn;
         }
         if (find(b[ab..abe], "/Rect", 0)) |ra| {
@@ -8741,18 +8883,21 @@ fn collectAnnots(b: []const u8, body: usize, end: usize) void {
         }
         // 글(/Contents) · 쓴 이(/T) · 날짜(/M)
         if (find(b[ab..abe], "/Contents", 0)) |ta| {
-            const n2 = copyPdfText(b, ab + ta + 9, abe, &ann_buf, ann_used);
+            _ = ann_bufRoom(ann_used + 8192);
+            const n2 = copyPdfText(b, ab + ta + 9, abe, ann_buf(), ann_used);
             if (n2 > 0) { a.txt_off = ann_used; a.txt_len = n2; ann_used += n2; }
         }
         if (keyPos(b, ab, abe, "/T")) |ta| {
-            const n2 = copyPdfText(b, ta + 2, abe, &ann_buf, ann_used);
+            _ = ann_bufRoom(ann_used + 8192);
+            const n2 = copyPdfText(b, ta + 2, abe, ann_buf(), ann_used);
             if (n2 > 0) { a.au_off = ann_used; a.au_len = n2; ann_used += n2; }
         }
         if (keyPos(b, ab, abe, "/M")) |da| {
-            const n2 = copyPdfText(b, da + 2, abe, &ann_buf, ann_used);
+            _ = ann_bufRoom(ann_used + 8192);
+            const n2 = copyPdfText(b, da + 2, abe, ann_buf(), ann_used);
             if (n2 > 0) { a.dt_off = ann_used; a.dt_len = n2; ann_used += n2; }
         }
-        anns[ann_n] = a;
+        anns()[ann_n] = a;
         ann_n += 1;
     }
 }
@@ -8778,7 +8923,7 @@ fn collectLinks(b: []const u8, body: usize, end: usize) void {
     } else return;
 
     var q = as2;
-    while (q < ae and link_n < MAX_LINKS) {
+    while (q < ae) {
         while (q < ae and isSpace(b[q])) q += 1;
         if (q >= ae or b[q] == ']') break;
         if (!isDigit(b[q])) { q += 1; continue; }
@@ -8812,7 +8957,8 @@ fn collectLinks(b: []const u8, body: usize, end: usize) void {
             while (up < abe and isSpace(b[up])) up += 1;
             if (up < abe and (b[up] == '(' or b[up] == '<')) {
                 uoff = link_buf_n;
-                ulen = copyPdfText(b, up, abe, &link_buf, link_buf_n);
+                _ = link_bufRoom(link_buf_n + 8192);
+                ulen = copyPdfText(b, up, abe, link_buf(), link_buf_n);
                 link_buf_n += ulen;
                 break;
             }
@@ -8824,7 +8970,8 @@ fn collectLinks(b: []const u8, body: usize, end: usize) void {
             pg = destPage(b, ab + da + 2, abe);
         }
         if (ulen == 0 and pg < 0) continue;
-        links[link_n] = .{ .rect = rect, .off = uoff, .len = ulen, .page = pg };
+        if (!growTable(&link_at, &link_cap, link_n, @sizeOf(Link), 128)) break;
+        links()[link_n] = .{ .rect = rect, .off = uoff, .len = ulen, .page = pg };
         link_n += 1;
     }
 }
@@ -8833,14 +8980,15 @@ fn collectLinks(b: []const u8, body: usize, end: usize) void {
 fn walkOutline(b: []const u8, first: u32, depth: u8) void {
     var num = first;
     var guard: u32 = 0;
-    while (num != 0 and mark_n < MAX_OUT and guard < 512) : (guard += 1) {
+    while (num != 0 and guard < 1 << 16) : (guard += 1) {
         const ob = findObj(b, num) orelse return;
         const oe = objDictEnd(b, ob);
         var off: u32 = 0;
         var len: u32 = 0;
         if (find(b[ob..oe], "/Title", 0)) |ta| {
             off = mark_buf_n;
-            len = copyPdfText(b, ob + ta + 6, oe, &mark_buf, mark_buf_n);
+            _ = mark_bufRoom(mark_buf_n + 8192);
+            len = copyPdfText(b, ob + ta + 6, oe, mark_buf(), mark_buf_n);
             mark_buf_n += len;
         }
         var pg: i32 = -1;
@@ -8860,7 +9008,7 @@ fn walkOutline(b: []const u8, first: u32, depth: u8) void {
             }
         }
         if (len > 0) {
-            marks[mark_n] = .{ .depth = depth, .off = off, .len = len, .page = pg };
+            marks()[mark_n] = .{ .depth = depth, .off = off, .len = len, .page = pg };
             mark_n += 1;
         }
         // 자식
@@ -8969,11 +9117,20 @@ var oc_name_off: [MAX_OCG]u32 = undefined;
 var oc_name_len: [MAX_OCG]u32 = undefined;
 var oc_on: [MAX_OCG]bool = undefined;
 var oc_n: u32 = 0;
-var oc_buf: [32 * 1024]u8 = undefined;
+/// oc_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
+var oc_buf_at: usize = 0;
+var oc_buf_cap: u32 = 0;
+fn oc_buf() []u8 {
+    if (oc_buf_at == 0 or oc_buf_cap == 0) return &[_]u8{};
+    return @as([*]u8, @ptrFromInt(oc_buf_at))[0..oc_buf_cap];
+}
+fn oc_bufRoom(want: u32) bool {
+    return growTable(&oc_buf_at, &oc_buf_cap, want, 1, 8192);
+}
 var oc_used: u32 = 0;
 
 export fn ocCount() u32 { return oc_n; }
-export fn ocTextPtr() usize { return @intFromPtr(&oc_buf); }
+export fn ocTextPtr() usize { return (if (oc_buf_at == 0) heapBase() else oc_buf_at); }
 export fn ocNameOff(i: u32) u32 { return if (i < oc_n) oc_name_off[i] else 0; }
 export fn ocNameLen(i: u32) u32 { return if (i < oc_n) oc_name_len[i] else 0; }
 export fn ocIsOn(i: u32) u32 { return if (i < oc_n and oc_on[i]) 1 else 0; }

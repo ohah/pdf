@@ -294,6 +294,32 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   }
   ok('병합(170쪽): 쪽이 제자리', wrong === 0, `어긋난 쪽 ${wrong}개`);
 }
+// --- 세는 상한이 없다: 링크·주석·칸이 많은 쪽
+{
+  const refs = [];
+  const objs = ['%PDF-1.7', '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj',
+    '2 0 obj\n<< /Type /Pages /Count 1 /Kids [4 0 R] >>\nendobj',
+    '3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj'];
+  let n = 10;
+  const add = (body) => { refs.push(`${n} 0 R`); objs.push(`${n} 0 obj\n${body}\nendobj`); n++; };
+  // 예전 상한(링크 128 · 주석 256 · 칸 512)을 넉넉히 넘긴다
+  for (let i = 0; i < 400; i++) add(`<< /Type /Annot /Subtype /Link /Rect [10 ${i % 900} 50 ${(i % 900) + 8}] /A << /S /URI /URI (https://e.com/${i}) >> >>`);
+  for (let i = 0; i < 900; i++) add(`<< /Type /Annot /Subtype /Highlight /Rect [60 ${i % 900} 90 ${(i % 900) + 8}] /C [1 1 0] /Contents (m${i}) >>`);
+  for (let i = 0; i < 1200; i++) add(`<< /Type /Annot /Subtype /Widget /FT /Tx /T (f${i}) /V (v${i}) /Rect [100 ${i % 900} 200 ${(i % 900) + 8}] >>`);
+  const cs = 'BT /F1 12 Tf 20 700 Td (many) Tj ET';
+  objs.push(`4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 1000] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R /Annots [${refs.join(' ')}] >>\nendobj`);
+  objs.push(`5 0 obj\n<< /Length ${cs.length} >>\nstream\n${cs}\nendstream\nendobj`);
+  objs.push('trailer\n<< /Size 3000 /Root 1 0 R >>', '%%EOF', '');
+  fs.writeFileSync(`${S}/.many.annots.pdf`, Buffer.from(objs.join('\n'), 'latin1'));
+  const r = await load('.many.annots.pdf');
+  ok('링크 400개: 다 걷는다', r && r.ex.linkCount() === 400, r && r.ex.linkCount());
+  ok('주석 2500개: 다 걷는다', r && r.ex.annCount() === 2500, r && r.ex.annCount());
+  ok('입력칸 1200개: 다 걷는다', r && r.fld.length === 1200, r && r.fld.length);
+  // 이름·값도 끝까지 남아 있어야 한다 — 표만 늘리고 글자 곳간을 두면 거기서 잘린다
+  const last = r && r.fld[r.fld.length - 1];
+  ok('마지막 칸의 이름·값', last && last.name === 'f1199' && last.value === 'v1199',
+    last && `${last.name}=${last.value}`);
+}
 // --- 같은 쪽을 여러 번 가리키는 문서 (쪽 수가 객체 수보다 많다)
 {
   const mk = (n) => [
