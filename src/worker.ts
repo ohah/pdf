@@ -305,6 +305,11 @@ async function engine() {
  */
 export type Slot = { ex: Exports | null; wasm: string; cmaps: string };
 
+/** 지금 엔진이 잡고 있는 선형 메모리(바이트). 재는 데 쓴다. */
+export function currentMemory(): number {
+  return ex ? ex.memory.buffer.byteLength : 0;
+}
+
 export function newSlot(): Slot {
   return { ex: null, wasm: DEFAULTS.wasm, cmaps: DEFAULTS.cmaps };
 }
