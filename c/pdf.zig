@@ -204,8 +204,9 @@ export fn outputPtr() usize { return out_off; }
 /// 브라우저가 실제로 내주는 양은 기기마다 다르고, 못 늘리면 reserve 가
 /// 0 을 돌려주므로 그때는 "메모리를 못 잡았다"로 끝난다.
 const BUDGET: usize = 3584 * 1024 * 1024;
-/// 파일 크기와 무관하게 늘 잡는 것 — 그림 48 · 글꼴 8 · 인라인 8 · 폼 6 · Type1 4
-const FIXED: usize = (48 + 8 + 8 + 6 + 4) * 1024 * 1024;
+/// 파일 크기와 무관하게 늘 잡는 것 — 그림 48 · 글꼴 8 · 인라인 8 · 폼 6 ·
+/// Type1 4 · 마스크 곳간 12(쓸 때만) · 모듈이 들고 시작하는 35
+const FIXED: usize = (48 + 8 + 8 + 6 + 4 + 12 + 35) * 1024 * 1024;
 
 /// 받을 수 있는 파일 크기.
 ///
@@ -945,6 +946,9 @@ export fn parse(len: usize) u32 {
     // 고리처럼 얽힌 쪽 트리를 만나도 훑는 양이 파일 크기를 넘지 않게 한다.
     // 넉넉히 잡아 채운 뒤 실제로 쓴 만큼으로 줄인다.
     zoneReset();
+    mask_at = 0;
+    mask_used = 0;
+    att_at = 0;
     pages_cut = false;
     if (!walkStart(total)) return 0;
     page_count = 0;
@@ -1349,6 +1353,22 @@ fn skipVal(b: []const u8, from: usize, end: usize) usize {
 }
 
 /// 콘텐츠 스트림 하나를 출력에 적고 xref 목록에 올린다.
+/// 새로 적은 객체의 자리·번호를 담을 표를 잡는다.
+///
+/// 예전에는 [4098]·[8192] 같은 고정 배열이었다. 4098 은 쪽이 [4096] 이던
+/// 시절의 숫자인데, 쪽 상한을 없애면서 이 둘만 남았다 — 4100 쪽짜리를
+/// 돌려 내면 표 밖으로 넘겨 써서 상호참조표에 엉뚱한 번호가 박혔다
+/// (6000 쪽이면 3806 개). 이제 담을 만큼 잡는다.
+fn xrefTables(want: usize) ?struct { offs: []usize, nums: []u32 } {
+    const cap = @max(@as(usize, 64), @min(want, 1 << 20));
+    const off_at = zoneAlloc(cap * @sizeOf(usize)) orelse return null;
+    const num_at = zoneAlloc(cap * 4) orelse return null;
+    return .{
+        .offs = @as([*]usize, @ptrFromInt(off_at))[0..cap],
+        .nums = @as([*]u32, @ptrFromInt(num_at))[0..cap],
+    };
+}
+
 fn writeStream(pos: *usize, offs: []usize, nums: []u32, n: *usize,
     obj: u32, body: []const u8) void
 {
@@ -1401,8 +1421,12 @@ export fn apply() usize {
     if (pos > 0 and outBuf()[pos - 1] != '\n') { outBuf()[pos] = '\n'; pos += 1; }
 
     // 새로 쓸 객체: Pages 하나 + (회전이면) 고른 페이지들
-    var new_offsets: [4098]usize = undefined;
-    var new_nums: [4098]u32 = undefined;
+    // 쪽마다 하나씩, 라벨·주석·칸까지 더해 잡는다. 다 쓰면 되돌린다.
+    const xr_keep = zoneTop();
+    defer zoneShrink(xr_keep);
+    const xr = xrefTables(pick_n * 3 + @as(usize, edit_n) + note_n + newf_n + 64) orelse return 0;
+    const new_offsets = xr.offs;
+    const new_nums = xr.nums;
     var new_n: usize = 0;
 
     // 1) Pages 객체 — Kids 를 고른 순서로
@@ -1453,7 +1477,7 @@ export fn apply() usize {
         // 크롬이 만든 PDF 는 맨 앞에서 .24 배로 줄인다. 그 뒤에 그냥 이으면
         // 워터마크도 같이 줄어든다. 그래서 원본을 q…Q 로 감싼다.
         // 앞 스트림이 q 하나, 뒤 스트림이 Q 로 시작해 원래 좌표계를 되찾는다.
-        writeStream(&pos, &new_offsets, &new_nums, &new_n, wm_pre, "q\n");
+        writeStream(&pos, new_offsets, new_nums, &new_n, wm_pre, "q\n");
     }
     // 라벨·워터마크가 쓸 그림을 먼저 적고 번호를 매긴다
     var mask_next = max_obj + 4 + 2 * @as(u32, @intCast(pick_n)) + 1;
@@ -1475,7 +1499,7 @@ export fn apply() usize {
                 appendStr(pp, " /ImageMask true /BitsPerComponent 1 /Decode [0 1] /Length ");
                 appendNum(pp, len);
                 appendStr(pp, " >>\nstream\n");
-                @memcpy(outBuf()[pp.*..][0..len], mask_buf[off..][0..len]);
+                @memcpy(outBuf()[pp.*..][0..len], maskBuf()[off..][0..len]);
                 pp.* += len;
                 appendStr(pp, "\nendstream\nendobj\n");
             }
@@ -1487,14 +1511,14 @@ export fn apply() usize {
             mask_next += 1;
             any_mask = true;
             writeMask(labs[mi].mobj, labs[mi].mw, labs[mi].mh, labs[mi].moff, labs[mi].mlen,
-                &new_offsets, &new_nums, &new_n, &pos);
+                new_offsets, new_nums, &new_n, &pos);
         }
         if (wm_mlen > 0) {
             wm_mobj = mask_next;
             mask_next += 1;
             any_mask = true;
             writeMask(wm_mobj, wm_mw, wm_mh, wm_moff, wm_mlen,
-                &new_offsets, &new_nums, &new_n, &pos);
+                new_offsets, new_nums, &new_n, &pos);
         }
     }
 
@@ -1564,7 +1588,7 @@ export fn apply() usize {
             putw(&body, &bl, " 0 0 ");
             bl += putNum(body[bl..], @intFromFloat(@max(1, ih2)));
             putw(&body, &bl, " 0 0 cm /PdWm Do Q\n");
-            writeStream(&pos, &new_offsets, &new_nums, &new_n, wm_content, body[0..bl]);
+            writeStream(&pos, new_offsets, new_nums, &new_n, wm_content, body[0..bl]);
             wm_done = true;
         }
         // 앞 스트림이 눌러 둔 q 를 여기서 되돌린다. 원본이 배율을 바꿔 놓은
@@ -1622,7 +1646,7 @@ export fn apply() usize {
         const tail = " Tj ET Q\n";
         @memcpy(body[bl..][0..tail.len], tail);
         bl += tail.len;
-        if (!wm_done) writeStream(&pos, &new_offsets, &new_nums, &new_n, wm_content, body[0..bl]);
+        if (!wm_done) writeStream(&pos, new_offsets, new_nums, &new_n, wm_content, body[0..bl]);
     }
 
     // 새로 다는 주석 — 주석 객체와 겉모습을 함께 적는다
@@ -1952,7 +1976,7 @@ export fn apply() usize {
                 if (bl2 > 2) {
                     my_lab = lab_base + lab_used;
                     lab_used += 1;
-                    writeStream(&pos, &new_offsets, &new_nums, &new_n, my_lab, lab_body[0..bl2]);
+                    writeStream(&pos, new_offsets, new_nums, &new_n, my_lab, lab_body[0..bl2]);
                 }
             }
             new_offsets[new_n] = pos;
@@ -2188,7 +2212,7 @@ export fn apply() usize {
                     appendStr(&pos, " /ImageMask true /BitsPerComponent 1 /Decode [0 1] /Length ");
                     appendNum(&pos, e.mlen);
                     appendStr(&pos, " >>\nstream\n");
-                    @memcpy(outBuf()[pos..][0..e.mlen], mask_buf[e.moff..][0..e.mlen]);
+                    @memcpy(outBuf()[pos..][0..e.mlen], maskBuf()[e.moff..][0..e.mlen]);
                     pos += e.mlen;
                     appendStr(&pos, "\nendstream\nendobj\n");
                     // 겉모습 — 그림을 상자에 꽉 채워 그린다
@@ -5290,15 +5314,32 @@ const EditT = struct {
     mlen: u32 = 0,
 };
 const MASK_POOL = 12 * 1024 * 1024;
-var mask_buf: [MASK_POOL]u8 = undefined;
+/// 마스크 곳간. 정적 배열로 두면 한글 워터마크 한 번 안 쓰는 문서에서도
+/// 모듈이 12MB 를 들고 시작한다 — 쓸 때 잡는다.
+var mask_at: usize = 0;
 var mask_used: u32 = 0;
+fn maskBuf() []u8 {
+    if (mask_at == 0) {
+        mask_at = zoneAlloc(MASK_POOL) orelse return &[_]u8{};
+    }
+    return @as([*]u8, @ptrFromInt(mask_at))[0..MASK_POOL];
+}
 
 /// 마스크 비트를 적을 자리. 화면 쪽이 여기에 적고 붙이기를 부른다.
 /// 입력 칸·라벨·워터마크가 같은 곳간을 나눠 쓴다.
-export fn fieldMaskPtr() usize { return @intFromPtr(&mask_buf) + mask_used; }
-export fn fieldMaskRoom() u32 { return MASK_POOL - mask_used; }
+///
+/// 처음 부를 때 곳간을 잡느라 메모리가 늘 수 있다. 부르는 쪽은 이 값을
+/// 먼저 받아 두고 나서 memory.buffer 를 잡아야 한다 — 반대로 하면 늘어난
+/// 순간 앞서 잡은 버퍼가 떨어져 나가(detached) 쓰지 못한다.
+export fn fieldMaskPtr() usize {
+    const buf = maskBuf();
+    if (buf.len == 0) return 0;
+    return @intFromPtr(buf.ptr) + mask_used;
+}
+export fn fieldMaskRoom() u32 { return if (mask_at == 0) MASK_POOL else MASK_POOL - mask_used; }
 
 fn maskAlloc(len: u32, w: u32, h: u32) ?u32 {
+    if (maskBuf().len == 0) return null;
     if (len == 0 or len > MASK_POOL - mask_used) return null;
     if (w == 0 or h == 0 or w > 1 << 15 or h > 1 << 15) return null;
     const at = mask_used;
@@ -8345,12 +8386,17 @@ export fn attLoad(i: u32) u32 {
     const fnum = readUint(b, &q);
     const body = findObj(b, fnum) orelse return 0;
     const data = streamFrom(b, body) orelse return 0;
-    if (data.len == 0 or data.len > att_out.len) return 0;
-    @memcpy(att_out[0..data.len], data);
+    if (data.len == 0) return 0;
+    // 꺼낼 때 그 크기만큼 빌린다. 예전에는 32MB 짜리 정적 배열이라, 딸린
+    // 파일이 없는 문서에서도 늘 32MB 를 들고 있었고 그보다 큰 붙임은
+    // 아예 못 꺼냈다.
+    const room = bigScratch(data.len) orelse return 0;
+    att_at = @intFromPtr(room.ptr);
+    @memcpy(room[0..data.len], data);
     return @intCast(data.len);
 }
-var att_out: [32 * 1024 * 1024]u8 = undefined;
-export fn attPtr() usize { return @intFromPtr(&att_out); }
+var att_at: usize = 0;
+export fn attPtr() usize { return if (att_at == 0) heapBase() else att_at; }
 
 /// 이름나무를 훑어 딸린 파일을 걷는다.
 fn walkAttTree(b: []const u8, num: u32, depth: u8) void {
@@ -12014,8 +12060,14 @@ export fn merge() usize {
     var pos: usize = in_len;
     if (pos > 0 and outBuf()[pos - 1] != '\n') { outBuf()[pos] = '\n'; pos += 1; }
 
-    var new_offsets: [8192]usize = undefined;
-    var new_nums: [8192]u32 = undefined;
+    const xr_keep = zoneTop();
+    defer zoneShrink(xr_keep);
+    // 둘째 문서의 객체 수는 미리 모르니 파일 크기로 어림잡는다(객체 하나에
+    // 최소 열여섯 바이트). 예전에는 8192 로 묶여, 그보다 많은 객체를 가진
+    // 문서를 붙이면 뒤가 조용히 빠진 채 /Kids 만 남았다.
+    const xr = xrefTables(b.len / 16 + page_count + 128) orelse return 0;
+    const new_offsets = xr.offs;
+    const new_nums = xr.nums;
     var new_n: usize = 0;
 
     // B 의 객체를 번호를 밀어 다시 적는다
@@ -12266,7 +12318,15 @@ export fn merge() usize {
 // 스트림 안의 이진 데이터에는 참조처럼 보이는 바이트가 있을 수 있으므로
 // 딕셔너리 구간만 훑는다.
 
-var reach: [65536]bool = undefined;
+/// 어느 객체가 살아 있는가. 문서에서 본 가장 큰 번호에 맞춰 잡는다 —
+/// 예전에는 [65536] 고정이라, 번호가 그보다 큰 객체는 살아 있어도
+/// 조용히 버려졌다(compact 로 낸 파일에서 그 객체만 사라졌다).
+var reach_at: usize = 0;
+var reach_n: usize = 0;
+fn reachTable() []bool {
+    if (reach_at == 0 or reach_n == 0) return &[_]bool{};
+    return @as([*]bool, @ptrFromInt(reach_at))[0..reach_n];
+}
 
 fn objRange(b: []const u8, num: u32) ?struct { start: usize, dict_end: usize, end: usize } {
     const body = findObj(b, num) orelse return null;
@@ -12277,6 +12337,7 @@ fn objRange(b: []const u8, num: u32) ?struct { start: usize, dict_end: usize, en
 }
 
 fn markReach(b: []const u8, num: u32, depth: u32) void {
+    const reach = reachTable();
     if (num >= reach.len or depth > 64) return;
     if (reach[num]) return;
     reach[num] = true;
@@ -12622,13 +12683,18 @@ fn aesSeal(src: []const u8, dst: []u8) u32 {
     return @intCast(total);
 }
 
-/// 암호 걸 자리 — 스트림 하나를 담아 두는 곳
-var seal_buf: [16 * 1024 * 1024]u8 = undefined;
+/// 글자열 하나를 암호화할 때만 쓰는 작은 자리.
+///
+/// 스트림은 여기 안 담는다. 예전에는 16MB 짜리 정적 배열 하나에 둘 다
+/// 담았는데, 그보다 큰 스트림(300dpi 스캔 한 장이면 25MB 다)을 만나면
+/// 조용히 건너뛰고 딕셔너리에는 원래 /Length 를 적었다 — 스트림은 없는데
+/// 있다고 적힌 파일이 나갔다. 이제 스트림은 그때그때 메모리 끝을 빌린다.
+var seal_str: [64 * 1024]u8 = undefined;
 
 /// 문자열 하나를 암호화해 <16진> 으로 적는다.
 fn writeSealedString(pos: *usize, raw: []const u8) void {
-    if (raw.len + 64 > seal_buf.len) return;
-    const n = aesSeal(raw, &seal_buf);
+    if (raw.len + 64 > seal_str.len) return;
+    const n = aesSeal(raw, &seal_str);
     if (n == 0 or !outRoom(pos.*, n * 2 + 8)) {
         appendStr(pos, "<>");
         return;
@@ -12636,8 +12702,8 @@ fn writeSealedString(pos: *usize, raw: []const u8) void {
     appendStr(pos, "<");
     var i: u32 = 0;
     while (i < n) : (i += 1) {
-        const hi: u8 = seal_buf[i] >> 4;
-        const lo: u8 = seal_buf[i] & 15;
+        const hi: u8 = seal_str[i] >> 4;
+        const lo: u8 = seal_str[i] & 15;
         outBuf()[pos.*] = if (hi < 10) '0' + hi else 'A' + (hi - 10);
         outBuf()[pos.* + 1] = if (lo < 10) '0' + lo else 'A' + (lo - 10);
         pos.* += 2;
@@ -12727,8 +12793,13 @@ export fn compact() usize {
     if (pick_n == 0 or pages_obj == 0) return 0;
     const b = searchSlice();
 
-    var i: usize = 0;
-    while (i < reach.len) : (i += 1) reach[i] = false;
+    // 살아 있는 객체 표를 문서에서 본 가장 큰 번호에 맞춰 잡는다
+    const reach_keep = zoneTop();
+    defer zoneShrink(reach_keep);
+    reach_n = @as(usize, max_obj) + 64;
+    reach_at = zoneAlloc(reach_n) orelse { reach_n = 0; return 0; };
+    const reach = reachTable();
+    @memset(reach, false);
 
     // 옛 페이지 트리를 먼저 방문한 것으로 막는다. 이렇게 하지 않으면
     // Catalog → Pages → 모든 쪽으로 내려가 버려서, 버리려던 쪽까지 전부
@@ -12743,7 +12814,7 @@ export fn compact() usize {
     if (root != 0) markReach(b, root, 0);
 
     // 고른 쪽과 그 아래 딸린 것들만 표시한다
-    i = 0;
+    var i: usize = 0;
     while (i < pick_n) : (i += 1) markReach(b, page_objs()[pick()[i]], 0);
 
     var pos: usize = 0;
@@ -12753,8 +12824,11 @@ export fn compact() usize {
         enc_ctr = 0;
     }
 
-    var new_offsets: [8192]usize = undefined;
-    var new_nums: [8192]u32 = undefined;
+    const xr_keep = zoneTop();
+    defer zoneShrink(xr_keep);
+    const xr = xrefTables(@as(usize, max_obj) + 64) orelse return 0;
+    const new_offsets = xr.offs;
+    const new_nums = xr.nums;
     var new_n: usize = 0;
 
     // 살아남은 객체를 번호를 그대로 두고 옮긴다. 번호를 다시 매기면 모든
@@ -12778,14 +12852,19 @@ export fn compact() usize {
             const sp2 = find(b[r.start..r.end], "stream", 0);
             var dict_to = r.end;
             var sealed: u32 = 0;
+            var sealed_at: []u8 = &[_]u8{};
             if (sp2) |sa| {
                 dict_to = r.start + sa;
                 const length = lengthOf(b, r.start, dict_to) orelse 0;
                 var d2 = r.start + sa + 6;
                 if (d2 < b.len and b[d2] == '\r') d2 += 1;
                 if (d2 < b.len and b[d2] == '\n') d2 += 1;
-                if (length > 0 and d2 + length <= b.len and length + 64 < seal_buf.len) {
-                    sealed = aesSeal(b[d2..][0..length], &seal_buf);
+                if (length > 0 and d2 + length <= b.len) {
+                    // 스트림 크기에 맞춰 메모리 끝을 빌린다. 못 빌리면 여기서
+                    // 접는다 — 스트림 없이 /Length 만 적힌 파일을 내느니
+                    // 만들기를 실패로 돌리는 편이 낫다.
+                    sealed_at = bigScratch(length + 64) orelse return 0;
+                    sealed = aesSeal(b[d2..][0..length], sealed_at);
                 }
             }
             // 딕셔너리
@@ -12805,7 +12884,7 @@ export fn compact() usize {
             }
             if (sealed > 0 and outRoom(pos, sealed + 64)) {
                 appendStr(&pos, "\nstream\n");
-                @memcpy(outBuf()[pos..][0..sealed], seal_buf[0..sealed]);
+                @memcpy(outBuf()[pos..][0..sealed], sealed_at[0..sealed]);
                 pos += sealed;
                 appendStr(&pos, "\nendstream\n");
             } else appendStr(&pos, "\n");

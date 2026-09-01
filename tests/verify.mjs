@@ -552,7 +552,8 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
     const W = 64, H = 16, st = (W + 7) >> 3;
     const bits = new Uint8Array(st * H).fill(0xff);
     for (let y = 6; y < 10; y++) for (let x = 8; x < 56; x++) bits[y * st + (x >> 3)] &= ~(0x80 >> (x & 7));
-    new Uint8Array(ek.memory.buffer, ek.fieldMaskPtr(), bits.length).set(bits);
+    const maskAt2 = ek.fieldMaskPtr();
+    new Uint8Array(ek.memory.buffer, maskAt2, bits.length).set(bits);
     ok('양식: 마스크 붙임', ek.setFieldEditMask(W, H, bits.length) === 1);
   }
   const nk = ek.apply();
@@ -790,11 +791,13 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
     ex.addLabel(0, 60, 700, 20, 0.9, 0.1, 0.1);
     for (const ch of '한글라벨') ex.addLabelChar(ch.codePointAt(0));
     const b1 = mkbits(80, 20);
-    new Uint8Array(ex.memory.buffer, ex.fieldMaskPtr(), b1.length).set(b1);
+    const maskAt3 = ex.fieldMaskPtr();
+    new Uint8Array(ex.memory.buffer, maskAt3, b1.length).set(b1);
     ok('라벨 그림 붙임', ex.setLabelMask(80, 20, b1.length, 60, 20) === 1);
     for (const ch of '대외비') ex.addWatermarkChar(ch.codePointAt(0));
     const b2 = mkbits(120, 40);
-    new Uint8Array(ex.memory.buffer, ex.fieldMaskPtr(), b2.length).set(b2);
+    const maskAt4 = ex.fieldMaskPtr();
+    new Uint8Array(ex.memory.buffer, maskAt4, b2.length).set(b2);
     ok('워터마크 그림 붙임', ex.setWatermarkMask(120, 40, b2.length, 120, 40) === 1);
     const n = ex.apply();
     ok('한글 라벨·워터마크 만들어짐', n > 0, n);

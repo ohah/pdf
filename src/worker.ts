@@ -421,7 +421,8 @@ export type BuildSpec = {
 function putMask(e: Exports, m: Mask) {
   if (!e.fieldMaskPtr || !e.fieldMaskRoom) return false;
   if (m.bits.length > e.fieldMaskRoom()) return false;
-  new Uint8Array(e.memory.buffer, e.fieldMaskPtr(), m.bits.length).set(m.bits);
+  const maskAt1 = e.fieldMaskPtr();
+  new Uint8Array(e.memory.buffer, maskAt1, m.bits.length).set(m.bits);
   return true;
 }
 

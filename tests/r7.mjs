@@ -509,14 +509,16 @@ await koFill('라벨 그림 크기 0', (ex) => {
   ex.addLabel(0, 10, 10, 12, 0, 0, 0);
   ex.addLabelChar(0xac00);
   const b = kbits(16);
-  new Uint8Array(ex.memory.buffer, ex.fieldMaskPtr(), b.length).set(b);
+  const maskAt5 = ex.fieldMaskPtr();
+  new Uint8Array(ex.memory.buffer, maskAt5, b.length).set(b);
   ex.setLabelMask(0, 0, b.length, 10, 10);
 });
 await koFill('라벨 그림 4만×4만', (ex) => {
   ex.addLabel(0, 10, 10, 12, 0, 0, 0);
   ex.addLabelChar(0xac00);
   const b = kbits(16);
-  new Uint8Array(ex.memory.buffer, ex.fieldMaskPtr(), b.length).set(b);
+  const maskAt6 = ex.fieldMaskPtr();
+  new Uint8Array(ex.memory.buffer, maskAt6, b.length).set(b);
   ex.setLabelMask(40000, 40000, b.length, 10, 10);
 });
 await koFill('라벨 그림 64개', (ex) => {
@@ -524,25 +526,29 @@ await koFill('라벨 그림 64개', (ex) => {
     ex.addLabel(0, 10 + i, 10 + i, 12, 0, 0, 0);
     ex.addLabelChar(0xac00);
     const b = kbits(64);
-    new Uint8Array(ex.memory.buffer, ex.fieldMaskPtr(), b.length).set(b);
+    const maskAt7 = ex.fieldMaskPtr();
+    new Uint8Array(ex.memory.buffer, maskAt7, b.length).set(b);
     ex.setLabelMask(16, 16, b.length, 10, 10);
   }
 });
 await koFill('라벨 없이 그림만', (ex) => {
   const b = kbits(64);
-  new Uint8Array(ex.memory.buffer, ex.fieldMaskPtr(), b.length).set(b);
+  const maskAt8 = ex.fieldMaskPtr();
+  new Uint8Array(ex.memory.buffer, maskAt8, b.length).set(b);
   ex.setLabelMask(16, 16, b.length, 10, 10);
 });
 await koFill('워터마크 그림 크기 0', (ex) => {
   ex.addWatermarkChar(0xac00);
   const b = kbits(16);
-  new Uint8Array(ex.memory.buffer, ex.fieldMaskPtr(), b.length).set(b);
+  const maskAt9 = ex.fieldMaskPtr();
+  new Uint8Array(ex.memory.buffer, maskAt9, b.length).set(b);
   ex.setWatermarkMask(16, 16, b.length, 0, 0);
 });
 await koFill('워터마크 그림 놓을 크기 무한', (ex) => {
   ex.addWatermarkChar(0xac00);
   const b = kbits(16);
-  new Uint8Array(ex.memory.buffer, ex.fieldMaskPtr(), b.length).set(b);
+  const maskAt10 = ex.fieldMaskPtr();
+  new Uint8Array(ex.memory.buffer, maskAt10, b.length).set(b);
   ex.setWatermarkMask(16, 16, b.length, 1e30, -1e30);
 });
 
