@@ -74,13 +74,15 @@ export function PDFPage({
   doc, page, className, style, onRender, ...opts
 }: PDFPageProps) {
   const ref = useRef<HTMLCanvasElement | null>(null);
-  const { scale, dpr, formLayer } = opts;
+  // 광고한 옵션은 다 넘긴다. 예전에는 셋만 꺼내 쓰고 rotation·background 는
+  // 조용히 버려, <PDFPage rotation={90}/> 이 형은 맞는데 아무 일도 안 했다.
+  const { scale, dpr, formLayer, rotation, background } = opts;
   const draw = useCallback(async (signal: AbortSignal) => {
     const cv = ref.current;
     if (!cv || !doc) return;
-    const r = await doc.render(page, cv, { scale, dpr, formLayer, signal });
+    const r = await doc.render(page, cv, { scale, dpr, formLayer, rotation, background, signal });
     onRender?.({ width: r.width, height: r.height });
-  }, [doc, page, scale, dpr, formLayer, onRender]);
+  }, [doc, page, scale, dpr, formLayer, rotation, background, onRender]);
   useEffect(() => {
     // 쪽·배율이 바뀌거나 떠나면 그리던 것을 버린다 — 빠르게 넘길 때
     // 지나간 쪽이 나중에 덮어 그리지 않게.

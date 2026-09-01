@@ -1,6 +1,6 @@
 # @ohah/pdf
 
-브라우저에서 PDF 를 읽고, 그리고, 고친다. 엔진은 Zig 로 짜 wasm 하나(288KB)로
+브라우저에서 PDF 를 읽고, 그리고, 고친다. 엔진은 Zig 로 짜 wasm 하나(306KB)로
 굽고 웹 워커에서 돌린다. 화면 갈래는 바닐라·React·Vue·Svelte 를 함께 낸다.
 
 ```bash
@@ -197,7 +197,7 @@ const [px, py] = viewport.toPdf(ev.offsetX, ev.offsetY);        // 클릭 → PD
 npm i
 npm run build:wasm   # zig 0.16 이 필요하다 (mise 를 쓰면 mise.toml 이 잡는다)
 npm run build:js
-bash tests/run.sh 3  # 적대적 604개 + 단언 343개
+bash tests/run.sh 3  # 적대적 604개 + 단언 330개 + API 전수 + 타입
 npx vite examples    # 예제 넷을 한 서버에 띄운다
 ```
 

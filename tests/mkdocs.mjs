@@ -115,8 +115,4 @@ const multi = doc([
 fs.mkdirSync(`${S}/pdf`, { recursive: true });
 fs.writeFileSync(`${S}/pdf/modern.pdf`, modern);
 fs.writeFileSync(`${S}/pdf/multi.pdf`, multi);
-// e2e 는 같은 문서를 tests/fixtures/ 에서 읽는다
-const e2e = path.resolve(S, '../../fixtures');
-fs.writeFileSync(`${e2e}/pages.pdf`, modern);
-fs.writeFileSync(`${e2e}/sample.pdf`, multi);
 console.log(`modern.pdf ${modern.length}B · multi.pdf ${multi.length}B (pages.pdf·sample.pdf 로도 씀)`);

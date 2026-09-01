@@ -86,6 +86,25 @@ export type DrawInput = {
 // 만든 캔버스를 내용과 색으로 캐시한다.
 const inlineCache = new Map<string, HTMLCanvasElement>();
 
+/**
+ * 인라인 그림 곳간마다 붙이는 딱지.
+ *
+ * 캐시 열쇠에 자리(off)와 길이만 넣었더니, 엔진이 쪽마다 그 곳간을 처음부터
+ * 다시 쓰기 때문에 2쪽의 첫 그림이 1쪽 것과 길이만 같으면 1쪽 그림이
+ * 나왔다. Type3 비트맵 글꼴은 크기가 같아 길이도 같으니 거의 반드시 겹친다.
+ * 곳간(버퍼)마다 딴 딱지를 달아 섞이지 않게 한다.
+ */
+const inlineTags = new WeakMap<Uint8Array, string>();
+let inlineSeq = 0;
+function tagOf(buf: Uint8Array): string {
+    let t = inlineTags.get(buf);
+    if (!t) {
+      t = `b${inlineSeq++}:`;
+      inlineTags.set(buf, t);
+    }
+    return t;
+}
+
 /** 1비트 스텐실 그림 — 색이 그릴 때 정해지므로 미리 만들어 둘 수 없다. */
 export type Stencil = { w: number; h: number; flip: boolean; bytes: Uint8Array; key: string };
 
@@ -94,12 +113,14 @@ function inlineCanvas(
   src: Uint8Array, off: number, len: number,
   w: number, h: number, bpc: number, isMask: boolean, flip: boolean,
   comps: number, color: string, tag?: string,
+  /** 여벌 판을 만들 본보기. Node 에는 document 가 없어 이것이 있어야 만든다 */
+  like?: { constructor: unknown } | null,
 ): HTMLCanvasElement | null {
   const key = `${tag ?? ""}${off}:${len}:${isMask ? color : ""}`;
   const hit = inlineCache.get(key);
   if (hit) return hit;
   if (off + len > src.length) return null;
-  const cv = scratch(w, h, null) as HTMLCanvasElement | null;
+  const cv = scratch(w, h, like ?? null) as HTMLCanvasElement | null;
   if (!cv) return null;
   const c = cv.getContext("2d");
   if (!c) return null;
@@ -607,7 +628,8 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
         const w = ops[a], h = ops[a + 1], bpc = ops[a + 2], isMask = ops[a + 3] === 1;
         const off = ops[a + 4], len = ops[a + 5], flip = ops[a + 6] === 1;
         const comps = argc > 7 ? ops[a + 7] : 1;
-        const cv = inlineCanvas(src, off, len, w, h, bpc, isMask, flip, comps, fillCss);
+        const cv = inlineCanvas(src, off, len, w, h, bpc, isMask, flip, comps, fillCss,
+          `${tagOf(src)}${w}x${h}x${bpc}x${comps}:`, canvas);
         if (!cv) break;
         g.save();
         g.imageSmoothingEnabled = false;
@@ -621,7 +643,7 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
         const slot = argc > 0 ? ops[a] : 0;
         const st2 = slot > 0 ? input.stencils?.[slot - 1] : undefined;
         if (st2) {
-          const cv = inlineCanvas(st2.bytes, 0, st2.bytes.length, st2.w, st2.h, 1, true, st2.flip, 1, fillCss, st2.key);
+          const cv = inlineCanvas(st2.bytes, 0, st2.bytes.length, st2.w, st2.h, 1, true, st2.flip, 1, fillCss, st2.key, canvas);
           if (cv) {
             g.save();
             g.imageSmoothingEnabled = false;

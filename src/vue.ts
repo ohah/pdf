@@ -51,6 +51,10 @@ export const PDFPage = defineComponent({
     page: { type: Number, default: 1 },
     scale: { type: Number, default: 1 },
     formLayer: { type: Boolean, default: true },
+    // React 갈래와 같은 것을 받는다 — 한쪽만 되는 옵션이 있으면 헷갈린다
+    dpr: { type: Number, default: undefined },
+    rotation: { type: Number, default: undefined },
+    background: { type: String, default: undefined },
   },
   setup(props) {
     const cv = ref<HTMLCanvasElement | null>(null);
@@ -61,7 +65,8 @@ export const PDFPage = defineComponent({
       onCleanup(() => ac.abort());
       await props.doc
         .render(props.page, cv.value, {
-          scale: props.scale, formLayer: props.formLayer, signal: ac.signal,
+          scale: props.scale, formLayer: props.formLayer, dpr: props.dpr,
+          rotation: props.rotation, background: props.background, signal: ac.signal,
         })
         .catch(() => {});
     });

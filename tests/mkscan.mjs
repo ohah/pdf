@@ -141,7 +141,5 @@ const four = scanDoc(4, 500, 680, 596, 843);
 
 fs.mkdirSync(`${S}/pdf`, { recursive: true });
 fs.writeFileSync(`${S}/pdf/scanned.pdf`, one);
-const e2e = path.resolve(S, '../../fixtures');
-fs.writeFileSync(`${e2e}/scanned.pdf`, one);
-fs.writeFileSync(`${e2e}/scan4.pdf`, four);
+fs.writeFileSync(path.join(S, 'scan4.pdf'), four);
 console.log(`scanned.pdf ${(one.length / 1024).toFixed(0)}KB · scan4.pdf ${(four.length / 1024).toFixed(0)}KB`);

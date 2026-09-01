@@ -34,25 +34,35 @@ type CmapEx = {
   cmapAdd?: (idx: number, len: number) => number;
 };
 
-let index: Promise<Set<string>> | null = null;
+// 곳간은 자리(base)마다 따로 둔다.
+//
+// 예전에는 이름만 열쇠라, 문서 A 의 표를 받아 두면 자리가 다른 문서 B 도
+// 그것을 썼다. 브라우저에서는 문서마다 워커가 따로라 안 겪지만, Node 나
+// 워커를 못 만드는 자리에서는 한 모듈을 나눠 쓰므로 B 의 한글이 깨졌다.
+const indexes = new Map<string, Promise<Set<string>>>();
 const cache = new Map<string, Promise<ArrayBuffer | null>>();
 
 /** 어떤 이름이 실제로 있는지. 없는 이름을 받으러 가면 404 만 쌓인다. */
 function known() {
-  index ??= loadBytes(`${base}/index.json`)
-    .then((b) => (b ? (JSON.parse(new TextDecoder().decode(b)) as string[]) : []))
-    .then((a) => new Set(a))
-    .catch(() => new Set<string>());
-  return index;
+  let got = indexes.get(base);
+  if (!got) {
+    got = loadBytes(`${base}/index.json`)
+      .then((b) => (b ? (JSON.parse(new TextDecoder().decode(b)) as string[]) : []))
+      .then((a) => new Set(a))
+      .catch(() => new Set<string>());
+    indexes.set(base, got);
+  }
+  return got;
 }
 
 function grab(name: string) {
-  let p = cache.get(name);
+  const key = `${base}\n${name}`;
+  let p = cache.get(key);
   if (!p) {
     p = loadBytes(`${base}/${name}.bin`)
       .then((b) => (b ? (b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer) : null))
       .catch(() => null);
-    cache.set(name, p);
+    cache.set(key, p);
   }
   return p;
 }

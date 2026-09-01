@@ -8,7 +8,7 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 
 | | pdf.js | @ohah/pdf |
 |---|---|---|
-| 번들 크기 | 505KB | **150KB** + wasm 288KB |
+| 번들 크기 | 505KB | **148KB** + wasm 306KB |
 | 그리기 정확도 | CMYK JPEG·JBIG2 허프만·JPX ROI 문서에서 빈 화면 | **그린다** |
 | 표준 14종 자간 | AFM 폭 + 실제 글꼴 | **AFM 폭** (모양은 시스템 글꼴) |
 | 전자 서명 | 데이터만 준다 | **WebCrypto 로 검증까지** |
@@ -21,7 +21,7 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 | pdf.js | 우리 |
 |---|---|
 | `data` · `password` | ✅ |
-| `cMapUrl` / `cMapPacked` | ✅ `paths.cmaps` |
+| `cMapUrl` / `cMapPacked` | ✅ 열 때 `cmaps` 로 자리를 준다 |
 | `url` + `range`·`disableStream`·`disableAutoFetch` | ❌ 전체 바이트를 받아야 시작 |
 | `onProgress` | ✅ `open(url, { onProgress, signal })` |
 | `standardFontDataUrl` (표준 14종) | ⚠️ **자간은 정확**(Adobe AFM 폭 표를 담았다) · 글자 모양은 시스템 글꼴 |

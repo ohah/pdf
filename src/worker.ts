@@ -453,7 +453,7 @@ async function open(bytes: Uint8Array, pw: string) {
   chars(e, pw, (c) => e.addPasswordChar?.(c));
   const ok = e.parse(bytes.byteLength);
   if (e.needPassword?.()) return { needPw: true };
-  if (!ok) return { err: "트리" };
+  if (!ok) return { err: "no-page-tree" };
   await loadCmaps(e as unknown as Parameters<typeof loadCmaps>[0]);
   const marks: { depth: number; title: string; page: number }[] = [];
   for (let i = 0; i < (e.outlineCount?.() ?? 0); i++) {
@@ -489,7 +489,7 @@ async function open(bytes: Uint8Array, pw: string) {
   for (let i = 0; i < (e.attCount?.() ?? 0); i++) {
     atts.push({
       name: dec.decode(new Uint8Array(e.memory.buffer,
-        e.attTextPtr!() + e.attNameOff!(i), e.attNameLen!(i))) || `붙임 ${i + 1}`,
+        e.attTextPtr!() + e.attNameOff!(i), e.attNameLen!(i))) || `attachment ${i + 1}`,
     });
   }
   // 레이어(선택 콘텐츠) — 도면·지도 문서가 켜고 끌 거리를 담아 온다
@@ -497,7 +497,7 @@ async function open(bytes: Uint8Array, pw: string) {
   for (let i = 0; i < (e.ocCount?.() ?? 0); i++) {
     layers.push({
       name: dec.decode(new Uint8Array(e.memory.buffer,
-        e.ocTextPtr!() + e.ocNameOff!(i), e.ocNameLen!(i))) || `레이어 ${i + 1}`,
+        e.ocTextPtr!() + e.ocNameOff!(i), e.ocNameLen!(i))) || `layer ${i + 1}`,
       on: e.ocIsOn!(i) === 1,
     });
   }
@@ -617,7 +617,7 @@ async function page(i: number, formOn: boolean, light = false) {
         c2.fillStyle = "#6b7280";
         c2.font = `${Math.max(9, cv.width / 16)}px system-ui, sans-serif`;
         c2.textAlign = "center";
-        c2.fillText("지원하지 않는 그림 형식", cv.width / 2, cv.height / 2);
+        c2.fillText("unsupported image format", cv.width / 2, cv.height / 2);
       }
       stencils.push(undefined);
       bitmaps.push(await createImageBitmap(cv).catch(() => undefined));
@@ -659,7 +659,6 @@ async function page(i: number, formOn: boolean, light = false) {
   const ops = light
     ? new Float32Array(0)
     : new Float32Array(e.memory.buffer, e.opsPtr(), e.opsLen()).slice();
-  const txt = new Uint8Array(e.memory.buffer, e.textPtr(), e.textLen()).slice();
   const drw = new Uint8Array(e.memory.buffer, e.drawPtr(), e.drawLen()).slice();
   const rtx = e.readPtr && e.readLen
     ? new Uint8Array(e.memory.buffer, e.readPtr(), e.readLen()).slice()
@@ -737,7 +736,7 @@ async function page(i: number, formOn: boolean, light = false) {
   }
   return {
     w: e.pageWidth(), h: e.pageHeight(), x0: e.pageOriginX?.() ?? 0, y0: e.pageOriginY?.() ?? 0,
-    rot: e.pageRotate?.() ?? 0, items, ops, txt, drw, rtx, links, annots, inline, fields,
+    rot: e.pageRotate?.() ?? 0, items, ops, drw, rtx, links, annots, inline, fields,
     fonts, bitmaps, stencils, bitmap, images: e.imageCount(), forms: e.formCount?.() ?? 0,
     light,
   };
@@ -916,7 +915,7 @@ export async function doWork(t: string, a: any): Promise<{ r: unknown; move: Tra
   }
   else if (t === "page") {
     const q = await page(a.i, a.formOn, a.light === true);
-    for (const b of [q.ops.buffer, q.txt.buffer, q.drw.buffer, q.rtx.buffer, q.inline.buffer]) {
+    for (const b of [q.ops.buffer, q.drw.buffer, q.rtx.buffer, q.inline.buffer]) {
       move.push(b as Transferable);
     }
     for (const b of q.bitmaps) if (b) move.push(b);

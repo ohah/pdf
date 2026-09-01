@@ -18,7 +18,7 @@ export type PageMsg = {
     dir: "ltr" | "rtl" | "ttb";
   }[];
   ops: Float32Array;
-  txt: Uint8Array;
+  /** 그리는 데 쓰는 글자(글꼴 코드 그대로). 그리기 말고는 쓸 데가 없다 */
   drw: Uint8Array;
   rtx: Uint8Array;
   links: { x0: number; y0: number; x1: number; y1: number; uri: string; page: number }[];

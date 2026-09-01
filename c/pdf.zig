@@ -143,12 +143,6 @@ fn searchSlice() []u8 {
     return @as([*]u8, @ptrFromInt(heapBase()))[0 .. in_len + exp_len];
 }
 
-fn inputSlice() []u8 {
-    return @as([*]u8, @ptrFromInt(heapBase()))[0..in_len];
-}
-fn outputAt(i: usize) *u8 {
-    return @ptrFromInt(out_off + i);
-}
 
 /// 페이지 객체 번호들 (문서 순서). 자리는 parse 가 쪽 수에 맞춰 잡는다.
 var pg_at: usize = 0;
@@ -5481,11 +5475,6 @@ export fn addNewFieldChar(c: u32) void {
     f.len += n;
 }
 
-fn newFieldsOnPage(page: u32) bool {
-    var i: u32 = 0;
-    while (i < newf_n) : (i += 1) if (newf[i].page == page) return true;
-    return false;
-}
 
 /// 이 객체가 지울 칸인가
 fn fieldDeleted(obj: u32) bool {
