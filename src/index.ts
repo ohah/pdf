@@ -257,8 +257,8 @@ export class PDFDocument {
   private cl: PDFClient;
   /** 닫혔는가 */
   private shut = false;
-  private cache = new Map<number, PageMsg>();
-  private fams = new Map<number, (string | undefined)[]>();
+  private cache = new Map<string, PageMsg>();
+  private fams = new Map<string, (string | undefined)[]>();
   private raw: Uint8Array;
 
   /** 쪽 수 */
@@ -368,17 +368,27 @@ export class PDFDocument {
     return new PDFDocument(cl, r, keep);
   }
 
-  private async get(i: number, formLayer: boolean) {
-    const hit = this.cache.get(i);
+  /**
+   * 쪽 하나를 가져온다. `drawFields` 는 **밖에서 쓰는 뜻**이다 — 입력 칸
+   * 겉모습을 그릴 것인가.
+   *
+   * 엔진이 받는 값은 그 반대다. 거기서 켠다는 것은 "화면이 제 입력 칸을
+   * 얹을 테니 겉모습은 그리지 마라" 는 뜻이라, 그대로 넘기면 양식 문서가
+   * 통째로 빈 쪽으로 나왔다. 담아 두는 자리도 이 값을 함께 열쇠로 삼는다 —
+   * 안 그러면 먼저 부른 쪽의 값이 뒤엣것에 그대로 쓰인다.
+   */
+  private async get(i: number, drawFields: boolean) {
+    const key = `${i}:${drawFields ? 1 : 0}`;
+    const hit = this.cache.get(key);
     if (hit) return hit;
-    const q = await this.cl.page(i - 1, formLayer);
+    const q = await this.cl.page(i - 1, !drawFields);
     // 기다리는 사이에 닫혔으면 담아 두지 않는다 — 담으면 닫은 뒤에도
     // 그 쪽만 계속 답해 준다.
     if (this.shut) throw new Error("the document is already closed");
     const fams: (string | undefined)[] = [];
     for (const f of q.fonts) fams.push(f.bytes ? await loadFont(f.bytes) : undefined);
-    this.cache.set(i, q);
-    this.fams.set(i, fams);
+    this.cache.set(key, q);
+    this.fams.set(key, fams);
     return q;
   }
 
@@ -399,9 +409,10 @@ export class PDFDocument {
         + "On Node, pass one from a canvas package, or use text()/textItems() to extract instead.",
       );
     }
-    const q = await this.get(page, opts.formLayer !== false);
+    const draw = opts.formLayer !== false;
+    const q = await this.get(page, draw);
     stopIfAborted(opts.signal);
-    const fams = this.fams.get(page) ?? [];
+    const fams = this.fams.get(`${page}:${draw ? 1 : 0}`) ?? [];
     const scale = opts.scale ?? 1;
     const dpr = opts.dpr ?? Math.min(globalThis.devicePixelRatio || 1, 2);
     const vp = makeViewport({
@@ -504,12 +515,12 @@ export class PDFDocument {
 
   /** 쪽 하나의 입력 칸 */
   async fields(page: number): Promise<FormField[]> {
-    return (await this.get(page, true)).fields;
+    return (await this.get(page, false)).fields;
   }
 
   /** 쪽 하나의 링크 */
   async links(page: number): Promise<LinkItem[]> {
-    return (await this.get(page, true)).links;
+    return (await this.get(page, false)).links;
   }
 
   /**
@@ -520,7 +531,7 @@ export class PDFDocument {
    * 숨김 깃발(2)이 선 것도 그대로 준다 — 거르는 것은 쓰는 쪽 몫이다.
    */
   async annotations(page: number): Promise<Annotation[]> {
-    return (await this.get(page, true)).annots;
+    return (await this.get(page, false)).annots;
   }
 
   /** 전자 서명을 확인한다. 브라우저 WebCrypto 로 맞춰 본다. */
