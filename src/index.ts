@@ -137,6 +137,58 @@ export type OpenOpts = Paths & {
 
 /** 열 수 있는 것들. 주소를 주면 받아 오면서 진행률을 알려 준다. */
 /** build() 에 주는 것. 다 안 적어도 된다 — 안 적으면 그대로 둔다. */
+/**
+ * 밖에서 부를 수 있게 이름을 붙인 것들.
+ *
+ * 메서드가 돌려주는 꼴을 그 자리에 적어 두면 쓰는 쪽이 그걸 가리킬 수가 없다 —
+ * `const items: ??? = await pdf.textItems(1)` 에서 막힌다. 함수 하나를 건너
+ * 넘길 때마다 `Awaited<ReturnType<...>>` 를 쓰게 하지 않으려고 이름을 준다.
+ */
+
+/** 목차 한 줄. `page` 는 0부터 */
+export type OutlineItem = { depth: number; title: string; page: number };
+
+/** 문서가 밝힌 허락. 암호가 없으면 모두 true 다 */
+export type Permissions = {
+  print: boolean; modify: boolean; copy: boolean; annotate: boolean;
+  fillForms: boolean; accessibility: boolean; assemble: boolean; printHighRes: boolean;
+};
+
+/** 레이어(선택 콘텐츠) 하나 */
+export type Layer = { name: string; on: boolean };
+
+/** 딸린 파일 하나 */
+export type Attachment = { name: string };
+
+/** 이름 목적지 하나. 못 풀면 `page` 는 -1 */
+export type Destination = { name: string; page: number };
+
+/** 글자 덩이 하나 — pdf.js 의 TextItem 자리 */
+export type TextItem = {
+  str: string; x: number; y: number; size: number;
+  /** 이 덩이를 그린 글꼴 이름. 문서가 안 적어 두면 빈 문자열 */
+  font: string;
+  /** 쓰는 방향 — 세로쓰기면 "ttb", 아랍·히브리면 "rtl", 그 밖은 "ltr" */
+  dir: "ltr" | "rtl" | "ttb";
+  /** 이 덩이가 줄의 끝인가 */
+  hasEOL: boolean;
+};
+
+/** 입력 칸 하나 */
+export type FormField = PageMsg["fields"][number];
+
+/** 링크 하나 */
+export type LinkItem = PageMsg["links"][number];
+
+/** 주석 하나 — 형광펜·메모·네모·잉크·도장·링크·위젯을 가리지 않는다 */
+export type Annotation = PageMsg["annots"][number];
+
+/** 서명 하나 — 맞춰 본 결과에 이름·날짜·사유가 붙는다 */
+export type Signature = SigCheck & { name: string; date: string; reason: string };
+
+/** 이어 붙인 결과. `added` 는 붙은 쪽 수 */
+export type MergeResult = { bytes: Uint8Array; added: number };
+
 export type BuildOpts = Partial<BuildSpec>;
 
 export type Source = Uint8Array | ArrayBuffer | Blob | Response | string | URL;
@@ -216,13 +268,13 @@ export class PDFDocument {
   /** 잠긴 문서였나 */
   readonly locked: boolean;
   /** 목차 */
-  readonly outline: { depth: number; title: string; page: number }[];
+  readonly outline: OutlineItem[];
   /** 문서 속성 (제목·글쓴이 …) */
   readonly info: string[];
   /** 레이어(선택 콘텐츠) */
-  readonly layers: { name: string; on: boolean }[];
+  readonly layers: Layer[];
   /** 딸린 파일 이름 */
-  readonly attachments: { name: string }[];
+  readonly attachments: Attachment[];
   /** XFA 양식인가 — 그렇다면 쪽이 거의 비어 있는 것이 정상이다 */
   readonly isXfa: boolean;
   /**
@@ -231,10 +283,7 @@ export class PDFDocument {
    * 강제가 아니라 문서가 밝힌 뜻이다 — 뷰어가 인쇄·복사 단추를 흐리게 하는
    * 데 쓴다(pdf.js 의 getPermissions 와 같은 비트다).
    */
-  readonly permissions: {
-    print: boolean; modify: boolean; copy: boolean; annotate: boolean;
-    fillForms: boolean; accessibility: boolean; assemble: boolean; printHighRes: boolean;
-  };
+  readonly permissions: Permissions;
   /** 열 때 옆판을 어떻게 둘지 — UseOutlines·UseThumbs·FullScreen … (/PageMode) */
   readonly pageMode: string;
   /** 한 쪽·두 쪽 보기 — SinglePage·TwoColumnLeft … (/PageLayout) */
@@ -251,7 +300,7 @@ export class PDFDocument {
    * 이름 목적지. 목차·링크가 "3쪽" 대신 이름으로 가리키는 문서가 흔하다.
    * `page` 는 0부터이고, 못 풀면 -1 이다.
    */
-  readonly destinations: { name: string; page: number }[];
+  readonly destinations: Destination[];
   /** 뷰어 설정 (/ViewerPreferences) — HideToolbar·Direction·PrintScaling … */
   readonly viewerPreferences: Record<string, string>;
   /** XMP 메타데이터 원문(RDF/XML). 문서에 없으면 빈 문자열 */
@@ -425,10 +474,7 @@ export class PDFDocument {
    * 그리지 않고도 얻는다(가벼운 뽑기). 각 덩이는 자리·크기와 함께 그린
    * 글꼴 이름, 쓰는 방향, 줄 끝인지를 달고 온다.
    */
-  async textItems(page: number): Promise<{
-    str: string; x: number; y: number; size: number;
-    font: string; dir: "ltr" | "rtl" | "ttb"; hasEOL: boolean;
-  }[]> {
+  async textItems(page: number): Promise<TextItem[]> {
     const q = await this.get(page, false);
     const out = q.items.map((it) => ({
       str: it.text, x: it.x, y: it.y, size: it.size,
@@ -457,12 +503,12 @@ export class PDFDocument {
   }
 
   /** 쪽 하나의 입력 칸 */
-  async fields(page: number) {
+  async fields(page: number): Promise<FormField[]> {
     return (await this.get(page, true)).fields;
   }
 
   /** 쪽 하나의 링크 */
-  async links(page: number) {
+  async links(page: number): Promise<LinkItem[]> {
     return (await this.get(page, true)).links;
   }
 
@@ -473,12 +519,12 @@ export class PDFDocument {
    * 뛰어가기처럼 **다루기 위한** 정보다(pdf.js 의 getAnnotations 자리).
    * 숨김 깃발(2)이 선 것도 그대로 준다 — 거르는 것은 쓰는 쪽 몫이다.
    */
-  async annotations(page: number) {
+  async annotations(page: number): Promise<Annotation[]> {
     return (await this.get(page, true)).annots;
   }
 
   /** 전자 서명을 확인한다. 브라우저 WebCrypto 로 맞춰 본다. */
-  async signatures(): Promise<(SigCheck & { name: string; date: string; reason: string })[]> {
+  async signatures(): Promise<Signature[]> {
     const out = [];
     for (const g of this.sigsRaw) {
       const one = { name: g.name, date: g.date, reason: g.reason };
@@ -566,7 +612,7 @@ export class PDFDocument {
   }
 
   /** 다른 PDF 를 뒤에 잇는다 */
-  merge(bytes: Uint8Array) {
+  merge(bytes: Uint8Array): Promise<MergeResult | null> {
     return this.cl.merge(bytes);
   }
 

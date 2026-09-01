@@ -181,6 +181,11 @@ Object.assign(box.style, viewport.rect([72, 680, 172, 700]));   // PDF 네모 �
 const [px, py] = viewport.toPdf(ev.offsetX, ev.offsetY);        // 클릭 → PDF 좌표
 ```
 
+돌려주는 것들은 이름이 있다 — `TextItem`·`FormField`·`LinkItem`·`Annotation`·
+`Signature`·`MergeResult`·`OutlineItem`·`Permissions`·`Layer`·`Attachment`·
+`Destination`·`StructNode`·`Viewport`·`TextRun`. 함수 하나를 건너 넘길 때
+`Awaited<ReturnType<…>>` 를 쓰지 않아도 된다.
+
 `toLines(runs)` 로 글자 덩이를 읽는 차례의 줄로 묶을 수 있고, `renderTextLayer()` 가
 그 줄로 투명 글자층을 지어 준다(폭 맞추기·줄바꿈까지).
 `renderAnnotationLayer(container, annots, viewport)` 는 주석을 다룰 수 있게 얹는다 —
