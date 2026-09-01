@@ -6354,9 +6354,7 @@ fn collectContents(b: []const u8, body: usize, end: usize) ?[]const u8 {
     var p = body + ca + 9;
     while (p < end and isSpace(b[p])) p += 1;
     if (p >= end) return null;
-    const cap = stream_tmp_off - content_off;
-    if (content_off == 0 or cap == 0) return null;
-    const dst = @as([*]u8, @ptrFromInt(content_off))[0..cap];
+    var dst = growBuf(&cont_at, &cont_cap, 64 * 1024, 256 * 1024, 0) orelse return null;
     var w: usize = 0;
 
     // 하나뿐이라도 제자리로 옮겨 둔다.
@@ -6368,7 +6366,7 @@ fn collectContents(b: []const u8, body: usize, end: usize) ?[]const u8 {
         if (!isDigit(b[p])) return null;
         const n = readUint(b, &p);
         const cs = streamOf(b, n) orelse return null;
-        if (cs.len + 1 > cap) return null;
+        dst = growBuf(&cont_at, &cont_cap, cs.len + 1, 256 * 1024, 0) orelse return null;
         @memcpy(dst[0..cs.len], cs);
         dst[cs.len] = '\n';
         return dst[0 .. cs.len + 1];
@@ -6384,8 +6382,9 @@ fn collectContents(b: []const u8, body: usize, end: usize) ?[]const u8 {
         while (p < end and isSpace(b[p])) p += 1;
         if (p < end and b[p] == 'R') p += 1;
         const cs = streamOf(b, n) orelse continue;
-        // 앞 스트림의 마지막 토큰과 붙지 않게 줄바꿈을 끼운다
-        if (w + cs.len + 1 > cap) break;
+        // 앞 스트림의 마지막 토큰과 붙지 않게 줄바꿈을 끼운다.
+        // 자리가 모자라면 늘린다 — 여기서 멈추면 쪽 뒷부분이 소리 없이 잘린다.
+        dst = growBuf(&cont_at, &cont_cap, w + cs.len + 1, 256 * 1024, w) orelse break;
         @memcpy(dst[w..][0..cs.len], cs);
         w += cs.len;
         dst[w] = '\n';
@@ -6394,14 +6393,51 @@ fn collectContents(b: []const u8, body: usize, end: usize) ?[]const u8 {
     return if (w > 0) dst[0..w] else null;
 }
 
-/// 임시 자리 두 곳. 펼친 객체 뒤에 잡아 서로 겹치지 않게 한다.
-/// content 는 /Contents 를 모으는 자리, stream_tmp 는 스트림 하나를 푸는 자리다.
-var content_off: usize = 0;
-var stream_tmp_off: usize = 0;
+/// 임시 자리 두 곳. content 는 /Contents 를 모으는 자리, stream_tmp 는
+/// 스트림 하나를 푸는 자리다.
+///
+/// 예전에는 둘 다 "펼친 객체 뒤에 남은 자리" 를 8분의 1·2분의 1 지점에서
+/// 잘라 썼다. 그 자리는 파일 크기에 딸린 값이라, 작은 파일에 빽빽한 쪽이
+/// 들어 있으면 모자랐다 — 그리고 모자라면 null 을 돌려 쪽이 통째로 백지가
+/// 됐다. 같은 쪽(내용 1.03MB)이 1MB 파일에서는 백지, 9MB 파일에서는
+/// 멀쩡했다. 이제는 필요한 만큼 zone 에서 잡고 모자라면 배로 늘린다.
+var cont_at: usize = 0;
+var cont_cap: usize = 0;
+var tmp_at: usize = 0;
+var tmp_cap: usize = 0;
 fn layoutScratch() void {
-    const avail = exp_cap - exp_len;
-    content_off = exp_off + exp_len + avail / 8;
-    stream_tmp_off = exp_off + exp_len + avail / 2;
+    // zone 은 parse 마다 되감기므로 들고 있던 자리도 함께 버린다
+    cont_at = 0;
+    cont_cap = 0;
+    tmp_at = 0;
+    tmp_cap = 0;
+}
+
+/// 자리를 need 만큼 마련한다. 이미 잡아 둔 것이 크면 그대로 쓴다.
+/// keep 바이트는 새 자리로 옮겨 준다 — 스트림을 이어 붙이는 중이면
+/// 앞서 담은 것이 날아가면 안 된다.
+fn growBuf(at: *usize, cap: *usize, need: usize, least: usize, keep: usize) ?[]u8 {
+    // 구역이 되감겼으면(merge·compact 가 그런다) 들고 있던 자리는 남의 것이다
+    if (at.* != 0 and at.* + cap.* > zoneTop()) {
+        at.* = 0;
+        cap.* = 0;
+    }
+    if (at.* != 0 and cap.* >= need) return @as([*]u8, @ptrFromInt(at.*))[0..cap.*];
+    var want = if (cap.* == 0) least else cap.*;
+    while (want < need) {
+        const dbl = want *| 2;
+        if (dbl <= want) return null; // 넘침
+        want = dbl;
+    }
+    const got = zoneAlloc(want) orelse return null;
+    const dst = @as([*]u8, @ptrFromInt(got))[0..want];
+    if (keep > 0 and at.* != 0) {
+        const src = @as([*]const u8, @ptrFromInt(at.*))[0..@min(keep, cap.*)];
+        @memcpy(dst[0..src.len], src);
+    }
+    at.* = got;
+    cap.* = want;
+    return dst;
 }
 
 /// 스트림 하나를 필터 사슬대로 풀어 dst 에 담는다. 담은 길이를 준다.
@@ -6508,15 +6544,24 @@ fn streamFrom(b: []const u8, body: usize) ?[]const u8 {
     // 넘쳐서 통과해 버린다(위 fixStreamLen 주석).
     if (length > b.len - data) return null;
 
-    if (stream_tmp_off == 0) return null;
-    const cap = (exp_off + exp_cap) - stream_tmp_off;
     if (find(b[body..sp], "/Filter", 0) == null) {
         return b[data .. data + length]; // 필터가 없으면 그대로
     }
-    const dst = @as([*]u8, @ptrFromInt(stream_tmp_off))[0..cap];
-    const got = decodeChain(b, body, sp, data, length, dst);
-    if (got == 0) return null;
-    return dst[0..got];
+    // 푼 크기는 미리 알 수 없다. 넉넉히 잡아 풀되, 자리를 꽉 채웠으면
+    // 잘렸다는 뜻이므로 배로 늘려 다시 푼다. 예전에는 남은 자리에 맞춰
+    // 자르고 말았고, 그래서 큰 쪽이 반만 그려지거나 통째로 사라졌다.
+    var want = @max(@as(usize, 1024 * 1024), length *| 4);
+    var tries: u32 = 0;
+    while (tries < 8) : (tries += 1) {
+        const dst = growBuf(&tmp_at, &tmp_cap, want, 1024 * 1024, 0) orelse return null;
+        const got = decodeChain(b, body, sp, data, length, dst);
+        if (got == 0) return null;
+        if (got < dst.len) return dst[0..got];
+        // 딱 맞게 찼다 — 더 있는지 모르니 늘려서 다시 본다
+        want = dst.len *| 2;
+        if (want <= dst.len) return dst[0..got];
+    }
+    return @as([*]const u8, @ptrFromInt(tmp_at))[0..tmp_cap];
 }
 
 

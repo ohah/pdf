@@ -69,6 +69,19 @@ async function load(file, page = 0, feed = true, formOn = true) {
   return { ex, ops, counts, text, need, drew, slot, fld, pages: ex.pageCount() };
 }
 
+// --- 빽빽한 쪽 (작은 파일 + 1MB 내용)
+//
+// 내용을 모으는 자리를 "남은 자리" 에서 잘라 쓰던 때는 이 쪽이 통째로
+// 백지였다. 자리가 파일 크기에 딸린 값이라 작은 파일에서 모자랐고,
+// 모자라면 null 을 돌려 그리기 명령이 하나도 안 나왔다.
+{
+  const r = await load('dense.pdf');
+  ok('빽빽한 쪽: 명령이 나온다', r && r.ops.length > 1000, r && r.ops.length);
+  // 네모 5000개를 다 그린다 — 자리(5)와 채우기(6)가 5000쌍
+  ok('빽빽한 쪽: 네모 5000개', r && r.counts[5] >= 5000 && r.counts[6] >= 5000,
+    r && `${r.counts[5]}/${r.counts[6]}`);
+}
+
 // --- 글꼴
 {
   const r = await load('korean.pdf');
