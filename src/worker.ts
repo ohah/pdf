@@ -240,7 +240,15 @@ declare const self: {
 };
 
 let ex: Exports | null = null;
-let mod: WebAssembly.Module | null = null;
+/**
+ * 컴파일한 wasm. 자리(주소)마다 따로 담는다.
+ *
+ * 하나만 담아 두면, 자리를 잘못 알려 준 문서도 앞서 담아 둔 것으로 열려
+ * 버린다 — 설정이 틀렸는데 되는 것처럼 보이고, 판이 다른 wasm 을 가리켜도
+ * 조용히 옛것이 쓰인다. 워커가 하나씩 뜨는 브라우저에서는 안 겪지만
+ * Node 처럼 한 모듈을 나눠 쓰는 곳에서는 겪는다.
+ */
+const mods = new Map<string, WebAssembly.Module>();
 const dec = new TextDecoder();
 
 const wasi = {
@@ -255,11 +263,13 @@ let wasmPath = DEFAULTS.wasm;
 
 async function engine() {
   if (ex) return ex;
+  let mod = mods.get(wasmPath);
   if (!mod) {
     const wasmBytes = await loadBytes(wasmPath);
     if (!wasmBytes) throw new Error(`could not load ${wasmPath}`);
-    // 컴파일 결과는 사례끼리 나눠 써도 된다 — 무거운 건 이것뿐이다
+    // 컴파일 결과는 같은 자리를 보는 사례끼리 나눠 쓴다 — 무거운 건 이것뿐이다
     mod = await WebAssembly.compile(wasmBytes);
+    mods.set(wasmPath, mod);
   }
   const inst = await WebAssembly.instantiate(mod, { wasi_snapshot_preview1: wasi });
   ex = inst.exports as unknown as Exports;
@@ -773,8 +783,9 @@ async function build(spec: BuildSpec) {
 /** 다 만든 바이트에 암호를 건다. 보던 문서를 건드리지 않게 사례를 따로 쓴다. */
 async function seal(bytes: Uint8Array, pw: string) {
   await engine();
-  if (!mod) return null;
-  const inst = await WebAssembly.instantiate(mod, { wasi_snapshot_preview1: wasi });
+  const built = mods.get(wasmPath);
+  if (!built) return null;
+  const inst = await WebAssembly.instantiate(built, { wasi_snapshot_preview1: wasi });
   const e = inst.exports as unknown as Exports;
   if (!e.setEncrypt || !e.encRandomPtr) return null;
   if (!e.reserve(bytes.length, bytes.length * 4 + 32 * 1024 * 1024)) return null;

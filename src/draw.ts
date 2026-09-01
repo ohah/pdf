@@ -194,7 +194,10 @@ function scratch(
 export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] {
   const runs: TextRun[] = [];
   const g0 = canvas.getContext("2d");
-  if (!g0) return runs;
+  // 판을 못 얻는 일이 실제로 있다 — 그 캔버스가 이미 webgl 로 잡혀 있거나,
+  // 메모리가 모자랄 때다. 조용히 빈 손으로 돌아오면 "그렸는데 아무것도
+  // 안 보인다" 가 되므로 무슨 일인지 말해 준다.
+  if (!g0) throw new Error("could not get a 2d context from the canvas");
   // 글자 오려 내기가 걸리면 그리는 판이 바뀐다
   let g: CanvasRenderingContext2D = g0;
   const { ops, text, pageW, pageH } = input;

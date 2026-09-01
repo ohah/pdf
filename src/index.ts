@@ -525,6 +525,9 @@ export class PDFDocument {
 
   /** 전자 서명을 확인한다. 브라우저 WebCrypto 로 맞춰 본다. */
   async signatures(): Promise<Signature[]> {
+    // 열 때 걷어 둔 것을 쓰지만, 닫은 문서에 물으면 다른 것들처럼 거절한다 —
+    // 하나만 대답하면 "닫혔는데 왜 되지" 가 된다.
+    if (this.shut) throw new Error("the document is already closed");
     const out = [];
     for (const g of this.sigsRaw) {
       const one = { name: g.name, date: g.date, reason: g.reason };

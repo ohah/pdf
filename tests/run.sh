@@ -5,6 +5,8 @@
 #
 # 두 갈래로 돌린다.
 #
+#   API     — 내보낸 것을 하나도 빠짐없이 이상한 값으로 두들긴다. 매달리지
+#             않고, Error 만 던지고, 안 건드린 이름이 없어야 한다.
 #   적대적  — 망가진 파일·극단값을 넣고 죽거나 멎지 않는지 본다.
 #             통과 기준은 "예외 0, 3초 넘는 항목 0" 이다.
 #   단언    — 결과가 실제로 맞는지 본다. 죽지 않는 것만으로는 모자란다.
@@ -38,17 +40,20 @@ for pass in $(seq 1 "$N"); do
   pl=$(bun run tests/place.ts)
   sg=$(bun run tests/sig.ts)
   nd=$(node tests/node.mjs "$FX" 2>&1 || true)
+  ap=$(node tests/api-adv.mjs "$pass" "$FX" 2>&1 || true)
   ty=$(npx tsc --noEmit --ignoreConfig --strict --target ES2022 --module ESNext \
         --moduleResolution bundler --lib ES2022,DOM,DOM.Iterable tests/types.ts 2>&1 \
         && echo "타입 이름 다 나감" || echo "타입 실패 1")
   printf "%s회차  적대적 %s개 · 예외 %s · 느림 %s | %s | %s\n" \
     "$pass" "$n" "$ex" "$slow" "$(echo "$fn" | head -1 | sed 's/^ *//')" "$(echo "$ln" | head -1 | sed 's/^ *//')"
   echo "        ${pl# } | ${sg# } | ${nd# } | ${ty# }"
+  echo "        API ${ap# }"
   if [ "$ex" != 0 ] || [ "$slow" != 0 ]; then echo "$adv" | grep -E '예외|⚠'; fail=1; fi
   if echo "$fn" | grep -qE '실패 [1-9]'; then echo "$fn"; fail=1; fi
   if echo "$ln$pl$sg" | grep -qE '실패 [1-9]'; then echo "$ln"; echo "$pl"; echo "$sg"; fail=1; fi
   if echo "$nd" | grep -qE '실패 [1-9]'; then echo "$nd"; fail=1; fi
   if echo "$ty" | grep -qE '실패 [1-9]'; then echo "$ty"; fail=1; fi
+  if echo "$ap" | grep -q '✗'; then echo "$ap"; fail=1; fi
 done
 [ "$fail" = 0 ] || { echo "실패한 항목이 있다."; exit 1; }
 echo "모두 통과."
