@@ -18,9 +18,10 @@ import { makeViewport, type Viewport } from "./viewport.js";
 
 export type { Paths } from "./config.js";
 export type { BuildSpec, Mask, PageMsg } from "./client.js";
-export type { TextRun } from "./draw.js";
+export type { TextRun, Stencil } from "./draw.js";
 export type { SigCheck } from "./sig.js";
-export { toLines } from "./draw.js";
+export { checkSignature } from "./sig.js";
+export { toLines, drawOps } from "./draw.js";
 export { renderTextLayer, type TextLayer, type TextLayerOpts } from "./textlayer.js";
 export { renderAnnotationLayer, type Annot, type AnnotLayer, type AnnotLayerOpts } from "./annotlayer.js";
 export { makeViewport, type Viewport } from "./viewport.js";
