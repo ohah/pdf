@@ -197,7 +197,8 @@ const [px, py] = viewport.toPdf(ev.offsetX, ev.offsetY);        // 클릭 → PD
 npm i
 npm run build:wasm   # zig 0.16 이 필요하다 (mise 를 쓰면 mise.toml 이 잡는다)
 npm run build:js
-bash tests/run.sh 3  # 적대적 604개 + 단언 330개 + API 전수 + 타입
+bash tests/run.sh 3          # 적대적 604개 + 단언 + API 전수 + 타입
+bash tests/mem-cmp.sh       # pdf.js 와 메모리 맞대기 (들이기·열고 그리기·합)
 npx vite examples    # 예제 넷을 한 서버에 띄운다
 ```
 
