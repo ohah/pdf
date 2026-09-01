@@ -556,6 +556,20 @@ fn growTableTo(at: *usize, cap: *u32, want: u32, elem: usize, start: u32, limit:
     while (n <= want) : (n *|= 2) {
         if (n >= limit) return false;
     }
+    // 맨 위에 있는 표는 뒤로 늘리기만 하면 된다 — 옮기지도, 앞엣것을
+    // 버리지도 않는다. 배로 늘리는 표가 여럿 쌓이면 그 버린 자리가 꽤 된다
+    // (무늬를 잔뜩 그리는 쪽에서 6MB 였다).
+    if (at.* != 0 and at.* + @as(usize, cap.*) * elem == zoneTop()) {
+        const want_end = at.* + @as(usize, n) * elem;
+        const have = @wasmMemorySize(0) * PAGE;
+        if (want_end > have) {
+            const more = (want_end - have + PAGE - 1) / PAGE;
+            if (@wasmMemoryGrow(0, more) < 0) return false;
+        }
+        zone_top = want_end;
+        cap.* = n;
+        return true;
+    }
     const fresh = zoneAlloc(@as(usize, n) * elem) orelse return false;
     if (cap.* > 0 and at.* != 0) {
         const old = @as([*]const u8, @ptrFromInt(at.*))[0 .. @as(usize, cap.*) * elem];
