@@ -11,6 +11,8 @@ import {
   type Signature, type MergeResult, type OutlineItem, type Permissions,
   type Layer, type Attachment, type Destination, type StructNode, type Viewport,
   type RenderResult, type BuildOpts, type OpenOpts, type Paths, type TextRun,
+  type OpenAction, type CalcField, type ValueOf, type XfaForm, type XfaPage, type XfaBox,
+  readXfa, drawXfa, toPt, runCalc, recalculate,
 } from "../src/index.js";
 
 export async function demo(pdf: PDFDocument) {
@@ -31,5 +33,20 @@ export async function demo(pdf: PDFDocument) {
   const opts: OpenOpts = { wasm: "/pdf.wasm" };
   const paths: Paths = { cmaps: "/cmaps" };
   const runs: TextRun[] = [];
-  return { items, fields, links, annots, sigs, merged, outline, perm, layers, atts, dests, tree, vp, spec, opts, paths, runs };
+  // 열 때 갈 자리·셈 차례·XFA
+  const open: OpenAction | null = pdf.openAction;
+  const order: number[] = pdf.calcOrder;
+  const xml: string = pdf.xfaXml;
+  const form: XfaForm = readXfa(xml);
+  const page: XfaPage | undefined = form.pages[0];
+  const box: XfaBox | undefined = page?.boxes[0];
+  const pt: number = toPt("1in");
+  const calcs: CalcField[] = fields.map((f) => ({ name: f.name, calc: f.calc, format: f.format }));
+  const at: ValueOf = (n) => n;
+  const one: string | null = runCalc("event.value = 1;", at);
+  const many: { values: Record<string, string>; skipped: string[] } = recalculate(calcs, {}, order.map(String));
+  const partial: boolean = pdf.partial;
+  void drawXfa;
+  return {
+    open, order, xml, form, page, box, pt, calcs, one, many, partial, items, fields, links, annots, sigs, merged, outline, perm, layers, atts, dests, tree, vp, spec, opts, paths, runs };
 }

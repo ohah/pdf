@@ -45,13 +45,16 @@ for pass in $(seq 1 "$N"); do
   sg=$(bun run tests/sig.ts)
   nd=$(node tests/node.mjs "$FX" 2>&1 || true)
   ap=$(node tests/api-adv.mjs "$pass" "$FX" 2>&1 || true)
+  rg=$(node tests/range.mjs 2>&1 | tail -1 || true)
+  fj=$(node tests/formjs.mjs 2>&1 | tail -1 || true)
+  xf=$(node tests/xfa.mjs 2>&1 | tail -1 || true)
   ty=$(npx tsc --noEmit --ignoreConfig --strict --target ES2022 --module ESNext \
         --moduleResolution bundler --lib ES2022,DOM,DOM.Iterable tests/types.ts 2>&1 \
         && echo "타입 이름 다 나감" || echo "타입 실패 1")
   printf "%s회차  적대적 %s개 · 예외 %s · 느림 %s | %s | %s\n" \
     "$pass" "$n" "$ex" "$slow" "$(echo "$fn" | head -1 | sed 's/^ *//')" "$(echo "$ln" | head -1 | sed 's/^ *//')"
   echo "        ${pl# } | ${sg# } | ${nd# } | ${ty# }"
-  echo "        API ${ap# }"
+  echo "        API ${ap# } | ${rg# } | ${fj# } | ${xf# }"
   if [ "$ex" != 0 ] || [ "$slow" != 0 ]; then echo "$adv" | grep -E '예외|⚠'; fail=1; fi
   if echo "$fn" | grep -qE '실패 [1-9]'; then echo "$fn"; fail=1; fi
   if echo "$ln$pl$sg" | grep -qE '실패 [1-9]'; then echo "$ln"; echo "$pl"; echo "$sg"; fail=1; fi

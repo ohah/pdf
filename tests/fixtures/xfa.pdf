@@ -1,39 +1,61 @@
 %PDF-1.7
-1 0 obj
-<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [] /XFA 6 0 R >> >>
-endobj
-2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
-endobj
-3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 760] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
-endobj
-4 0 obj
-<< /Length 55 >>
-stream
-BT /F1 12 Tf 40 700 Td (Please open with Acrobat) Tj ET
-endstream
-endobj
-5 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
-endobj
-6 0 obj
-<< /Length 67 >>
-stream
-<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template/></xdp:xdp>
-endstream
-endobj
+1 0 obj<</Type/Catalog/Pages 2 0 R/AcroForm<</Fields[]/XFA[(template) 5 0 R (datasets) 6 0 R]>>>>endobj
+2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Resources<</Font<</F1 7 0 R>>>>/Contents 4 0 R>>endobj
+4 0 obj<</Length 71>>stream
+BT /F1 12 Tf 60 700 Td (Please open this document with Acrobat.) Tj ET
+endstream endobj
+5 0 obj<</Length 1103>>stream
+<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.0/">
+  <subform name="form1" layout="position">
+    <pageSet>
+      <pageArea name="Page1">
+        <contentArea x="0mm" y="0mm" w="210mm" h="297mm"/>
+        <medium short="210mm" long="297mm"/>
+      </pageArea>
+    </pageSet>
+    <subform x="20mm" y="20mm">
+      <draw name="title" x="0mm" y="0mm" w="120mm" h="10mm">
+        <value><text>거래 명세서</text></value>
+        <font size="16pt" weight="bold"/>
+      </draw>
+      <field name="company" x="0mm" y="15mm" w="80mm" h="8mm">
+        <caption><value><text>상호</text></value></caption>
+        <value><text>보기 주식회사</text></value>
+        <font size="10pt"/>
+        <border><edge/></border>
+      </field>
+      <field name="amount" x="0mm" y="27mm" w="80mm" h="8mm">
+        <caption><value><text>금액</text></value></caption>
+        <font size="10pt"/>
+        <para hAlign="right"/>
+        <border><edge/></border>
+      </field>
+    </subform>
+  </subform>
+</template>
+
+endstream endobj
+6 0 obj<</Length 158>>stream
+<xfa:datasets xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/">
+  <xfa:data><form1><amount>1,250,000</amount></form1></xfa:data>
+</xfa:datasets>
+</xdp:xdp>
+endstream endobj
+7 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
 xref
-0 7
+0 8
 0000000000 65535 f 
 0000000009 00000 n 
-0000000096 00000 n 
-0000000153 00000 n 
-0000000279 00000 n 
-0000000384 00000 n 
-0000000454 00000 n 
-trailer
-<< /Size 7 /Root 1 0 R >>
+0000000113 00000 n 
+0000000162 00000 n 
+0000000272 00000 n 
+0000000388 00000 n 
+0000001539 00000 n 
+0000001744 00000 n 
+trailer<</Size 8/Root 1 0 R>>
 startxref
-571
+1805
 %%EOF

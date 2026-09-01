@@ -48,6 +48,10 @@ export type PageMsg = {
     obj: number; kind: number; flags: number; maxLen: number; size: number; align: number;
     rect: [number, number, number, number];
     name: string; value: string; on: string; opts: string; checked: boolean;
+    /** 값이 바뀔 때 도는 계산식 (/AA /C). 없으면 빈 문자열 */
+    calc: string;
+    /** 보이는 꼴을 정하는 스크립트 (/AA /F) */
+    format: string;
   }[];
   fonts: { bytes: Uint8Array | null; pua: boolean; name: string; kind: number; len: number }[];
   bitmaps: (ImageBitmap | undefined)[];
@@ -71,8 +75,10 @@ export type OpenMsg = {
   info?: string[];
   layers?: { name: string; on: boolean }[];
   atts?: { name: string }[];
-  /** XFA 양식인가 — 우리도 남들도 제대로 못 그린다 */
+  /** XFA 양식인가 */
   xfa?: boolean;
+  /** XFA 양식의 XML 원문. 아니면 빈 문자열 */
+  xfaXml?: string;
   /** 암호 사전의 권한 비트(/P). 암호가 없으면 -1 */
   perm?: number;
   /** 열 때 옆판을 어떻게 둘지 (/PageMode) */
@@ -89,6 +95,8 @@ export type OpenMsg = {
   labels?: string[];
   /** 이름 목적지 — 목차·링크가 이름으로 가리키는 자리 */
   dests?: { name: string; page: number }[];
+  /** 값이 바뀌면 다시 셈할 차례 (/AcroForm /CO). 칸의 객체 번호 */
+  calcOrder?: number[];
   /** 열 때 갈 자리 (/OpenAction). 갈 데가 없으면 null */
   openAction?: {
     page: number;

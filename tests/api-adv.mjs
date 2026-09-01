@@ -204,6 +204,41 @@ for (const g of [new Uint8Array(0), new Uint8Array([1, 2, 3])]) {
   await bounded("checkSignature(쓰레기)", () => lib.checkSignature(g, g, [0, 0, 0, 0], false));
 }
 
+// ── 6-2. 양식 계산식·XFA ──────────────────────────────────────
+hit("runCalc");
+// 문서가 준 코드를 절대 돌리면 안 된다 — 돌면 아래 자국이 남는다
+globalThis.__pwned = false;
+const evil = [
+  'event.value = (globalThis.__pwned = true) ? 1 : 2;',
+  'app.alert("x"); event.value = 1;',
+  'this.getField("a").value = eval("1+1");',
+  'while(1){}',
+  'event.value = ' + '('.repeat(500) + '1' + ')'.repeat(500) + ';',
+  'event.value = this.getField(' + '"a"'.repeat(50) + ').value;',
+  '',
+  'event.value = 1/0;',
+  'AFSimple_Calculate("SUM", new Array(' + '"a",'.repeat(200) + '"b"));',
+];
+for (const js of evil) await bounded("runCalc(고약한 것)", () => lib.runCalc(js, () => "1"));
+if (globalThis.__pwned) note("runCalc", "문서가 준 코드가 실제로 돌았다");
+hit("recalculate");
+for (const arg of [[[], {}], [[{ name: "a", calc: "event.value = 1;" }], {}],
+                   [[{ name: "a", calc: "event.value = this.getField(\"a\").value + 1;" }], { a: "1" }]]) {
+  await bounded("recalculate", () => lib.recalculate(arg[0], arg[1]));
+}
+hit("toPt");
+for (const v of ["", "1in", "25.4mm", "abc", "1e9in", "-5pt", "9".repeat(400) + "mm"]) {
+  await bounded("toPt", () => lib.toPt(v));
+}
+hit("readXfa");
+for (const x of ["", "<template>", "<template><subform x=\"1in\"><field/></subform></template>",
+                 "<".repeat(2000), "<template>" + "<subform>".repeat(300) + "</template>"]) {
+  await bounded("readXfa(이상한 XML)", () => lib.readXfa(x));
+}
+hit("drawXfa");
+await bounded("drawXfa(캔버스 없이)", () => lib.drawXfa({ getContext: () => null, width: 1, height: 1 },
+  { width: 10, height: 10, boxes: [] }, 1));
+
 // ── 7. 만들기·잇기·암호 ───────────────────────────────────────
 for (const spec of [{}, { pick: [] }, { pick: [0, 0, 0] }, { pick: [1e6] }, { pick: [-1] },
                     { rotate: 450 }, { rotate: NaN }, { watermark: "가".repeat(400) },

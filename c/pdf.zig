@@ -1095,6 +1095,7 @@ export fn parse(len: usize) u32 {
     collectMeta(b);
     collectDests(b);
     collectOpenAction(b); // 이름 붙은 자리를 찾으려면 dests 뒤여야 한다
+    collectCalcOrder(b);
     collectViewPrefs(b);
     collectXmp(b);
     collectStruct(b);
@@ -5861,6 +5862,12 @@ const FieldT = struct {
     opts_off: u32,
     opts_len: u32,
     checked: bool,
+    /// 칸에 붙은 자바스크립트(/AA). 계산식(/C)과 서식(/F).
+    /// 값이 바뀔 때 다른 칸을 다시 셈하는 양식이 흔하다 — 합계·부가세 따위다.
+    calc_off: u32,
+    calc_len: u32,
+    fmt_off: u32,
+    fmt_len: u32,
 };
 fn fields() []FieldT {
     if (field_at == 0 or field_cap == 0) return &[_]FieldT{};
@@ -5887,6 +5894,10 @@ export fn fieldFlags(i: u32) u32 { return if (i < field_n) fields()[i].flags els
 export fn fieldMaxLen(i: u32) u32 { return if (i < field_n) fields()[i].maxlen else 0; }
 export fn fieldSize(i: u32) f32 { return if (i < field_n) fields()[i].size else 0; }
 export fn fieldAlign(i: u32) u32 { return if (i < field_n) fields()[i].align_ else 0; }
+export fn fieldCalcOff(i: u32) u32 { return if (i < field_n) fields()[i].calc_off else 0; }
+export fn fieldCalcLen(i: u32) u32 { return if (i < field_n) fields()[i].calc_len else 0; }
+export fn fieldFmtOff(i: u32) u32 { return if (i < field_n) fields()[i].fmt_off else 0; }
+export fn fieldFmtLen(i: u32) u32 { return if (i < field_n) fields()[i].fmt_len else 0; }
 export fn fieldChecked(i: u32) u32 { return if (i < field_n and fields()[i].checked) 1 else 0; }
 export fn fieldTextPtr() [*]u8 { return @ptrFromInt(if (fld_buf_at == 0) heapBase() else fld_buf_at); }
 export fn fieldNameOff(i: u32) u32 { return if (i < field_n) fields()[i].name_off else 0; }
@@ -5914,7 +5925,7 @@ fn fldPutStr(b: []const u8, s0: usize, e0: usize) [2]u32 {
     var p = s0;
     while (p < e0 and isSpace(b[p])) p += 1;
     if (p >= e0) return .{ off, 0 };
-    var tmp: [2048]u8 = undefined;
+    var tmp: [16384]u8 = undefined;
     var n: usize = 0;
     if (b[p] == '(') {
         p += 1;
@@ -6025,6 +6036,95 @@ fn fieldLookup(b: []const u8, obj: u32, key: []const u8, depth: u32) ?[2]usize {
 }
 
 /// 이 쪽의 입력 칸을 모은다.
+/// 칸에 붙은 자바스크립트를 꺼낸다. sub 는 "/C"(계산) 또는 "/F"(서식).
+///
+/// /AA << /C << /S /JavaScript /JS (…) >> >> 꼴이고, 어디든 참조로 빠져
+/// 있을 수 있다. /JS 는 문자열일 때도, 스트림일 때도 있다.
+fn fieldScript(b: []const u8, num: u32, sub: []const u8) [2]u32 {
+    const r = fieldLookup(b, num, "/AA", 0) orelse return .{ 0, 0 };
+    var s0 = r[0];
+    while (s0 < r[1] and isSpace(b[s0])) s0 += 1;
+    var ds = s0;
+    var de = r[1];
+    if (s0 < r[1] and isDigit(b[s0])) {
+        var q = s0;
+        const n = readUint(b, &q);
+        if (findObj(b, n)) |ob| { ds = ob; de = objDictEnd(b, ob); }
+    } else if (s0 < r[1] and b[s0] == '<') {
+        de = dictEnd(b, s0, r[1]);
+    }
+    const ka = keyAt(b, ds, de, sub) orelse return .{ 0, 0 };
+    var q2 = ka;
+    while (q2 < de and isSpace(b[q2])) q2 += 1;
+    var js_s = q2;
+    var js_e = de;
+    if (q2 < de and isDigit(b[q2])) {
+        var q3 = q2;
+        const n2 = readUint(b, &q3);
+        if (findObj(b, n2)) |ob2| { js_s = ob2; js_e = objDictEnd(b, ob2); }
+    } else if (q2 < de and b[q2] == '<') {
+        js_e = dictEnd(b, q2, de);
+    }
+    const ja = keyAt(b, js_s, js_e, "/JS") orelse return .{ 0, 0 };
+    var jp = ja;
+    while (jp < js_e and isSpace(b[jp])) jp += 1;
+    if (jp >= js_e) return .{ 0, 0 };
+    if (b[jp] == '(' or b[jp] == '<') return fldPutStr(b, jp, js_e);
+    if (isDigit(b[jp])) {
+        var q4 = jp;
+        const n3 = readUint(b, &q4);
+        if (streamOf(b, n3)) |st| return fldPut(st);
+    }
+    return .{ 0, 0 };
+}
+
+/// 셈하는 차례 (/AcroForm /CO). 값을 하나 고치면 이 차례로 다시 셈한다.
+var calc_at: usize = 0;
+var calc_cap: u32 = 0;
+var calc_n: u32 = 0;
+fn calcBuf() []u32 {
+    if (calc_at == 0 or calc_cap == 0) return &[_]u32{};
+    return @as([*]u32, @ptrFromInt(calc_at))[0..calc_cap];
+}
+export fn calcOrderCount() u32 { return calc_n; }
+export fn calcOrderObj(i: u32) u32 { return if (i < calc_n) calcBuf()[i] else 0; }
+
+fn collectCalcOrder(b: []const u8) void {
+    calc_n = 0;
+    const cat = catalogRange(b) orelse return;
+    const fa = keyPos(b, cat.s, cat.e, "/AcroForm") orelse return;
+    var p = fa + 9;
+    while (p < cat.e and isSpace(b[p])) p += 1;
+    var ds = p;
+    var de = cat.e;
+    if (p < cat.e and isDigit(b[p])) {
+        var q = p;
+        const n = readUint(b, &q);
+        if (findObj(b, n)) |ob| { ds = ob; de = objDictEnd(b, ob); } else return;
+    } else if (p < cat.e and b[p] == '<') {
+        de = dictEnd(b, p, cat.e);
+    }
+    const co = keyAt(b, ds, de, "/CO") orelse return;
+    var q2 = co;
+    while (q2 < de and isSpace(b[q2])) q2 += 1;
+    if (q2 >= de or b[q2] != '[') return;
+    const end = arrayEnd(b, q2, de);
+    q2 += 1;
+    while (q2 < end) {
+        while (q2 < end and isSpace(b[q2])) q2 += 1;
+        if (q2 >= end or b[q2] == ']') break;
+        if (!isDigit(b[q2])) { q2 += 1; continue; }
+        const num = readUint(b, &q2);
+        while (q2 < end and isSpace(b[q2])) q2 += 1;
+        if (q2 < end and isDigit(b[q2])) _ = readUint(b, &q2);
+        while (q2 < end and isSpace(b[q2])) q2 += 1;
+        if (q2 < end and b[q2] == 'R') q2 += 1;
+        if (!growTable(&calc_at, &calc_cap, calc_n + 1, 4, 16)) break;
+        calcBuf()[calc_n] = num;
+        calc_n += 1;
+    }
+}
+
 fn collectFields(b: []const u8, body: usize, end: usize) void {
     const aa = find(b[body..end], "/Annots", 0) orelse return;
     var p = body + aa + 7;
@@ -6073,7 +6173,7 @@ fn collectFields(b: []const u8, body: usize, end: usize) void {
             .obj = num, .rect = .{ 0, 0, 0, 0 }, .kind = 0, .flags = 0, .maxlen = 0,
             .size = 0, .align_ = 0, .name_off = 0, .name_len = 0, .val_off = 0,
             .val_len = 0, .on_off = 0, .on_len = 0, .opts_off = 0, .opts_len = 0,
-            .checked = false,
+            .checked = false, .calc_off = 0, .calc_len = 0, .fmt_off = 0, .fmt_len = 0,
         };
         if (find(b[ab..abe], "/Rect", 0)) |ra| {
             var rp = ab + ra + 5;
@@ -6120,6 +6220,15 @@ fn collectFields(b: []const u8, body: usize, end: usize) void {
             var vp = r[0];
             while (vp < r[1] and isSpace(b[vp])) vp += 1;
             if (vp < r[1] and isDigit(b[vp])) f.align_ = @intCast(@min(2, readUint(b, &vp)));
+        }
+        // 값이 바뀔 때 도는 계산식과 서식
+        {
+            const c = fieldScript(b, num, "/C");
+            f.calc_off = c[0];
+            f.calc_len = c[1];
+            const g2 = fieldScript(b, num, "/F");
+            f.fmt_off = g2[0];
+            f.fmt_len = g2[1];
         }
         // /DA 에서 글자 크기 — "/Helv 9 Tf 0 g"
         if (fieldLookup(b, num, "/DA", 0)) |r| {
@@ -9074,6 +9183,68 @@ fn checkXfa(b: []const u8) void {
         if (findObj(b, n)) |ob| { as2 = ob; ae = objDictEnd(b, ob); }
     }
     has_xfa = find(b[as2..ae], "/XFA", 0) != null;
+    if (has_xfa) collectXfa(b, as2, ae);
+}
+
+// ===== XFA 양식의 XML =====
+//
+// XFA 는 쪽 내용이 PDF 가 아니라 XML 로 들어 있다. /AcroForm /XFA 가
+// 스트림 하나이거나, [(name) 스트림 (name) 스트림 …] 배열이다. 배열이면
+// template·datasets 같은 조각이 이름마다 따로 들어 있어 이어 붙여야 한다.
+// 여기서는 XML 을 통째로 꺼내 주고, 뜯어 그리는 것은 xfa.ts 가 한다.
+var xfa_at: usize = 0;
+var xfa_cap: u32 = 0;
+var xfa_used: u32 = 0;
+fn xfaBuf() []u8 {
+    if (xfa_at == 0 or xfa_cap == 0) return &[_]u8{};
+    return @as([*]u8, @ptrFromInt(xfa_at))[0..xfa_cap];
+}
+export fn xfaXmlLen() u32 { return xfa_used; }
+export fn xfaXmlPtr() usize { return if (xfa_at == 0) heapBase() else xfa_at; }
+
+fn xfaAppend(part: []const u8) void {
+    if (!growTable(&xfa_at, &xfa_cap, xfa_used + @as(u32, @intCast(part.len)) + 2, 1, 65536)) return;
+    const buf = xfaBuf();
+    @memcpy(buf[xfa_used..][0..part.len], part);
+    xfa_used += @intCast(part.len);
+    buf[xfa_used] = '\n';
+    xfa_used += 1;
+}
+
+fn collectXfa(b: []const u8, as2: usize, ae: usize) void {
+    xfa_used = 0;
+    const xa = keyAt(b, as2, ae, "/XFA") orelse return;
+    var p = xa;
+    while (p < ae and isSpace(b[p])) p += 1;
+    if (p >= ae) return;
+    if (isDigit(b[p])) {
+        // 스트림 하나 — 그 안에 XML 이 통째로 들어 있다
+        var q = p;
+        const n = readUint(b, &q);
+        if (streamOf(b, n)) |st| xfaAppend(st);
+        return;
+    }
+    if (b[p] != '[') return;
+    const end = arrayEnd(b, p, ae);
+    p += 1;
+    var guard: u32 = 0;
+    while (p < end and guard < 64) : (guard += 1) {
+        while (p < end and isSpace(b[p])) p += 1;
+        if (p >= end or b[p] == ']') break;
+        if (b[p] == '(') { // 조각 이름 — 건너뛴다
+            while (p < end and b[p] != ')') p += 1;
+            p += 1;
+            continue;
+        }
+        if (!isDigit(b[p])) { p += 1; continue; }
+        const n = readUint(b, &p);
+        while (p < end and isSpace(b[p])) p += 1;
+        if (p < end and isDigit(b[p])) _ = readUint(b, &p);
+        while (p < end and isSpace(b[p])) p += 1;
+        if (p < end and b[p] == 'R') p += 1;
+        // 스트림을 푸는 자리는 하나뿐이라, 꺼내는 즉시 담아 둔다
+        if (streamOf(b, n)) |st| xfaAppend(st);
+    }
 }
 
 fn collectAttach(b: []const u8) void {

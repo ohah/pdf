@@ -11,6 +11,7 @@ import { loadBytes } from "./bytes.js";
 //   const text = await pdf.text(1);
 //   pdf.close();
 import { PDFClient, type PageMsg, type OpenMsg, type BuildSpec } from "./client.js";
+import { openRanged, fillRest, type Ranged } from "./range.js";
 import { drawOps, toLines, type TextRun } from "./draw.js";
 import { type Paths } from "./config.js";
 import { checkSignature, type SigCheck } from "./sig.js";
@@ -21,6 +22,8 @@ export type { BuildSpec, Mask, PageMsg } from "./client.js";
 export type { TextRun, Stencil } from "./draw.js";
 export type { SigCheck } from "./sig.js";
 export { checkSignature } from "./sig.js";
+export { runCalc, recalculate, type CalcField, type ValueOf } from "./formjs.js";
+export { readXfa, drawXfa, toPt, type XfaForm, type XfaPage, type XfaBox } from "./xfa.js";
 export { toLines, drawOps } from "./draw.js";
 export { renderTextLayer, type TextLayer, type TextLayerOpts } from "./textlayer.js";
 export { renderAnnotationLayer, type Annot, type AnnotLayer, type AnnotLayerOpts } from "./annotlayer.js";
@@ -133,6 +136,14 @@ export type OpenOpts = Paths & {
   onProgress?: (p: { loaded: number; total: number }) => void;
   /** 내려받기를 그만둔다 */
   signal?: AbortSignal;
+  /**
+   * 주소로 열 때 파일을 통째로 받지 않고 토막만 받아 먼저 연다.
+   *
+   * 서버가 범위 요청(Range)을 받아 주고 파일이 512KB 를 넘을 때만 쓴다.
+   * 그렇지 않으면 저절로 통째로 받는다. 끄려면 false.
+   * 토막만 받은 문서는 `partial` 이 true 이고, `complete()` 로 마저 받는다.
+   */
+  range?: boolean;
 };
 
 /** 열 수 있는 것들. 주소를 주면 받아 오면서 진행률을 알려 준다. */
@@ -276,45 +287,45 @@ export class PDFDocument {
   private raw: Uint8Array;
 
   /** 쪽 수 */
-  readonly pages: number;
+  readonly pages!: number;
   /** 쪽이 너무 많아 뒤를 잘라 냈는가. 그렇다면 `pages` 는 문서의 전부가 아니다 */
-  readonly truncated: boolean;
+  readonly truncated!: boolean;
   /** 잠긴 문서였나 */
-  readonly locked: boolean;
+  readonly locked!: boolean;
   /** 목차 */
-  readonly outline: OutlineItem[];
+  readonly outline!: OutlineItem[];
   /** 문서 속성 (제목·글쓴이 …) */
-  readonly info: string[];
+  readonly info!: string[];
   /** 레이어(선택 콘텐츠) */
-  readonly layers: Layer[];
+  readonly layers!: Layer[];
   /** 딸린 파일 이름 */
-  readonly attachments: Attachment[];
+  readonly attachments!: Attachment[];
   /** XFA 양식인가 — 그렇다면 쪽이 거의 비어 있는 것이 정상이다 */
-  readonly isXfa: boolean;
+  readonly isXfa!: boolean;
   /**
    * 문서가 허락한 것들. 암호가 없으면 모두 true 다.
    *
    * 강제가 아니라 문서가 밝힌 뜻이다 — 뷰어가 인쇄·복사 단추를 흐리게 하는
    * 데 쓴다(pdf.js 의 getPermissions 와 같은 비트다).
    */
-  readonly permissions: Permissions;
+  readonly permissions!: Permissions;
   /** 열 때 옆판을 어떻게 둘지 — UseOutlines·UseThumbs·FullScreen … (/PageMode) */
-  readonly pageMode: string;
+  readonly pageMode!: string;
   /** 한 쪽·두 쪽 보기 — SinglePage·TwoColumnLeft … (/PageLayout) */
-  readonly pageLayout: string;
+  readonly pageLayout!: string;
   /** 파일 지문(/ID). 문서마다 다른 값이라 마지막 쪽·확대율을 저장하는 열쇠로 쓴다 */
-  readonly fingerprint: string;
+  readonly fingerprint!: string;
   /** 태그 PDF 인가 — 읽는 차례 정보가 들어 있다는 뜻 */
-  readonly tagged: boolean;
+  readonly tagged!: boolean;
   /** 문서 언어 (/Lang) */
-  readonly lang: string;
+  readonly lang!: string;
   /** 쪽 라벨(i, ii, A-1 …). 문서가 안 적어 두면 빈 배열 */
-  readonly pageLabels: string[];
+  readonly pageLabels!: string[];
   /**
    * 이름 목적지. 목차·링크가 "3쪽" 대신 이름으로 가리키는 문서가 흔하다.
    * `page` 는 0부터이고, 못 풀면 -1 이다.
    */
-  readonly destinations: Destination[];
+  readonly destinations!: Destination[];
   /**
    * 문서가 "열면 여기부터 보여라" 고 적어 둔 자리(/OpenAction). 없으면 null.
    *
@@ -322,24 +333,50 @@ export class PDFDocument {
    * null 이면 "지금 값을 그대로 두라" 는 뜻이다. 갈 데가 없는 동작(문서를
    * 열 때 실행하는 자바스크립트 따위)은 null 로 온다.
    */
-  readonly openAction: OpenAction | null;
+  readonly openAction!: OpenAction | null;
+  /**
+   * 값이 바뀌면 다시 셈할 차례 (/AcroForm /CO) — 칸의 객체 번호다.
+   * 문서가 안 정해 두면 빈 배열이고, 그때는 나온 차례대로 셈한다.
+   */
+  readonly calcOrder!: number[];
+  /**
+   * XFA 양식의 XML 원문. XFA 가 아니면 빈 문자열이다.
+   *
+   * `readXfa()` 로 뜯어 `drawXfa()` 로 그릴 수 있다 — 정적인 양식만이다.
+   */
+  readonly xfaXml!: string;
   /** 뷰어 설정 (/ViewerPreferences) — HideToolbar·Direction·PrintScaling … */
-  readonly viewerPreferences: Record<string, string>;
+  readonly viewerPreferences!: Record<string, string>;
   /** XMP 메타데이터 원문(RDF/XML). 문서에 없으면 빈 문자열 */
-  readonly xmp: string;
-  private structFlat: NonNullable<OpenMsg["struct"]>;
-  private sigsRaw: NonNullable<OpenMsg["sigs"]>;
+  readonly xmp!: string;
+  /** 토막만 받아 연 문서인가. `complete()` 로 마저 받는다 */
+  partial = false;
+  private rest: { url: string; ranged: Ranged; opts: OpenOpts } | null = null;
+  private structFlat!: NonNullable<OpenMsg["struct"]>;
+  private sigsRaw!: NonNullable<OpenMsg["sigs"]>;
 
   private constructor(cl: PDFClient, r: OpenMsg, raw: Uint8Array) {
     this.cl = cl;
     this.raw = raw;
-    this.pages = r.pages ?? 0;
-    this.locked = r.locked === true;
-    this.outline = r.outline ?? [];
-    this.info = r.info ?? [];
-    this.layers = r.layers ?? [];
-    this.attachments = r.atts ?? [];
-    this.isXfa = r.xfa === true;
+    this.take(r);
+  }
+
+  /**
+   * 엔진이 준 문서 정보를 받아 담는다.
+   *
+   * 나머지 토막을 마저 받아 다시 읽을 때도 여기로 온다 — 그때는 쪽 수부터
+   * 목차까지 다 달라질 수 있다(앞머리만 보고 연 것이었으므로).
+   */
+  private take(r: OpenMsg) {
+    const w = this as unknown as { -readonly [K in keyof PDFDocument]: PDFDocument[K] };
+    w.pages = r.pages ?? 0;
+    w.locked = r.locked === true;
+    w.outline = r.outline ?? [];
+    w.info = r.info ?? [];
+    w.layers = r.layers ?? [];
+    w.attachments = r.atts ?? [];
+    w.isXfa = r.xfa === true;
+    w.xfaXml = r.xfaXml ?? "";
     // /P 비트. 규격이 정한 자리다(3=인쇄, 4=고침, 5=복사, 6=주석 …).
     //
     // 이 값은 **원래 음수로 적힌다** — 위쪽 비트가 다 켜져 있기 때문이다.
@@ -347,22 +384,23 @@ export class PDFDocument {
     // 비트만 본다. 암호가 없으면 -1 이라 모든 비트가 켜져 저절로 전부 허락이 된다.
     const p = r.perm ?? -1;
     const can = (bit: number) => ((p >>> 0) & (1 << (bit - 1))) !== 0;
-    this.permissions = {
+    w.permissions = {
       print: can(3), modify: can(4), copy: can(5), annotate: can(6),
       fillForms: can(9), accessibility: can(10), assemble: can(11), printHighRes: can(12),
     };
-    this.pageMode = r.pageMode ?? "";
-    this.pageLayout = r.pageLayout ?? "";
-    this.fingerprint = r.fingerprint ?? "";
-    this.tagged = r.tagged === true;
-    this.lang = r.lang ?? "";
-    this.pageLabels = r.labels ?? [];
-    this.destinations = r.dests ?? [];
-    this.openAction = (r.openAction as OpenAction | null | undefined) ?? null;
-    this.viewerPreferences = r.prefs ?? {};
-    this.xmp = r.xmp ?? "";
+    w.pageMode = r.pageMode ?? "";
+    w.pageLayout = r.pageLayout ?? "";
+    w.fingerprint = r.fingerprint ?? "";
+    w.tagged = r.tagged === true;
+    w.lang = r.lang ?? "";
+    w.pageLabels = r.labels ?? [];
+    w.destinations = r.dests ?? [];
+    w.openAction = (r.openAction as OpenAction | null | undefined) ?? null;
+    w.calcOrder = r.calcOrder ?? [];
+    w.viewerPreferences = r.prefs ?? {};
+    w.xmp = r.xmp ?? "";
     this.structFlat = r.struct ?? [];
-    this.truncated = r.truncated === true;
+    w.truncated = r.truncated === true;
     this.sigsRaw = r.sigs ?? [];
   }
 
@@ -372,10 +410,24 @@ export class PDFDocument {
    * 암호가 틀리면 PasswordNeeded 를 던진다 — 받아서 다시 부르면 된다.
    */
   static async open(src: Source, opts: OpenOpts = {}) {
-    const raw = await toBytes(src, opts);
-    const keep = raw.slice();
+    // 주소로 여는 큰 파일은 토막만 받아 먼저 연다. 서버가 안 받아 주면
+    // openRanged 가 null 을 주고, 아래에서 통째로 받는 길로 간다.
+    const url = typeof src === "string" && /^https?:/i.test(src) ? src : "";
+    let ranged: Ranged | null = null;
+    if (url && opts.range !== false && typeof fetch === "function") {
+      ranged = await openRanged(url, opts).catch(() => null);
+    }
+    let raw = ranged ? ranged.bytes : await toBytes(src, opts);
     const cl = new PDFClient(opts);
-    const r = await cl.open(raw.slice(), opts.password ?? "");
+    let r = await cl.open(raw.slice(), opts.password ?? "");
+    // 토막만으로는 못 읽는 문서가 있다(선형화가 아니고 앞머리·꼬리 밖에
+    // 카탈로그가 있는 경우). 그럴 때는 조용히 다 받아 다시 읽는다.
+    if (ranged && (r.err || !r.pages) && !r.needPw) {
+      await fillRest(url, ranged, opts);
+      ranged = null;
+      r = await cl.open(raw.slice(), opts.password ?? "");
+    }
+    const keep = raw.slice();
     if (r.needPw) {
       cl.close();
       throw new PasswordNeeded();
@@ -389,7 +441,35 @@ export class PDFDocument {
         : "could not read the PDF",
       );
     }
-    return new PDFDocument(cl, r, keep);
+    const doc = new PDFDocument(cl, r, keep);
+    if (ranged?.partial) {
+      doc.partial = true;
+      doc.rest = { url, ranged, opts };
+    }
+    return doc;
+  }
+
+  /**
+   * 토막만 받아 연 문서의 나머지를 마저 받아 다시 읽는다.
+   *
+   * 첫 쪽을 그린 뒤 부르면 된다. 다 받은 뒤에는 쪽 수·목차·이름 자리까지
+   * 새로 채워지므로, 화면이 들고 있던 값을 다시 읽어야 한다.
+   * 이미 다 받았으면 아무 일도 하지 않는다.
+   */
+  async complete(): Promise<void> {
+    const rest = this.rest;
+    if (!rest || this.shut) return;
+    this.rest = null;
+    const bytes = await fillRest(rest.url, rest.ranged, rest.opts);
+    if (this.shut) return;
+    const r = await this.cl.open(bytes.slice(), rest.opts.password ?? "");
+    if (this.shut) return;
+    if (r.err || !r.pages) throw new Error("could not read the rest of the PDF");
+    this.raw = bytes.slice();
+    this.cache.clear();
+    this.fams.clear();
+    this.take(r);
+    this.partial = false;
   }
 
   /**

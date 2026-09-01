@@ -182,6 +182,8 @@ type Exports = {
   setOcOn?: (i: number, on: number) => void;
   sigCount?: () => number;
   sigRange?: (i: number, k: number) => number;
+  xfaXmlLen?: () => number;
+  xfaXmlPtr?: () => number;
   openPage?: () => number;
   openKind?: () => number;
   openX?: () => number;
@@ -224,6 +226,12 @@ type Exports = {
   fieldOnLen?: (i: number) => number;
   fieldOptsOff?: (i: number) => number;
   fieldOptsLen?: (i: number) => number;
+  fieldCalcOff?: (i: number) => number;
+  fieldCalcLen?: (i: number) => number;
+  fieldFmtOff?: (i: number) => number;
+  fieldFmtLen?: (i: number) => number;
+  calcOrderCount?: () => number;
+  calcOrderObj?: (i: number) => number;
   needCount?: () => number;
   needOff?: (i: number) => number;
   needLen?: (i: number) => number;
@@ -554,6 +562,10 @@ async function open(bytes: Uint8Array, pw: string) {
       }
     : null;
 
+  // 값이 바뀌면 이 차례로 다시 셈한다 (/AcroForm /CO). 객체 번호로 온다.
+  const calcOrder: number[] = [];
+  for (let i = 0; i < (e.calcOrderCount?.() ?? 0); i++) calcOrder.push(e.calcOrderObj!(i));
+
   // 뷰어 설정 — 도구줄을 감출지, 제목을 창에 띄울지 …
   const prefs: Record<string, string> = {};
   for (let i = 0; i < (e.viewPrefCount?.() ?? 0); i++) {
@@ -582,12 +594,16 @@ async function open(bytes: Uint8Array, pw: string) {
     });
   }
   return {
-    dests, prefs, xmp, struct, openAction,
+    dests, prefs, xmp, struct, openAction, calcOrder,
     pages: e.pageCount(), locked: (e.isEncrypted?.() ?? 0) === 1,
     // 쪽이 너무 많아 뒤를 잘랐는가 — 조용히 잘라 놓고 다 보여 주는 척하지 않는다
     truncated: (e.pagesTruncated?.() ?? 0) === 1,
     outline: marks, info, sigs, layers, atts,
     xfa: (e.isXfa?.() ?? 0) === 1,
+    // XFA 양식의 XML — 있으면 통째로 넘긴다. 뜯는 것은 xfa.ts 몫이다.
+    xfaXml: (e.xfaXmlLen?.() ?? 0) > 0
+      ? dec.decode(new Uint8Array(e.memory.buffer, e.xfaXmlPtr!(), e.xfaXmlLen!()))
+      : "",
     perm: e.permissions?.() ?? -1,
     pageMode: meta(0), pageLayout: meta(1), fingerprint: meta(2),
     tagged: meta(3) === "1", lang: meta(4),
@@ -758,6 +774,10 @@ async function page(i: number, formOn: boolean, light = false) {
       // 나오는데, 그대로 두면 켜서 저장해도 /Off 로 적힌다. 규격의 기본값을 쓴다.
       on: S(e.fieldOnOff!(k), e.fieldOnLen!(k)) || "Yes",
       opts: S(e.fieldOptsOff!(k), e.fieldOptsLen!(k)),
+      // 값이 바뀔 때 도는 계산식과 보이는 꼴(/AA /C·/F). 돌리지는 않는다 —
+      // formjs.ts 가 읽어서 셈한다.
+      calc: S(e.fieldCalcOff?.(k) ?? 0, e.fieldCalcLen?.(k) ?? 0),
+      format: S(e.fieldFmtOff?.(k) ?? 0, e.fieldFmtLen?.(k) ?? 0),
       checked: e.fieldChecked!(k) === 1,
     });
   }

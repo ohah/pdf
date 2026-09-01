@@ -1,0 +1,28 @@
+%PDF-1.7
+1 0 obj<</Type/Catalog/Pages 2 0 R/AcroForm<</Fields[5 0 R 6 0 R 7 0 R 8 0 R]/CO[7 0 R 8 0 R]/DA(/Helv 0 Tf 0 g)>>>>endobj
+2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 400 300]/Annots[5 0 R 6 0 R 7 0 R 8 0 R]/Resources<</Font<</Helv 4 0 R>>>>/Contents 9 0 R>>endobj
+4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+5 0 obj<</Type/Annot/Subtype/Widget/FT/Tx/T(qty)/Rect[20 240 120 265]/V(3)/DA(/Helv 11 Tf 0 g)>>endobj
+6 0 obj<</Type/Annot/Subtype/Widget/FT/Tx/T(price)/Rect[140 240 240 265]/V(1500)/DA(/Helv 11 Tf 0 g)>>endobj
+7 0 obj<</Type/Annot/Subtype/Widget/FT/Tx/T(amount)/Rect[260 240 380 265]/V()/DA(/Helv 11 Tf 0 g)/AA<</C<</S/JavaScript/JS(event.value = this.getField\("qty"\).value * this.getField\("price"\).value;)>>/F<</S/JavaScript/JS(AFNumber_Format\(2, 0, 0, 0, "", true\);)>>>>>>endobj
+8 0 obj<</Type/Annot/Subtype/Widget/FT/Tx/T(total)/Rect[260 200 380 225]/V()/DA(/Helv 11 Tf 0 g)/AA<</C<</S/JavaScript/JS(AFSimple_Calculate\("SUM", new Array\("amount"\)\);)>>>>>>endobj
+9 0 obj<</Length 54>>stream
+BT /Helv 10 Tf 20 280 Td (qty x price = amount) Tj ET
+endstream endobj
+xref
+0 10
+0000000000 65535 f 
+0000000009 00000 n 
+0000000132 00000 n 
+0000000181 00000 n 
+0000000325 00000 n 
+0000000386 00000 n 
+0000000489 00000 n 
+0000000598 00000 n 
+0000000875 00000 n 
+0000001062 00000 n 
+trailer<</Size 10/Root 1 0 R>>
+startxref
+1161
+%%EOF
