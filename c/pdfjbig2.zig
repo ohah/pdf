@@ -234,9 +234,16 @@ fn decodeIaid(mq: *MQ, code_len: u32) u32 {
 const BUDGET: i64 = 260_000_000;
 pub var work: i64 = 0;
 
-const POOL = 8 * 1024 * 1024;
-var pool: [POOL]u8 = undefined;
+pub const POOL = 8 * 1024 * 1024;
+/// 낱장 그림을 담는 곳간. 바깥(pdf.zig)이 자리를 잡아 준다 — 여기서
+/// 정적 배열로 두면 JBIG2 가 없는 문서도 8MB 를 들고 시작한다.
+var pool_at: usize = 0;
 var pool_used: u32 = 0;
+pub fn setPool(at: usize) void { pool_at = at; }
+fn pool() []u8 {
+    if (pool_at == 0) return &[_]u8{};
+    return @as([*]u8, @ptrFromInt(pool_at))[0..POOL];
+}
 
 /// 낱장 그림. 자기 자리를 들고 다닌다 — 쪽 그림은 부른 쪽 버퍼를 그대로
 /// 가리켜, 스캔 한 장이 4MB 를 넘어도 곳간을 두 번 쓰지 않는다.
@@ -272,11 +279,11 @@ fn alloc(w: u32, h: u32) ?BM {
     if (w == 0 or h == 0 or w > 1 << 16 or h > 1 << 16) return null;
     const stride = (w + 7) / 8;
     const need = stride * h;
-    if (need > POOL - pool_used) return null;
+    if (pool_at == 0 or need > POOL - pool_used) return null;
     const at = pool_used;
-    @memset(pool[at..][0..need], 0);
+    @memset(pool()[at..][0..need], 0);
     pool_used += need;
-    return BM{ .w = w, .h = h, .stride = stride, .d = pool[at..][0..need] };
+    return BM{ .w = w, .h = h, .stride = stride, .d = pool()[at..][0..need] };
 }
 
 // ===== 보통 영역 (6.2) =====

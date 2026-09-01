@@ -95,7 +95,10 @@ export async function loadCmaps(ex: CmapEx): Promise<string[]> {
   for (let k = 0; k < use.length; k++) {
     const b = bodies[k];
     if (!b || b.byteLength === 0 || b.byteLength > ex.cmapRoom!()) continue;
-    new Uint8Array(ex.memory.buffer, ex.cmapPtr!(), b.byteLength).set(new Uint8Array(b));
+    // 자리를 먼저 받는다 — 곳간을 잡느라 메모리가 늘면 앞서 잡은 버퍼가
+    // 떨어져 나간다(detached)
+    const at = ex.cmapPtr!();
+    new Uint8Array(ex.memory.buffer, at, b.byteLength).set(new Uint8Array(b));
     if (ex.cmapAdd(use[k].i, b.byteLength)) done.push(use[k].name);
   }
   return done;

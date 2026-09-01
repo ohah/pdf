@@ -21,13 +21,16 @@ async function sigsOf(file: string) {
   new Uint8Array(ex.memory.buffer, ex.inputPtr(), buf.length).set(buf);
   if (!ex.parse(buf.length)) return null;
   const dec = new TextDecoder();
+  // 자리를 먼저 받아 둔다 — 서명 곳간을 잡느라 메모리가 늘면 앞서 잡은
+  // 버퍼가 떨어져 나간다
+  const sigAt = ex.sigTextPtr();
   const S = (o: number, l: number) =>
-    dec.decode(new Uint8Array(ex.memory.buffer, ex.sigTextPtr() + o, l));
+    dec.decode(new Uint8Array(ex.memory.buffer, sigAt + o, l));
   const out = [];
   for (let i = 0; i < ex.sigCount(); i++) {
     out.push({
       range: [0, 1, 2, 3].map((k) => ex.sigRange(i, k)),
-      der: new Uint8Array(ex.memory.buffer, ex.sigTextPtr() + ex.sigDerOff(i), ex.sigDerLen(i)).slice(),
+      der: new Uint8Array(ex.memory.buffer, sigAt + ex.sigDerOff(i), ex.sigDerLen(i)).slice(),
       covers: ex.sigCovers(i) === 1,
       name: S(ex.sigNameOff(i), ex.sigNameLen(i)),
       reason: S(ex.sigReasonOff(i), ex.sigReasonLen(i)),

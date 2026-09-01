@@ -43,7 +43,8 @@ async function snap(mod, file) {
       if (!fs.existsSync(f)) continue;
       const b = fs.readFileSync(f);
       if (b.length > e.cmapRoom()) continue;
-      new Uint8Array(e.memory.buffer, e.cmapPtr(), b.length).set(b);
+      const cmapAt1 = e.cmapPtr();
+      new Uint8Array(e.memory.buffer, cmapAt1, b.length).set(b);
       e.cmapAdd(i, b.length);
     }
     put('cmap필요', names.join(','));

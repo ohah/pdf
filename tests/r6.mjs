@@ -148,7 +148,8 @@ await run('CMap 이름 없음', tw2('/Encoding /KSCms-UHC-H', ''));
 const cm2 = fs.readFileSync(S + '/cmap2.pdf');
 const feedRaw = (label, bytes) => run(label, cm2, null, (ex) => {
   ex.cmapReset();
-  new Uint8Array(ex.memory.buffer, ex.cmapPtr(), bytes.length).set(bytes);
+  const cmapAt4 = ex.cmapPtr();
+  new Uint8Array(ex.memory.buffer, cmapAt4, bytes.length).set(bytes);
   ex.cmapAdd(0, bytes.length);
 });
 const good = fs.readFileSync('cmaps/KSCms-UHC-H.bin');

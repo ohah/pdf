@@ -471,15 +471,18 @@ async function open(bytes: Uint8Array, pw: string) {
   }
   // 전자 서명 — 뭉치와 자리만 넘긴다. 맞춰 보는 것은 화면 쪽 WebCrypto 다.
   const sigs = [];
+  // 자리를 먼저 받아 둔다 — 곳간을 잡느라 메모리가 늘면 앞서 잡은 버퍼가
+  // 떨어져 나간다(detached)
+  const sigAt = (e.sigCount?.() ?? 0) > 0 ? e.sigTextPtr!() : 0;
   for (let i = 0; i < (e.sigCount?.() ?? 0); i++) {
     const T = (o: number, l: number) =>
-      l > 0 ? dec.decode(new Uint8Array(e.memory.buffer, e.sigTextPtr!() + o, l)) : "";
+      l > 0 ? dec.decode(new Uint8Array(e.memory.buffer, sigAt + o, l)) : "";
     sigs.push({
       name: T(e.sigNameOff!(i), e.sigNameLen!(i)),
       date: T(e.sigDateOff!(i), e.sigDateLen!(i)),
       reason: T(e.sigReasonOff!(i), e.sigReasonLen!(i)),
       sub: T(e.sigSubOff!(i), e.sigSubLen!(i)),
-      der: new Uint8Array(e.memory.buffer, e.sigTextPtr!() + e.sigDerOff!(i), e.sigDerLen!(i)).slice(),
+      der: new Uint8Array(e.memory.buffer, sigAt + e.sigDerOff!(i), e.sigDerLen!(i)).slice(),
       range: [0, 1, 2, 3].map((k) => e.sigRange!(i, k)),
       covers: e.sigCovers!(i) === 1,
     });

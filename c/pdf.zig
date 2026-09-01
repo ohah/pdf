@@ -3312,7 +3312,12 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
             }
         }
         if (rb * h <= room and
-            jbig2.decode(b[data..][0..length], glob, w, h, dst[0 .. rb * h]))
+            blk: {
+                // 스캔 문서를 만났을 때만 곳간을 잡는다
+                const at = zoneAlloc(jbig2.POOL) orelse break :blk false;
+                jbig2.setPool(at);
+                break :blk jbig2.decode(b[data..][0..length], glob, w, h, dst[0 .. rb * h]);
+            })
         {
             got = rb * h;
             kind = 4;
@@ -11309,7 +11314,15 @@ fn advance(f: ?*const FontMap, adv: f32, m: Mat) Mat {
 // 규격상 이 키는 CIDFontType2(트루타입 바탕)에만 쓴다. CFF 바탕인
 // CIDFontType0 은 CFF 안 charset 이 그 몫을 한다.
 const C2G_POOL = 1024 * 1024;
-var c2g_pool: [C2G_POOL]u8 = undefined;
+/// c2g_pool — 쓸 때 잡는다(그 갈래 문서가 아니면 안 잡는다)
+var c2g_pool_at: usize = 0;
+fn c2g_pool() []u8 {
+    if (c2g_pool_at == 0) {
+        c2g_pool_at = zoneAlloc(C2G_POOL) orelse 0;
+        if (c2g_pool_at == 0) return &[_]u8{};
+    }
+    return @as([*]u8, @ptrFromInt(c2g_pool_at))[0..C2G_POOL];
+}
 var c2g_used: u32 = 0;
 
 fn cidToGid(f: *const FontMap, cid: u32) u32 {
@@ -11317,7 +11330,7 @@ fn cidToGid(f: *const FontMap, cid: u32) u32 {
     if (cid > 0xFFFF) return 0;
     const at = f.c2g_off + cid * 2;
     if (at + 1 >= f.c2g_off + f.c2g_len) return 0;
-    return (@as(u32, c2g_pool[at]) << 8) | c2g_pool[at + 1];
+    return (@as(u32, c2g_pool()[at]) << 8) | c2g_pool()[at + 1];
 }
 
 // ===== 미리 정의된 CMap =====
@@ -11328,7 +11341,15 @@ fn cidToGid(f: *const FontMap, cid: u32) u32 {
 // 굽는 형식은 scripts/build-cmaps.mjs 에 있다.
 const MAX_CMAPS = 12;
 const CMAP_POOL = 2 * 1024 * 1024;
-var cmap_pool: [CMAP_POOL]u8 = undefined;
+/// cmap_pool — 쓸 때 잡는다(그 갈래 문서가 아니면 안 잡는다)
+var cmap_pool_at: usize = 0;
+fn cmap_pool() []u8 {
+    if (cmap_pool_at == 0) {
+        cmap_pool_at = zoneAlloc(CMAP_POOL) orelse 0;
+        if (cmap_pool_at == 0) return &[_]u8{};
+    }
+    return @as([*]u8, @ptrFromInt(cmap_pool_at))[0..CMAP_POOL];
+}
 var cmap_used: u32 = 0;
 const CMapT = struct { name: [32]u8, name_len: u8, off: u32, len: u32 };
 var cmaps: [MAX_CMAPS]CMapT = undefined;
@@ -11336,7 +11357,13 @@ var cmap_n: u32 = 0;
 
 export fn cmapReset() void { cmap_n = 0; cmap_used = 0; }
 /// 다음 표를 적을 자리. 화면 쪽이 여기에 바이트를 넣고 cmapAdd 를 부른다.
-export fn cmapPtr() usize { return @intFromPtr(&cmap_pool) + cmap_used; }
+export fn cmapPtr() usize {
+    // JS 가 표를 여기에 적는다. 자리를 여기서 잡으므로(메모리가 늘 수 있다)
+    // 부르는 쪽은 이 값을 먼저 받고 나서 memory.buffer 를 잡아야 한다.
+    const p = cmap_pool();
+    if (p.len == 0) return heapBase();
+    return @intFromPtr(p.ptr) + cmap_used;
+}
 export fn cmapRoom() u32 { return CMAP_POOL - cmap_used; }
 /// 방금 cmapPtr 에 적은 len 바이트를, 목록의 idx 번째 이름으로 등록한다.
 /// 이름을 따로 넘기지 않는 건 받을 것이 늘 그 목록에서 나오기 때문이다.
@@ -11382,7 +11409,7 @@ fn cmapOf(idx: i16) ?CM {
     const u: u32 = @intCast(idx);
     if (u >= cmap_n) return null;
     const t = cmaps[u];
-    const d = cmap_pool[t.off..][0..t.len];
+    const d = cmap_pool()[t.off..][0..t.len];
     if (d.len < 9 or d[0] != 'C' or d[1] != 'M' or d[2] != '1') return null;
     const wide = d[4] != 0;
     const ns = le16(d, 5);
@@ -11452,7 +11479,7 @@ fn cidUni(f: ?*const FontMap, cid: u32) ?u32 {
     const u: u32 = @intCast(ff.uc);
     if (u >= cmap_n) return null;
     const t = cmaps[u];
-    const d = cmap_pool[t.off..][0..t.len];
+    const d = cmap_pool()[t.off..][0..t.len];
     if (d.len < 4 or d[0] != 'C' or d[1] != 'U' or d[2] != '1') return null;
     const at = 4 + cid * 2;
     if (at + 1 >= d.len) return null;
@@ -11934,7 +11961,7 @@ fn attachWidths(b: []const u8, fbody: usize) void {
                     const room = C2G_POOL - c2g_used;
                     const n = @min(m.len, room);
                     if (n >= 2) {
-                        @memcpy(c2g_pool[c2g_used..][0..n], m[0..n]);
+                        @memcpy(c2g_pool()[c2g_used..][0..n], m[0..n]);
                         f.c2g_off = c2g_used;
                         f.c2g_len = @intCast(n);
                         c2g_used += @intCast(n);
@@ -12639,7 +12666,16 @@ const SigT = struct {
 const MAX_SIGS = 64;
 var sigs: [MAX_SIGS]SigT = undefined;
 var sig_n: u32 = 0;
-var sig_buf: [1024 * 1024]u8 = undefined;
+const SIG_BUF = 1024 * 1024;
+/// sig_buf — 쓸 때 잡는다(그 갈래 문서가 아니면 안 잡는다)
+var sig_buf_at: usize = 0;
+fn sig_buf() []u8 {
+    if (sig_buf_at == 0) {
+        sig_buf_at = zoneAlloc(SIG_BUF) orelse 0;
+        if (sig_buf_at == 0) return &[_]u8{};
+    }
+    return @as([*]u8, @ptrFromInt(sig_buf_at))[0..SIG_BUF];
+}
 var sig_used: u32 = 0;
 
 /// 글자열 하나를 주어진 곳간에 담는다. UTF-16BE 는 utf-8 로 옮긴다.
@@ -12704,10 +12740,10 @@ fn sigPutStr(b: []const u8, from: usize, to: usize) [2]u32 {
     if (p < to and b[p] == '(') {
         p += 1;
         var depth: u32 = 1;
-        while (p < to and sig_used + 4 < sig_buf.len) : (p += 1) {
+        while (p < to and sig_used + 4 < sig_buf().len) : (p += 1) {
             if (b[p] == '\\' and p + 1 < to) {
                 p += 1;
-                sig_buf[sig_used] = switch (b[p]) {
+                sig_buf()[sig_used] = switch (b[p]) {
                     'n' => '\n', 'r' => '\r', 't' => '\t', 'b' => 8, 'f' => 12, else => b[p],
                 };
                 sig_used += 1;
@@ -12715,25 +12751,25 @@ fn sigPutStr(b: []const u8, from: usize, to: usize) [2]u32 {
             }
             if (b[p] == '(') depth += 1;
             if (b[p] == ')') { depth -= 1; if (depth == 0) break; }
-            sig_buf[sig_used] = b[p];
+            sig_buf()[sig_used] = b[p];
             sig_used += 1;
         }
     } else if (p < to and b[p] == '<') {
         p += 1;
         var hi: ?u8 = null;
-        while (p < to and b[p] != '>' and sig_used + 4 < sig_buf.len) : (p += 1) {
+        while (p < to and b[p] != '>' and sig_used + 4 < sig_buf().len) : (p += 1) {
             const hv = hexVal(b[p]) orelse continue;
-            if (hi) |h| { sig_buf[sig_used] = (h << 4) | hv; sig_used += 1; hi = null; } else hi = hv;
+            if (hi) |h| { sig_buf()[sig_used] = (h << 4) | hv; sig_used += 1; hi = null; } else hi = hv;
         }
     }
     // UTF-16BE 로 적힌 것은 utf-8 로 옮긴다
     const n = sig_used - start;
-    if (n >= 2 and sig_buf[start] == 0xFE and sig_buf[start + 1] == 0xFF) {
+    if (n >= 2 and sig_buf()[start] == 0xFE and sig_buf()[start + 1] == 0xFF) {
         var tmp: [512]u8 = undefined;
         var w: u32 = 0;
         var i: u32 = start + 2;
         while (i + 1 < start + n and w + 4 < tmp.len) : (i += 2) {
-            const cp: u32 = (@as(u32, sig_buf[i]) << 8) | sig_buf[i + 1];
+            const cp: u32 = (@as(u32, sig_buf()[i]) << 8) | sig_buf()[i + 1];
             if (cp < 0x80) { tmp[w] = @intCast(cp); w += 1; }
             else if (cp < 0x800) {
                 tmp[w] = @intCast(0xC0 | (cp >> 6));
@@ -12746,7 +12782,7 @@ fn sigPutStr(b: []const u8, from: usize, to: usize) [2]u32 {
                 w += 3;
             }
         }
-        @memcpy(sig_buf[start..][0..w], tmp[0..w]);
+        @memcpy(sig_buf()[start..][0..w], tmp[0..w]);
         sig_used = start + w;
     }
     return .{ start, sig_used - start };
@@ -12793,13 +12829,13 @@ fn collectSigs(b: []const u8) void {
             const start = sig_used;
             var q = cp + 1;
             var hi: ?u8 = null;
-            while (q < e and b[q] != '>' and sig_used + 4 < sig_buf.len) : (q += 1) {
+            while (q < e and b[q] != '>' and sig_used + 4 < sig_buf().len) : (q += 1) {
                 const hv = hexVal(b[q]) orelse continue;
-                if (hi) |h| { sig_buf[sig_used] = (h << 4) | hv; sig_used += 1; hi = null; } else hi = hv;
+                if (hi) |h| { sig_buf()[sig_used] = (h << 4) | hv; sig_used += 1; hi = null; } else hi = hv;
             }
             // 뒤쪽 0 채움은 덜어 낸다
             var n = sig_used - start;
-            while (n > 0 and sig_buf[start + n - 1] == 0) n -= 1;
+            while (n > 0 and sig_buf()[start + n - 1] == 0) n -= 1;
             sig_used = start + n;
             f.der_off = start;
             f.der_len = n;
@@ -12828,9 +12864,9 @@ fn collectSigs(b: []const u8) void {
             if (q < e and b[q] == '/') {
                 q += 1;
                 while (q < e and !isSpace(b[q]) and b[q] != '/' and b[q] != '>' and
-                    sig_used + 4 < sig_buf.len) : (q += 1)
+                    sig_used + 4 < sig_buf().len) : (q += 1)
                 {
-                    sig_buf[sig_used] = b[q];
+                    sig_buf()[sig_used] = b[q];
                     sig_used += 1;
                 }
             }
@@ -12846,7 +12882,10 @@ fn collectSigs(b: []const u8) void {
 
 export fn sigCount() u32 { return sig_n; }
 export fn sigRange(i: u32, k: u32) u32 { return if (i < sig_n and k < 4) sigs[i].range[k] else 0; }
-export fn sigTextPtr() usize { return @intFromPtr(&sig_buf); }
+export fn sigTextPtr() usize {
+    const p = sig_buf();
+    return if (p.len == 0) heapBase() else @intFromPtr(p.ptr);
+}
 export fn sigDerOff(i: u32) u32 { return if (i < sig_n) sigs[i].der_off else 0; }
 export fn sigDerLen(i: u32) u32 { return if (i < sig_n) sigs[i].der_len else 0; }
 export fn sigNameOff(i: u32) u32 { return if (i < sig_n) sigs[i].name_off else 0; }

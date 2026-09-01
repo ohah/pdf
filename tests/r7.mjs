@@ -12,7 +12,8 @@ const ucs2 = fs.readFileSync('cmaps/Korea1-UCS2.bin');
 const feed = (ex, idx, bytes) => {
   const room = ex.cmapRoom();
   if (bytes.length > room) return 0;
-  new Uint8Array(ex.memory.buffer, ex.cmapPtr(), bytes.length).set(bytes);
+  const cmapAt3 = ex.cmapPtr();
+  new Uint8Array(ex.memory.buffer, cmapAt3, bytes.length).set(bytes);
   return ex.cmapAdd(idx, bytes.length);
 };
 

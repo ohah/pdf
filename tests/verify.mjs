@@ -30,7 +30,8 @@ async function load(file, page = 0, feed = true, formOn = true) {
       if (!fs.existsSync(f)) continue;
       const b = fs.readFileSync(f);
       if (b.length > ex.cmapRoom()) continue;
-      new Uint8Array(ex.memory.buffer, ex.cmapPtr(), b.length).set(b);
+      const cmapAt2 = ex.cmapPtr();
+      new Uint8Array(ex.memory.buffer, cmapAt2, b.length).set(b);
       ex.cmapAdd(i, b.length);
     }
   }
@@ -309,7 +310,7 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
     return ex.memory.buffer.byteLength / 1048576;
   };
   const plain = await floorOf('multi.pdf');
-  ok('글자만 있는 문서: 바닥이 낮다', plain > 0 && plain < 60, `${plain.toFixed(0)}MB`);
+  ok('글자만 있는 문서: 바닥이 낮다', plain > 0 && plain < 32, `${plain.toFixed(0)}MB`);
   const withImg = await floorOf('pdf/scanned.pdf');
   ok('그림 있는 문서: 그때 자리를 잡는다', withImg > plain, `${withImg.toFixed(0)}MB > ${plain.toFixed(0)}MB`);
 }
