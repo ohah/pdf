@@ -477,10 +477,52 @@ fn readUint(b: []const u8, p: *usize) u32 {
 // 아니라 원본의 사본이다. 그래서 원본 구간에 평문으로 있는 것을 먼저 본다.
 var max_obj: u32 = 0;
 
-const OBJ_IDX_MAX = 65536;
-var obj_off: [OBJ_IDX_MAX]u32 = undefined;
-var obj_rank: [OBJ_IDX_MAX]u8 = undefined; // 0=없음, 클수록 믿을 만함
+/// 색인은 문서에 맞춰 늘어난다.
+///
+/// 예전에는 [65536] 고정이었다. 번호가 그보다 큰 객체는 색인에 못 들어가고,
+/// 그것을 찾을 때마다 파일을 통째로 훑었다 — 3만 쪽 문서 46ms 가 4만 쪽에서
+/// 89초가 되는 벼랑이 상수 하나에 걸려 있었다. 처음 6만 5천 개로 시작해
+/// 더 큰 번호를 만나면 배로 늘린다.
+const OBJ_IDX_START: u32 = 65536;
+/// 여기서 멈춘다 — 번호가 끝없이 큰 망가진 파일에 끌려가지 않기 위한 것
+const OBJ_IDX_LIMIT: u32 = 1 << 22;
+var obj_at: usize = 0;
+var rank_at: usize = 0;
+var obj_cap: u32 = 0;
 var obj_idx_len: usize = 0; // 색인을 만든 버퍼 길이 (0 이면 없음)
+
+fn objOff() []u32 {
+    if (obj_at == 0) return &[_]u32{};
+    return @as([*]u32, @ptrFromInt(obj_at))[0..obj_cap];
+}
+fn objRankTable() []u8 {
+    if (rank_at == 0) return &[_]u8{};
+    return @as([*]u8, @ptrFromInt(rank_at))[0..obj_cap];
+}
+
+/// num 번까지 담을 자리를 마련한다. 못 늘리면 false — 그 번호는 색인에
+/// 안 들어가고 찾을 때 훑는다(예전과 같은 길).
+fn growIndex(num: u32) bool {
+    if (num < obj_cap) return true;
+    if (num >= OBJ_IDX_LIMIT) return false;
+    var want: u32 = if (obj_cap == 0) OBJ_IDX_START else obj_cap;
+    while (want <= num) : (want *|= 2) {
+        if (want >= OBJ_IDX_LIMIT) return false;
+    }
+    const off_at = zoneAlloc(@as(usize, want) * 4) orelse return false;
+    const rk_at = zoneAlloc(want) orelse return false;
+    const new_off = @as([*]u32, @ptrFromInt(off_at))[0..want];
+    const new_rank = @as([*]u8, @ptrFromInt(rk_at))[0..want];
+    @memset(new_rank, 0);
+    if (obj_cap > 0) {
+        @memcpy(new_off[0..obj_cap], objOff());
+        @memcpy(new_rank[0..obj_cap], objRankTable());
+    }
+    obj_at = off_at;
+    rank_at = rk_at;
+    obj_cap = want;
+    return true;
+}
 
 /// "N G obj" 를 뒤에서부터 읽는다. 숫자 시작 위치와 번호를 준다.
 fn objHeadAt(b: []const u8, at: usize) ?struct { start: usize, num: u32 } {
@@ -508,7 +550,11 @@ fn objRank(b: []const u8, start: usize) u8 {
 }
 
 fn buildObjIndex(b: []const u8) void {
-    @memset(&obj_rank, 0);
+    // 자리를 처음부터 다시 잡는다. 앞 문서 것이 남아 있으면 안 된다.
+    obj_at = 0;
+    rank_at = 0;
+    obj_cap = 0;
+    _ = growIndex(OBJ_IDX_START - 1);
     max_obj = 0;
     addObjIndex(b, 0);
 }
@@ -522,11 +568,12 @@ fn addObjIndex(b: []const u8, from: usize) void {
     while (i + 4 < b.len) {
         const at = find(b, " obj", i) orelse break;
         if (objHeadAt(b, at)) |h| {
-            if (h.num < OBJ_IDX_MAX) {
+            if (h.num < obj_cap or growIndex(h.num)) {
                 const rank = objRank(b, h.start);
-                if (obj_rank[h.num] <= rank) {
-                    obj_rank[h.num] = rank;
-                    obj_off[h.num] = @intCast(at + 4);
+                const rk = objRankTable();
+                if (rk[h.num] <= rank) {
+                    rk[h.num] = rank;
+                    objOff()[h.num] = @intCast(at + 4);
                 }
             }
             // 새로 만드는 객체는 이 뒤에 붙여야 트레일러의 /Size 안에 든다
@@ -540,10 +587,10 @@ fn addObjIndex(b: []const u8, from: usize) void {
 fn findObj(b: []const u8, num: u32) ?usize {
     // 본 버퍼는 색인으로 바로 찾는다. 병합용 두 번째 버퍼는 색인이 없다.
     if (obj_idx_len != 0 and b.len == obj_idx_len and
-        b.ptr == @as([*]const u8, @ptrFromInt(heapBase())) and num < OBJ_IDX_MAX)
+        b.ptr == @as([*]const u8, @ptrFromInt(heapBase())) and num < obj_cap)
     {
-        if (obj_rank[num] == 0) return null;
-        return obj_off[num];
+        if (objRankTable()[num] == 0) return null;
+        return objOff()[num];
     }
     var best: ?usize = null;
     var best_rank: u8 = 0;
@@ -805,6 +852,8 @@ export fn parse(len: usize) u32 {
     page_count = 0;
     pages_obj = 0;
     if (len < 8) return 0;
+    // 색인도 쪽 표도 이 자리를 쓴다. 문서를 새로 열 때 한 번만 비운다.
+    zoneReset();
     {
         const head = inputSlice2(len);
         if (!std_mem_eq(head[0..5], "%PDF-")) return 0;
@@ -939,7 +988,6 @@ export fn parse(len: usize) u32 {
     // 본 가장 큰 객체 번호가 상한이 된다. 파일 크기로도 한 번 더 묶는다 —
     // 고리처럼 얽힌 쪽 트리를 만나도 훑는 양이 파일 크기를 넘지 않게 한다.
     // 넉넉히 잡아 채운 뒤 실제로 쓴 만큼으로 줄인다.
-    zoneReset();
     mask_at = 0;
     mask_used = 0;
     att_at = 0;
@@ -2744,7 +2792,12 @@ export fn apply() usize {
 // 콘텐츠 스트림의 텍스트 연산자만 해석한다. 한글은 폰트의 ToUnicode CMap 을
 // 읽어야 실제 글자가 나온다.
 
-const MAX_ITEMS = 4096;
+/// 쪽 하나에서 뽑을 글자 덩이 수.
+///
+/// 4096 이던 것을 올렸다. 표가 촘촘한 쪽은 그 수를 넘겨, textItems() 가
+/// 뒤를 조용히 잃었다(text() 는 따로 담아 두어 멀쩡했다). 덩이 하나가
+/// 24 바이트라 16384 개도 384KB 다.
+const MAX_ITEMS = 16384;
 const MAX_TEXT = 256 * 1024;
 const MAX_FONTS = 32;
 const MAX_MAP = 2048;
@@ -7249,10 +7302,10 @@ fn decryptBytes(num: u32, gen: u32, off: usize, len: usize) u32 {
 fn decryptAllStreams(b: []u8) void {
     if (!enc_on) return;
     var num: u32 = 1;
-    while (num < OBJ_IDX_MAX) : (num += 1) {
-        if (obj_rank[num] == 0) continue;
+    while (num < obj_cap) : (num += 1) {
+        if (objRankTable()[num] == 0) continue;
         if (num == enc_obj) continue;
-        const body = obj_off[num];
+        const body = objOff()[num];
         const e = find(b, "endobj", body) orelse b.len;
         const sp2 = find(b, "stream", body) orelse continue;
         if (sp2 > e) continue;
@@ -7679,11 +7732,12 @@ export fn linkLen(i: u32) u32 { return if (i < link_n) links[i].len else 0; }
 export fn linkPage(i: u32) i32 { return if (i < link_n) links[i].page else -1; }
 export fn linkTextPtr() [*]u8 { return &link_buf; }
 
-const MAX_OUT = 256;
+/// 목차 줄 수. 256 이던 것을 올렸다 — 책 한 권의 차례는 쉽게 넘긴다.
+const MAX_OUT = 4096;
 const Bookmark = struct { depth: u8, off: u32, len: u32, page: i32 };
 var marks: [MAX_OUT]Bookmark = undefined;
 var mark_n: u32 = 0;
-var mark_buf: [16384]u8 = undefined;
+var mark_buf: [128 * 1024]u8 = undefined;
 var mark_buf_n: u32 = 0;
 
 export fn outlineCount() u32 { return mark_n; }
@@ -12498,9 +12552,9 @@ fn collectSigs(b: []const u8) void {
     sig_n = 0;
     sig_used = 0;
     var num: u32 = 1;
-    while (num < OBJ_IDX_MAX and sig_n < MAX_SIGS) : (num += 1) {
-        if (obj_rank[num] == 0) continue;
-        const body = obj_off[num];
+    while (num < obj_cap and sig_n < MAX_SIGS) : (num += 1) {
+        if (objRankTable()[num] == 0) continue;
+        const body = objOff()[num];
         if (body >= b.len) continue;
         const e = objDictEnd(b, body);
         if (find(b[body..e], "/ByteRange", 0) == null) continue;
