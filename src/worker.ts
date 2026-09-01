@@ -263,10 +263,28 @@ let wasmPath = DEFAULTS.wasm;
 
 async function engine() {
   if (ex) return ex;
+  if (typeof WebAssembly === "undefined") {
+    throw new Error("this browser has no WebAssembly — the PDF engine cannot run here");
+  }
   let mod = mods.get(wasmPath);
   if (!mod) {
     const wasmBytes = await loadBytes(wasmPath);
-    if (!wasmBytes) throw new Error(`could not load ${wasmPath}`);
+    if (!wasmBytes) throw new Error(`could not load the PDF engine from ${wasmPath}`);
+    // 받아 온 것이 wasm 이 맞는지 본다.
+    //
+    // 자리를 잘못 적으면 서버가 404 대신 안내 쪽(HTML)을 200 으로 준다.
+    // 그대로 컴파일하면 "expected magic word 00 61 73 6d" 라는 말만 남아,
+    // 무엇을 잘못했는지 알 길이 없다.
+    const magic = wasmBytes[0] === 0x00 && wasmBytes[1] === 0x61
+      && wasmBytes[2] === 0x73 && wasmBytes[3] === 0x6d;
+    if (!magic) {
+      const head = new TextDecoder().decode(wasmBytes.slice(0, 16)).replace(/\s+/g, " ").trim();
+      const looksHtml = /^<!?[a-z]/i.test(head);
+      throw new Error(
+        `${wasmPath} is not the PDF engine (wasm)`
+        + (looksHtml ? " — the server returned a web page there; check the path" : ` — starts with "${head}"`),
+      );
+    }
     // 컴파일 결과는 같은 자리를 보는 사례끼리 나눠 쓴다 — 무거운 건 이것뿐이다
     mod = await WebAssembly.compile(wasmBytes);
     mods.set(wasmPath, mod);

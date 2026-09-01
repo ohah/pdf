@@ -158,7 +158,7 @@ await writeFile("1쪽.png", cv.toBuffer("image/png"));
 | `pdf.structure(page?)` | 구조 나무(태그 PDF) — 제목·문단·표와 대체 글 |
 | `pdf.fields(page)` · `links(page)` | 입력 칸 · 링크 |
 | `pdf.annotations(page)` | 쪽에 달린 주석 전부 — 종류·글·쓴이·날짜·색·깃발 |
-| `pdf.signatures()` | 전자 서명을 WebCrypto 로 맞춰 본다 |
+| `pdf.signatures()` | 전자 서명을 WebCrypto 로 맞춰 본다. 비보안(http) 자리라 못 맞춰 보면 `unchecked` 가 선다 — "틀렸다" 와 구별한다 |
 | `pdf.attachment(i)` | 딸린 파일 바이트 |
 | `pdf.setLayers(on[])` | 레이어를 켜고 끈다 |
 | `pdf.build(spec)` · `encrypt(bytes, pw)` · `merge(bytes)` | 새 PDF 를 만든다 |

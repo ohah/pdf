@@ -117,7 +117,16 @@ export class PDFClient {
       this.tellPaths(paths);
       return;
     }
-    this.w = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+    try {
+      this.w = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+    } catch {
+      // 워커가 있는데도 못 만드는 자리가 있다 — CSP 가 worker-src 를 막거나,
+      // sandbox 를 좁게 준 iframe 이다. 거기서 통째로 멎는 것보다 화면 갈래에서
+      // 라도 도는 편이 낫다(큰 문서에서 잠깐 멎을 수 있다는 값은 치른다).
+      this.w = null;
+      this.tellPaths(paths);
+      return;
+    }
     this.w.onmessage = (ev) => {
       const { id, r, err } = ev.data;
       const slot = this.waiting.get(id);

@@ -81,6 +81,15 @@ const OID_O = "2.5.4.10";
 export type SigCheck = {
   /** 셋 다 맞았는가 */
   ok: boolean;
+  /**
+   * 아예 맞춰 보지 못했는가.
+   *
+   * 비보안(http://) 자리나 오래된 웹뷰에는 WebCrypto 가 없다. 그때 "서명이
+   * 틀렸다" 고 하면 멀쩡한 문서를 의심하게 만든다 — 못 봤다는 것과 보고
+   * 틀렸다는 것은 다르다. 화면에는 이 값이 참일 때 "확인할 수 없음" 으로
+   * 보여 주면 된다.
+   */
+  unchecked: boolean;
   /** 서명 안의 요약값과 실제 바이트의 요약값이 같은가 */
   digestOk: boolean;
   /** 공개 열쇠로 서명이 맞아떨어지는가 */
@@ -155,10 +164,16 @@ export async function checkSignature(
   covers: boolean,
 ): Promise<SigCheck> {
   const out: SigCheck = {
-    ok: false, digestOk: false, cryptoOk: false, covers,
+    ok: false, unchecked: false, digestOk: false, cryptoOk: false, covers,
     signer: "", issuer: "", from: "", to: "", hash: "", algo: "", note: "",
   };
   const fail = (why: string) => { out.note = why; return out; };
+
+  // 여기서 맞춰 볼 수 없는 자리인가 — 비보안(http://) 이거나 오래된 웹뷰다
+  if (typeof crypto === "undefined" || !crypto.subtle) {
+    out.unchecked = true;
+    return fail("this page cannot check signatures — WebCrypto needs a secure (https) context");
+  }
 
   // 서명 대상 바이트 — 구멍 앞뒤를 이어 붙인다
   if (range.length < 4) return fail("no byte range");
