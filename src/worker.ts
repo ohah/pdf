@@ -84,6 +84,7 @@ type Exports = {
   infoTextPtr?: () => number;
   pageHeight: () => number;
   secondPtr: () => number;
+  setSecondRoom?: (n: number) => void;
   maxSecond: () => number;
   parseSecond: (len: number) => number;
   secondPageCount: () => number;
@@ -443,7 +444,9 @@ function rtl(t: string): boolean {
 async function open(bytes: Uint8Array, pw: string) {
   const e = await engine();
   if (bytes.byteLength > e.maxInput()) return { err: "too-large", max: e.maxInput() };
-  if (!e.reserve(bytes.byteLength, bytes.byteLength + 1024 * 1024)) return { err: "no-memory" };
+  // 여는 데는 출력 자리가 필요 없다. 예전에는 파일 크기만큼 함께 잡아,
+  // 보기만 해도 파일의 세 배를 들고 있었다 — 만들거나 이어 붙일 때 늘린다.
+  if (!e.reserve(bytes.byteLength, 1024 * 1024)) return { err: "no-memory" };
   new Uint8Array(e.memory.buffer, e.inputPtr(), bytes.byteLength).set(bytes);
   e.clearPassword?.();
   chars(e, pw, (c) => e.addPasswordChar?.(c));
@@ -742,6 +745,8 @@ async function page(i: number, formOn: boolean, light = false) {
 /** 꾸러미대로 다시 만든다. 옛 run() 이 하던 일을 그대로 옮긴 것이다. */
 async function build(spec: BuildSpec) {
   const e = await engine();
+  // 낸 것은 원본보다 커질 수 있다(워터마크·주석·새 칸). 넉넉히 잡는다.
+  if (!(await roomToWrite(e, e.inputLen() + 32 * 1024 * 1024))) return null;
   e.clearPick();
   for (const i of spec.pick) e.addPick(i);
   e.setRotate(spec.rotate);
@@ -828,21 +833,35 @@ async function seal(bytes: Uint8Array, pw: string) {
   return n ? new Uint8Array(e.memory.buffer, e.outputPtr(), n).slice() : null;
 }
 
+/**
+ * 낼 자리를 넉넉히 잡아 둔다.
+ *
+ * 열 때는 출력 자리를 안 잡아 두므로, 새로 낼 때 여기서 늘린다. 자리를
+ * 다시 잡으면 배치가 바뀌어 읽어 둔 것이 어긋나므로 문서를 다시 읽는다 —
+ * 원본 바이트는 아직 입력 자리에 그대로 있다. (사람이 "만들기" 를 한 번
+ * 누를 때 드는 값이라 다시 읽어도 된다.)
+ */
+async function roomToWrite(e: Exports, want: number, wantSecond = 0): Promise<boolean> {
+  if (wantSecond > 0) e.setSecondRoom?.(wantSecond);
+  if (e.outCapacity() >= want && e.maxSecond() >= wantSecond) return true;
+  const src = new Uint8Array(e.memory.buffer, e.inputPtr(), e.inputLen()).slice();
+  if (!e.reserve(src.length, want)) return false;
+  new Uint8Array(e.memory.buffer, e.inputPtr(), src.length).set(src);
+  if (!e.parse(src.length)) return false;
+  await loadCmaps(e);
+  return true;
+}
+
 /** 다른 문서를 뒤에 잇는다. 결과 바이트를 돌려준다. */
 async function merge(bytes: Uint8Array) {
   const e = await engine();
-  if (bytes.byteLength > e.maxSecond()) return null;
+
   // 이어 붙인 결과는 두 문서를 합친 크기다. 열 때 잡아 둔 출력 자리는 첫
   // 문서 기준이라 모자랄 수 있다 — 모자라면 자리를 다시 잡고 문서를 다시
   // 읽는다. 원본 바이트는 아직 입력 자리에 그대로 있다.
-  const need = e.inputLen() + bytes.byteLength + 1024 * 1024;
-  if (e.outCapacity() < need) {
-    const src = new Uint8Array(e.memory.buffer, e.inputPtr(), e.inputLen()).slice();
-    if (!e.reserve(src.length, need)) return null;
-    new Uint8Array(e.memory.buffer, e.inputPtr(), src.length).set(src);
-    if (!e.parse(src.length)) return null;
-    await loadCmaps(e);
-  }
+  const room = bytes.byteLength + 1024 * 1024;
+  if (!(await roomToWrite(e, e.inputLen() + room, room))) return null;
+  if (bytes.byteLength > e.maxSecond()) return null;
   new Uint8Array(e.memory.buffer, e.secondPtr(), bytes.byteLength).set(bytes);
   if (!e.parseSecond(bytes.byteLength)) return null;
   const n = e.merge();

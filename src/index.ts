@@ -360,7 +360,8 @@ export class PDFDocument {
     if (r.err || !r.pages) {
       cl.close();
       throw new Error(
-        r.err === "too-large" ? "the file is too large"
+        r.err === "too-large"
+          ? `the file is too large — ${(raw.length / 1048576).toFixed(0)}MB, the engine takes up to ${Math.round((r.max ?? 0) / 1048576)}MB`
         : r.err === "no-memory" ? "could not reserve memory"
         : "could not read the PDF",
       );

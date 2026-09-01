@@ -28,6 +28,8 @@ var exp_cap: usize = 0;
 var b2_off: usize = 0;
 var b2_len: usize = 0;
 var b2_cap: usize = 0;
+/// 이어 붙일 문서를 담으려면 이만큼은 있어야 한다 — 다음 reserve 에서 본다
+var b2_want: usize = 0;
 /// 페이지에서 꺼낸 그림 한 장을 두는 자리
 var img_off: usize = 0;
 var img_cap: usize = 0;
@@ -53,7 +55,13 @@ fn heapBase() usize { return @intFromPtr(&__heap_base); }
 export fn reserve(want_in: usize, want_out: usize) u32 {
     // 원본 · 펼친 객체 · 출력 순으로 잡는다. 펼친 객체는 원본만큼 여유를 준다.
     exp_cap = want_in + 1024 * 1024;
-    b2_cap = want_in + 1024 * 1024;
+    // 여벌 자리.
+    //
+    // 이어 붙일 둘째 문서를 담기도 하고, 스트림 하나를 풀거나 푸는 동안
+    // 중간 결과를 두는 데도 쓴다. 파일만큼 잡아 두었더니 300MB 문서를
+    // 보기만 해도 300MB 를 더 들고 있었다 — 붙이지도 않는데. 스트림 하나에
+    // 맞춰 잡고, 이어 붙일 때만 setSecondRoom 으로 늘린다.
+    b2_cap = @max(@min(want_in + 1024 * 1024, 128 * 1024 * 1024), b2_want);
     // 그림 한 장을 푼 결과. A4 300dpi 컬러가 대략 25MB 다.
     img_cap = 48 * 1024 * 1024;
     font_cap = 8 * 1024 * 1024;
@@ -124,6 +132,8 @@ fn bigScratch(want: usize) ?[]u8 {
 }
 
 export fn secondPtr() usize { return b2_off; }
+/// 이어 붙이기 전에 "이만큼 담을 자리가 필요하다" 고 알린다
+export fn setSecondRoom(n: usize) void { b2_want = n; }
 export fn maxSecond() usize { return b2_cap; }
 
 fn expBuf() [*]u8 { return @ptrFromInt(exp_off); }
@@ -189,7 +199,28 @@ fn wmIsAscii() bool {
 
 export fn inputPtr() usize { return heapBase(); }
 export fn outputPtr() usize { return out_off; }
-export fn maxInput() usize { return 512 * 1024 * 1024; }
+/// wasm32 가 쓸 수 있는 주소는 4GB 다. 그 안에서 우리가 쓰는 만큼을 빼고
+/// 남는 것이 받을 수 있는 파일 크기다. 안전 여유를 두어 3.5GB 로 잡는다 —
+/// 브라우저가 실제로 내주는 양은 기기마다 다르고, 못 늘리면 reserve 가
+/// 0 을 돌려주므로 그때는 "메모리를 못 잡았다"로 끝난다.
+const BUDGET: usize = 3584 * 1024 * 1024;
+/// 파일 크기와 무관하게 늘 잡는 것 — 그림 48 · 글꼴 8 · 인라인 8 · 폼 6 · Type1 4
+const FIXED: usize = (48 + 8 + 8 + 6 + 4) * 1024 * 1024;
+
+/// 받을 수 있는 파일 크기.
+///
+/// 예전에는 입출력이 정적 배열이라 그 배열 크기가 곧 한계였다. 배열을
+/// 걷어내고 필요할 때 memory.grow 하도록 바꾸면서 배열은 사라졌는데,
+/// 그때 적어 둔 512MB 라는 숫자만 남아 아무것도 지키지 않은 채 문턱 노릇을
+/// 했다. 지금은 여는 데 실제로 드는 양에서 거꾸로 구한다 —
+/// 원본 + 펼친 객체(원본만큼) + 여벌(원본만큼) + 고정분 + 출력 여유.
+export fn maxInput() usize {
+    // 여는 데 드는 것: 원본(1) + 펼친 객체(1) + 여벌(최대 128MB) + 고정분 + 여유.
+    // 낼 때는 출력 자리를 더 잡지만 그건 그때 늘리고, 못 늘리면 그때 알린다.
+    const scratch: usize = 128 * 1024 * 1024;
+    const slack: usize = 4 * 1024 * 1024;
+    return (BUDGET - FIXED - scratch - slack) / 2;
+}
 export fn outputLen() usize { return out_len; }
 export fn pageCount() u32 { return page_count; }
 /// 쪽이 너무 많아 뒤를 잘랐는가
@@ -7139,8 +7170,13 @@ fn setupEncryption(b: []const u8) void {
 /// "이 메모리는 아무도 안 읽는다"고 보고 쓰기를 통째로 지운다 — 실제로
 /// ReleaseSmall 에서 RC4 결과가 사라졌다. Debug 에서만 되던 이유가 이것이다.
 fn decryptBytes(num: u32, gen: u32, off: usize, len: usize) u32 {
-    if (!enc_on or len == 0 or len > b2_cap) return @intCast(len);
-    const scratch = @as([*]u8, @ptrFromInt(b2_off))[0..len];
+    if (!enc_on or len == 0) return @intCast(len);
+    // 여벌보다 큰 스트림이면 메모리 끝을 잠깐 빌린다. 예전에는 그냥 넘겨,
+    // 그 스트림만 암호글 그대로 남아 깨진 그림이 되었다.
+    const scratch = if (len <= b2_cap)
+        @as([*]u8, @ptrFromInt(b2_off))[0..len]
+    else
+        (bigScratch(len) orelse return @intCast(len));
     const src = @as([*]const u8, @ptrFromInt(heapBase() + off))[0..len];
     @memcpy(scratch, src);
 
