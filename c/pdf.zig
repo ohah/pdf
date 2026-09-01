@@ -1458,6 +1458,7 @@ export fn apply() usize {
     const b = searchSlice();
 
     // 원본을 그대로 옮긴다 (펼친 영역은 우리가 만든 것이라 옮기지 않는다)
+    if (!outRoom(0, in_len)) return 0;
     @memcpy(outBuf()[0..in_len], b[0..in_len]);
     var pos: usize = in_len;
     if (pos > 0 and outBuf()[pos - 1] != '\n') { outBuf()[pos] = '\n'; pos += 1; }
@@ -1541,6 +1542,7 @@ export fn apply() usize {
                 appendStr(pp, " /ImageMask true /BitsPerComponent 1 /Decode [0 1] /Length ");
                 appendNum(pp, len);
                 appendStr(pp, " >>\nstream\n");
+                if (!outRoom(pp.*, len)) return;
                 @memcpy(outBuf()[pp.*..][0..len], maskBuf()[off..][0..len]);
                 pp.* += len;
                 appendStr(pp, "\nendstream\nendobj\n");
@@ -1846,6 +1848,7 @@ export fn apply() usize {
             appendNum(&pos, @intCast(bl));
             appendStr(&pos, " >>\nstream\n");
             if (outRoom(pos, bl)) {
+                if (!outRoom(pos, bl)) return 0;
                 @memcpy(outBuf()[pos..][0..bl], bd[0..bl]);
                 pos += bl;
             }
@@ -2254,6 +2257,7 @@ export fn apply() usize {
                     appendStr(&pos, " /ImageMask true /BitsPerComponent 1 /Decode [0 1] /Length ");
                     appendNum(&pos, e.mlen);
                     appendStr(&pos, " >>\nstream\n");
+                    if (!outRoom(pos, e.mlen)) return 0;
                     @memcpy(outBuf()[pos..][0..e.mlen], maskBuf()[e.moff..][0..e.mlen]);
                     pos += e.mlen;
                     appendStr(&pos, "\nendstream\nendobj\n");
@@ -2286,6 +2290,7 @@ export fn apply() usize {
                     appendNum(&pos, @intCast(b3));
                     appendStr(&pos, " >>\nstream\n");
                     if (outRoom(pos, b3)) {
+                        if (!outRoom(pos, b3)) return 0;
                         @memcpy(outBuf()[pos..][0..b3], body3[0..b3]);
                         pos += b3;
                     }
@@ -2398,6 +2403,7 @@ export fn apply() usize {
                     appendNum(&pos, @intCast(bl));
                     appendStr(&pos, " >>\nstream\n");
                     if (outRoom(pos, bl)) {
+                        if (!outRoom(pos, bl)) return 0;
                         @memcpy(outBuf()[pos..][0..bl], body2[0..bl]);
                         pos += bl;
                     }
@@ -2496,9 +2502,11 @@ export fn apply() usize {
                 const on = if (e.kind == 1 and val.len > 0) val else "Off";
                 if (outRoom(pos, on.len * 2 + 32)) {
                     appendStr(&pos, " /V /");
+                    if (!outRoom(pos, on.len)) return 0;
                     @memcpy(outBuf()[pos..][0..on.len], on);
                     pos += on.len;
                     appendStr(&pos, " /AS /");
+                    if (!outRoom(pos, on.len)) return 0;
                     @memcpy(outBuf()[pos..][0..on.len], on);
                     pos += on.len;
                 }
@@ -2675,7 +2683,8 @@ export fn apply() usize {
                         std_mem_eq(b[q4 .. q4 + 5], "/Font"))
                     {
                         if (!outRoom(pos, 64)) break;
-                        @memcpy(outBuf()[pos..][0..5], "/Font");
+                        if (!outRoom(pos, 5)) return 0;
+                    @memcpy(outBuf()[pos..][0..5], "/Font");
                         pos += 5;
                         q4 += 5;
                         while (q4 < re_ and isSpace(b[q4])) q4 += 1;
@@ -2754,6 +2763,7 @@ export fn apply() usize {
         var digits: [10]u8 = undefined;
         var d: usize = 10;
         while (d > 0) : (d -= 1) { digits[d - 1] = @intCast('0' + (off % 10)); off /= 10; }
+        if (!outRoom(pos, 10)) return 0;
         @memcpy(outBuf()[pos..][0..10], &digits);
         pos += 10;
         appendStr(&pos, " 00000 n \n");
@@ -12322,6 +12332,7 @@ export fn merge() usize {
         var digits: [10]u8 = undefined;
         var d: usize = 10;
         while (d > 0) : (d -= 1) { digits[d - 1] = @intCast('0' + (off % 10)); off /= 10; }
+        if (!outRoom(pos, 10)) return 0;
         @memcpy(outBuf()[pos..][0..10], &digits);
         pos += 10;
         appendStr(&pos, " 00000 n \n");
@@ -12888,6 +12899,7 @@ export fn compact() usize {
         appendStr(&pos, " 0 obj");
         if (!enc_want) {
             if (!outRoom(pos, r.end - r.start)) break;
+            if (!outRoom(pos, r.end - r.start)) return 0;
             @memcpy(outBuf()[pos..][0 .. r.end - r.start], b[r.start..r.end]);
             pos += r.end - r.start;
         } else {
@@ -12927,6 +12939,7 @@ export fn compact() usize {
             }
             if (sealed > 0 and outRoom(pos, sealed + 64)) {
                 appendStr(&pos, "\nstream\n");
+                if (!outRoom(pos, sealed)) return 0;
                 @memcpy(outBuf()[pos..][0..sealed], sealed_at[0..sealed]);
                 pos += sealed;
                 appendStr(&pos, "\nendstream\n");
@@ -13040,6 +13053,7 @@ export fn compact() usize {
         var digits: [10]u8 = undefined;
         var d: usize = 10;
         while (d > 0) : (d -= 1) { digits[d - 1] = @intCast('0' + (off % 10)); off /= 10; }
+        if (!outRoom(pos, 10)) return 0;
         @memcpy(outBuf()[pos..][0..10], &digits);
         pos += 10;
         appendStr(&pos, " 00000 n \n");
