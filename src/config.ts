@@ -24,7 +24,12 @@ export const onNode =
   !!(globalThis as { process?: { versions?: { node?: string } } }).process?.versions?.node &&
   typeof (globalThis as { window?: unknown }).window === "undefined";
 
+// 주소를 변수에 담아 만든다. 글자 그대로 적으면 번들러가 그 자리를 파일
+// 하나로 보고 "빌드 때 없는 파일" 이라고 경고한다 — 브라우저에서는 이
+// 갈래로 들어오지도 않는데 쓰는 쪽 빌드 로그가 지저분해진다.
+const here = (rel: string) => new URL(rel, import.meta.url).href;
+
 export const DEFAULTS: Required<Paths> = {
-  wasm: onNode ? new URL("./pdf.wasm", import.meta.url).href : "./pdf.wasm",
-  cmaps: onNode ? new URL("../cmaps", import.meta.url).href : "./cmaps",
+  wasm: onNode ? here("./pdf.wasm") : "./pdf.wasm",
+  cmaps: onNode ? here("../cmaps") : "./cmaps",
 };
