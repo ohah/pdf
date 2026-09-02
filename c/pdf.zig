@@ -3430,6 +3430,28 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
         }
     }
 
+    // 그림에 붙은 색 프로파일 — /ColorSpace [/ICCBased 6 0 R]
+    var img_icc: i32 = -1;
+    if (find(b[ob..oe], "/ColorSpace", 0)) |ca2| {
+        var q = ob + ca2 + 11;
+        while (q < oe and isSpace(b[q])) q += 1;
+        var cs_s = q;
+        var cs_e = oe;
+        if (q < oe and isDigit(b[q])) {
+            const cn = readUint(b, &q);
+            if (findObj(b, cn)) |cb| { cs_s = cb; cs_e = objDictEnd(b, cb); }
+        }
+        if (findIn(b[cs_s..@min(cs_e, cs_s + 128)], "ICCBased", 0) != null) {
+            var w5 = cs_s;
+            while (w5 < cs_e and !isDigit(b[w5])) w5 += 1;
+            if (w5 < cs_e) {
+                var w6 = w5;
+                const pn5 = readUint(b, &w6);
+                if (streamOf(b, pn5)) |prof| img_icc = addIcc(prof);
+            }
+        }
+    }
+
     var is_mask = false;
     if (find(b[ob..oe], "/ImageMask", 0)) |ma| {
         var q = ob + ma + 10;
@@ -3637,7 +3659,12 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
             } else if (bpc == 8) {
                 const n_px = @as(usize, w) * @as(usize, h);
                 const comps = @as(usize, @intCast(r)) / (if (n_px == 0) 1 else n_px);
-                if (comps >= 3) kind = 1 else if (comps >= 1) kind = 2;
+                if (comps == 4) {
+                    // CMYK 다. 예전에는 3성분으로 읽어 화소가 통째로 밀렸다 —
+                    // 시안이 빨강으로, 검정이 초록으로 나왔다.
+                    got = cmykToRgb(dst, n_px, img_icc, flip);
+                    kind = 1;
+                } else if (comps >= 3) kind = 1 else if (comps >= 1) kind = 2;
             } else if (bpc == 16) {
                 // 16비트는 높은 바이트만 남긴다. 화면은 8비트면 충분하고,
                 // 안 펴 두면 성분 수를 잘못 세어 딴 그림이 된다.
@@ -3647,7 +3674,10 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
                 got = half;
                 const n_px = @as(usize, w) * @as(usize, h);
                 const comps = @as(usize, half) / (if (n_px == 0) 1 else n_px);
-                if (comps >= 3) kind = 1 else if (comps >= 1) kind = 2;
+                if (comps == 4) {
+                    got = cmykToRgb(dst, n_px, img_icc, flip);
+                    kind = 1;
+                } else if (comps >= 3) kind = 1 else if (comps >= 1) kind = 2;
             } else if (bpc == 2 or bpc == 4) {
                 // 2·4비트 회색은 8비트로 펴 둔다
                 const row_in = (w * bpc + 7) / 8;
@@ -3835,6 +3865,126 @@ export fn jpegToRgb(i: u32) i32 {
     img_n += 1;
     img_used += @intCast((need + 3) & ~@as(usize, 3));
     return @intCast(slot);
+}
+
+/// CMYK 화소를 제자리에서 RGB 로 편다. 편 바이트 수.
+///
+/// 프로파일이 있으면 그걸로 옮긴다. 화소마다 곡선·격자표를 다 타면 느리므로
+/// (300만 화소면 억 단위 셈이다) 17^4 짜리 표를 한 번 만들어 두고 그 표에서
+/// 사이값을 읽는다 — 비싼 일은 83,521 번만 하고 화소마다는 값만 섞는다.
+fn cmykToRgb(dst: [*]u8, n_px: usize, ix: i32, invert: bool) u32 {
+    const G: usize = 17;
+    var lut: []u8 = &[_]u8{};
+    if (ix >= 0) {
+        if (iccLut(ix, G)) |t| lut = t;
+    }
+    var i: usize = 0;
+    while (i < n_px) : (i += 1) {
+        const s0 = i * 4;
+        var c: f32 = @as(f32, @floatFromInt(dst[s0])) / 255.0;
+        var m: f32 = @as(f32, @floatFromInt(dst[s0 + 1])) / 255.0;
+        var y: f32 = @as(f32, @floatFromInt(dst[s0 + 2])) / 255.0;
+        var k: f32 = @as(f32, @floatFromInt(dst[s0 + 3])) / 255.0;
+        if (invert) { c = 1 - c; m = 1 - m; y = 1 - y; k = 1 - k; }
+        var r: u8 = 0;
+        var g: u8 = 0;
+        var b2: u8 = 0;
+        if (lut.len > 0) {
+            var rgb: [3]f32 = .{ 0, 0, 0 };
+            lutLookup(lut, G, c, m, y, k, &rgb);
+            r = @intFromFloat(@max(0, @min(255, rgb[0] * 255)));
+            g = @intFromFloat(@max(0, @min(255, rgb[1] * 255)));
+            b2 = @intFromFloat(@max(0, @min(255, rgb[2] * 255)));
+        } else {
+            r = @intFromFloat(@max(0, @min(255, (1 - @min(@as(f32, 1), c + k)) * 255)));
+            g = @intFromFloat(@max(0, @min(255, (1 - @min(@as(f32, 1), m + k)) * 255)));
+            b2 = @intFromFloat(@max(0, @min(255, (1 - @min(@as(f32, 1), y + k)) * 255)));
+        }
+        const d0 = i * 3;
+        dst[d0] = r;
+        dst[d0 + 1] = g;
+        dst[d0 + 2] = b2;
+    }
+    return @intCast(n_px * 3);
+}
+
+/// 프로파일마다 만들어 두는 CMYK→RGB 표 (17^4 × 3바이트 ≈ 250KB)
+var lut_at: usize = 0;
+var lut_cap: u32 = 0;
+var lut_for: i32 = -1;
+fn iccLut(ix: i32, g: usize) ?[]u8 {
+    const need: u32 = @intCast(g * g * g * g * 3);
+    if (lut_for == ix and lut_at != 0) {
+        return @as([*]u8, @ptrFromInt(lut_at))[0..need];
+    }
+    if (!growTable(&lut_at, &lut_cap, need, 1, need)) return null;
+    const t = @as([*]u8, @ptrFromInt(lut_at))[0..need];
+    var idx: usize = 0;
+    var ci: usize = 0;
+    while (ci < g) : (ci += 1) {
+        var mi: usize = 0;
+        while (mi < g) : (mi += 1) {
+            var yi: usize = 0;
+            while (yi < g) : (yi += 1) {
+                var ki: usize = 0;
+                while (ki < g) : (ki += 1) {
+                    const inv: f32 = @floatFromInt(g - 1);
+                    const in = [_]f32{
+                        @as(f32, @floatFromInt(ci)) / inv,
+                        @as(f32, @floatFromInt(mi)) / inv,
+                        @as(f32, @floatFromInt(yi)) / inv,
+                        @as(f32, @floatFromInt(ki)) / inv,
+                    };
+                    var rgb: [3]f32 = .{ 0, 0, 0 };
+                    if (!iccToRgb(ix, &in, &rgb)) return null;
+                    t[idx] = @intFromFloat(@max(0, @min(255, rgb[0] * 255)));
+                    t[idx + 1] = @intFromFloat(@max(0, @min(255, rgb[1] * 255)));
+                    t[idx + 2] = @intFromFloat(@max(0, @min(255, rgb[2] * 255)));
+                    idx += 3;
+                }
+            }
+        }
+    }
+    lut_for = ix;
+    return t;
+}
+
+/// 만들어 둔 표에서 사이값을 읽는다 (모서리 열여섯 개를 무게로 섞는다)
+fn lutLookup(t: []const u8, g: usize, c: f32, m: f32, y: f32, k: f32, out: *[3]f32) void {
+    const gf: f32 = @floatFromInt(g - 1);
+    const v = [_]f32{
+        @max(0, @min(1, c)) * gf, @max(0, @min(1, m)) * gf,
+        @max(0, @min(1, y)) * gf, @max(0, @min(1, k)) * gf,
+    };
+    var lo: [4]usize = undefined;
+    var fr: [4]f32 = undefined;
+    var i: usize = 0;
+    while (i < 4) : (i += 1) {
+        const f0 = @floor(v[i]);
+        lo[i] = @min(g - 1, @as(usize, @intFromFloat(f0)));
+        fr[i] = v[i] - f0;
+    }
+    out[0] = 0;
+    out[1] = 0;
+    out[2] = 0;
+    var corner: u32 = 0;
+    while (corner < 16) : (corner += 1) {
+        var wgt: f32 = 1;
+        var idx: usize = 0;
+        var d: u3 = 0;
+        while (d < 4) : (d += 1) {
+            const up = (corner >> d) & 1 == 1;
+            const at = if (up) @min(g - 1, lo[d] + 1) else lo[d];
+            wgt *= if (up) fr[d] else 1 - fr[d];
+            idx = idx * g + at;
+        }
+        if (wgt == 0) continue;
+        const cell = idx * 3;
+        if (cell + 2 >= t.len) continue;
+        out[0] += wgt * @as(f32, @floatFromInt(t[cell])) / 255.0;
+        out[1] += wgt * @as(f32, @floatFromInt(t[cell + 1])) / 255.0;
+        out[2] += wgt * @as(f32, @floatFromInt(t[cell + 2])) / 255.0;
+    }
 }
 
 fn findImg(name: []const u8) i32 {
@@ -4127,6 +4277,7 @@ export fn resetPage(w: f32, h: f32) void {
     fld_used = 0;
     icc_n = 0;
     icc_data_used = 0;
+    lut_for = -1;
     img_used = 0;
     inl_used = 0;
     ops_n = 0;

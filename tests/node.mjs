@@ -275,6 +275,28 @@ const t = (name, cond, got) => {
       }
       t("ICC 색이 littleCMS 와 맞는다", far <= 5, `최대차 ${far} ${far2}`);
       q5.close();
+
+      // CMYK 그림.
+      //
+      // 성분이 넷인 그림을 셋으로 읽어 화소가 통째로 밀렸다 — 시안이
+      // 빨강(249,0,6)으로, 검정이 초록(0,255,0)으로 나왔다. 네 화소짜리
+      // 그림(시안·마젠타·노랑·검정)으로 지킨다.
+      const pick = async (n) => {
+        const q6 = await PDFDocument.open(`${FX}/${n}.pdf`);
+        const c6 = createCanvas(80, 20);
+        await q6.render(1, c6);
+        const d6 = c6.getContext("2d").getImageData(0, 0, 80, 20).data;
+        const at6 = (x) => { const i = (10 * 80 + x) * 4; return [d6[i], d6[i + 1], d6[i + 2]]; };
+        q6.close();
+        return [at6(10), at6(30), at6(50), at6(70)];
+      };
+      const near = (a, b, tol) => a.every((v, i) => Math.abs(v - b[i]) <= tol);
+      const plain = await pick("img-cmyk");
+      t("CMYK 그림: 시안이 시안이다", near(plain[0], [0, 255, 255], 10), plain[0]);
+      t("CMYK 그림: 검정이 검정이다", near(plain[3], [0, 0, 0], 10), plain[3]);
+      const iccImg = await pick("img-icc");
+      t("CMYK 그림 + ICC: 마젠타", near(iccImg[1], [215, 21, 126], 10), iccImg[1]);
+      t("CMYK 그림 + ICC: 검정", near(iccImg[3], [26, 26, 26], 10), iccImg[3]);
     }
   }
 }
