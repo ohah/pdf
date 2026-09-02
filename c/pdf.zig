@@ -3256,7 +3256,54 @@ fn labToRgb(l: f32, a: f32, bb: f32) [3]f32 {
     }
     return v;
 }
-const CSpace = struct { name: [24]u8, name_len: u8, kind: u8, comps: u8 };
+const CSpace = struct {
+    name: [24]u8,
+    name_len: u8,
+    kind: u8,
+    comps: u8,
+    /// ICC 프로파일 자리 (icc_profs 의 번호). 없으면 -1.
+    icc: i32 = -1,
+};
+
+// ===== ICC 색 프로파일 =====
+//
+// /ICCBased 는 "이 값은 이 프로파일 기준이다" 라고 알려 준다. 그걸 안 쓰고
+// 단순식으로 넘기면 색이 어긋난다 — 마젠타 자리에 형광 마젠타가 찍혔다.
+const icc = @import("pdficc.zig");
+var icc_profs_at: usize = 0;
+var icc_profs_cap: u32 = 0;
+var icc_n: u32 = 0;
+fn iccBuf() []icc.Profile {
+    if (icc_profs_at == 0 or icc_profs_cap == 0) return &[_]icc.Profile{};
+    return @as([*]icc.Profile, @ptrFromInt(icc_profs_at))[0..icc_profs_cap];
+}
+/// 프로파일 바이트를 담아 두는 자리 — 스트림 임시 자리는 곧 덮이므로 옮긴다
+var icc_data_at: usize = 0;
+var icc_data_cap: u32 = 0;
+var icc_data_used: u32 = 0;
+
+/// 프로파일 스트림을 읽어 담는다. 담은 번호, 못 읽으면 -1.
+fn addIcc(bytes: []const u8) i32 {
+    if (bytes.len < 132 or bytes.len > 8 * 1024 * 1024) return -1;
+    if (!growTable(&icc_profs_at, &icc_profs_cap, icc_n + 1, @sizeOf(icc.Profile), 4)) return -1;
+    const need = icc_data_used + @as(u32, @intCast(bytes.len));
+    if (!growTable(&icc_data_at, &icc_data_cap, need, 1, 65536)) return -1;
+    const dst = @as([*]u8, @ptrFromInt(icc_data_at))[0..icc_data_cap];
+    @memcpy(dst[icc_data_used..][0..bytes.len], bytes);
+    const mine = dst[icc_data_used..][0..bytes.len];
+    icc_data_used = need;
+    const p = icc.parse(mine);
+    if (p.kind == .none) return -1;
+    iccBuf()[icc_n] = p;
+    icc_n += 1;
+    return @intCast(icc_n - 1);
+}
+
+/// 성분 값을 프로파일로 옮긴다. 못 하면 false.
+fn iccToRgb(ix: i32, in: []const f32, out: *[3]f32) bool {
+    if (ix < 0 or @as(u32, @intCast(ix)) >= icc_n) return false;
+    return icc.toRgb(&iccBuf()[@intCast(ix)], in, out);
+}
 /// 이름 붙은 색 공간. 필요한 만큼 늘어난다(세는 상한 없음).
 var cspaces_at: usize = 0;
 var cspaces_cap: u32 = 0;
@@ -4078,6 +4125,8 @@ export fn resetPage(w: f32, h: f32) void {
     run_on = false;
     field_n = 0;
     fld_used = 0;
+    icc_n = 0;
+    icc_data_used = 0;
     img_used = 0;
     inl_used = 0;
     ops_n = 0;
@@ -4781,6 +4830,20 @@ fn runOps(b: []const u8, depth: u32) void {
                     g2 = 0.6;
                     b3 = 0.6;
                 }
+            } else if (ci >= 0 and cspacesBuf()[@intCast(ci)].icc >= 0 and
+                sp >= cspacesBuf()[@intCast(ci)].comps)
+            {
+                // 프로파일이 있으면 그대로 옮긴다 — 단순식보다 훨씬 맞는다
+                const cs2 = cspacesBuf()[@intCast(ci)];
+                var rgb: [3]f32 = .{ 0, 0, 0 };
+                const from = sp - cs2.comps;
+                if (iccToRgb(cs2.icc, st[from..sp], &rgb)) {
+                    r = rgb[0];
+                    g2 = rgb[1];
+                    b3 = rgb[2];
+                } else {
+                    ok = false;
+                }
             } else if (sp >= 4) {
                 const cy = st[sp - 4];
                 const m = st[sp - 3];
@@ -5064,6 +5127,7 @@ fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
                 const val = b[vs..ve];
                 var kind: u8 = CS_RGB;
                 var comps: u8 = 3;
+                var icc_ix: i32 = -1;
                 if (findIn(val, "/Pattern", 0) != null) { kind = CS_PATTERN; comps = 1; }
                 else if (findIn(val, "/Lab", 0) != null) { kind = CS_LAB; comps = 3; }
                 else if (findIn(val, "/Separation", 0) != null) { kind = CS_TINT; comps = 1; }
@@ -5086,6 +5150,14 @@ fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
                     }
                     comps = @intCast(@max(1, @min(4, nn)));
                     kind = if (comps == 1) CS_GRAY else if (comps == 4) CS_CMYK else CS_RGB;
+                    // 프로파일 자체를 읽어 둔다 — 색을 제대로 옮기려면 필요하다
+                    var w3 = vs;
+                    while (w3 < ve and !isDigit(b[w3])) w3 += 1;
+                    if (w3 < ve) {
+                        var w4 = w3;
+                        const on5 = readUint(b, &w4);
+                        if (streamOf(b, on5)) |prof| icc_ix = addIcc(prof);
+                    }
                 }
                 const c2 = &cspacesBuf()[cs_n];
                 const nl4 = @min(nm4.len, 24);
@@ -5094,6 +5166,7 @@ fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
                 c2.name_len = @intCast(nl4);
                 c2.kind = kind;
                 c2.comps = comps;
+                c2.icc = icc_ix;
                 cs_n += 1;
             }
             q = nq;

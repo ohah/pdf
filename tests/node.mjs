@@ -249,6 +249,32 @@ const t = (name, cond, got) => {
       }
       t("색차 늘리기가 libjpeg 과 맞는다", worst <= 6, `최대차 ${worst} ${where}`);
       q4.close();
+
+      // ICC 색 프로파일.
+      //
+      // /ICCBased 는 "이 CMYK 값은 이 프로파일 기준이다" 라고 알려 준다.
+      // 그걸 안 쓰고 (255-c)(255-k)/255 로 넘기던 때는 littleCMS 가 낸
+      // 참값과 평균 53/255, 마젠타는 129 까지 벌어졌다 — 참값 #D7157E
+      // 자리에 형광 마젠타 #FF00FF 를 찍었다. 아래 참값은 같은 프로파일로
+      // littleCMS 가 낸 것이다.
+      const want2 = [[255, 255, 255], [26, 26, 26], [0, 164, 219], [215, 21, 126], [255, 241, 8], [25, 94, 157], [172, 40, 52], [102, 120, 122]];
+      const q5 = await PDFDocument.open(`${FX}/icc.pdf`);
+      const c5 = createCanvas(200, 150);
+      await q5.render(1, c5);
+      const d5 = c5.getContext("2d").getImageData(0, 0, 200, 150).data;
+      let far = 0;
+      let far2 = "";
+      for (let i = 0; i < want2.length; i++) {
+        const x = 10 + (i % 4) * 45 + 20;
+        const yPdf = 100 - Math.floor(i / 4) * 45 + 20;
+        const at5 = ((150 - yPdf) * 200 + x) * 4;
+        for (let k = 0; k < 3; k++) {
+          const dv = Math.abs(d5[at5 + k] - want2[i][k]);
+          if (dv > far) { far = dv; far2 = `${i}번 ${d5[at5]},${d5[at5+1]},${d5[at5+2]} vs ${want2[i]}`; }
+        }
+      }
+      t("ICC 색이 littleCMS 와 맞는다", far <= 5, `최대차 ${far} ${far2}`);
+      q5.close();
     }
   }
 }
