@@ -18,6 +18,8 @@
  *       Math.round|abs|min|max|floor|ceil · Number() · parseFloat()
  */
 
+import { runJs, JsStop } from "./jsmini.js";
+
 /** 칸 하나의 지금 값을 찾아 주는 이. 이름은 양식이 쓰는 그 이름이다. */
 export type ValueOf = (name: string) => string;
 
@@ -202,6 +204,79 @@ function show(v: number | string, dec?: number): string {
  * `format` 을 함께 주면 AFNumber_Format 의 자릿수만 본다(돈 기호·구분점은
  * 화면이 붙일 몫이라 값에는 넣지 않는다 — 그 값이 다시 계산식에 들어간다).
  */
+/**
+ * 좁은 읽기로 못 읽은 계산식을 해석기로 돌린다.
+ *
+ * 문서가 준 코드를 host 자바스크립트로 넘기지 않는다 — jsmini 가 한 마디씩
+ * 해석한다. 그래서 전역도, fetch 도, 프로토타입을 타고 host 로 빠질 길도
+ * 없다. 걸음과 시간에 한도가 있어 while(1) 도 멎는다.
+ *
+ * 양식이 실제로 쓰는 것들을 건넨다 — event, this.getField(), AF* 도우미,
+ * app.alert(말만 모은다), util.printf.
+ */
+function runWithJs(calc: string, valueOf: ValueOf, dec?: number): string | null {
+  const fields = new Map<string, { value: unknown }>();
+  const field = (name: string) => {
+    let f = fields.get(name);
+    if (!f) { f = { value: valueOf(name) }; fields.set(name, f); }
+    return f;
+  };
+  const ev = { value: "" as unknown, target: null as unknown, willCommit: true, rc: true };
+  const said: string[] = [];
+  const numOf = (v: unknown) => {
+    const n = parseFloat(String(v ?? "").replace(/[^0-9.\-]/g, ""));
+    return isFinite(n) ? n : 0;
+  };
+  const box = {
+    event: ev,
+    this: {
+      getField: (n: unknown) => field(String(n)),
+      resetForm: () => undefined,
+      calculateNow: () => undefined,
+      getPrintParams: () => ({}),
+    },
+    app: {
+      alert: (m: unknown) => { said.push(String(m)); return 1; },
+      beep: () => undefined,
+    },
+    util: {
+      printf: (fmt: unknown, ...a: unknown[]) => {
+        let i = 0;
+        return String(fmt).replace(/%[0-9.]*[dfs]/g, () => String(a[i++] ?? ""));
+      },
+      printd: (_f: unknown, d: unknown) => String(d ?? ""),
+    },
+    AFNumber_Format: (d: unknown) => { ev.value = numOf(ev.value).toFixed(numOf(d)); },
+    AFPercent_Format: (d: unknown) => { ev.value = numOf(ev.value).toFixed(numOf(d)); },
+    AFDate_FormatEx: () => undefined,
+    AFSpecial_Format: () => undefined,
+    AFMakeNumber: (v: unknown) => numOf(v),
+    AFSimple_Calculate: (how: unknown, names: unknown) => {
+      const list = Array.isArray(names) ? names.map(String) : String(names).split(",");
+      const vals = list.map((n) => numOf(valueOf(n.trim())));
+      if (vals.length === 0) { ev.value = ""; return; }
+      const k = String(how).toUpperCase();
+      const v = k === "SUM" ? vals.reduce((a, b) => a + b, 0)
+        : k === "AVG" ? vals.reduce((a, b) => a + b, 0) / vals.length
+        : k === "PRD" ? vals.reduce((a, b) => a * b, 1)
+        : k === "MIN" ? Math.min(...vals)
+        : k === "MAX" ? Math.max(...vals) : NaN;
+      ev.value = Number.isNaN(v) ? "" : String(v);
+    },
+  };
+  try {
+    runJs(calc, box as Record<string, unknown>);
+  } catch (e) {
+    if (e instanceof JsStop) return null;
+    return null;
+  }
+  if (ev.value === "" || ev.value === undefined || ev.value === null) return null;
+  const out = String(ev.value);
+  if (dec === undefined) return out;
+  const n = parseFloat(out.replace(/[^0-9.\-]/g, ""));
+  return isFinite(n) ? n.toFixed(dec) : out;
+}
+
 export function runCalc(calc: string, valueOf: ValueOf, format = ""): string | null {
   let dec: number | undefined;
   if (format) {
@@ -242,9 +317,10 @@ export function runCalc(calc: string, valueOf: ValueOf, format = ""): string | n
       const v = r.expr();
       return show(v, dec);
     }
-    return null;
+    // 좁은 읽기로는 못 읽었다 — 해석기에 넘긴다
+    return runWithJs(calc, valueOf, dec);
   } catch (e) {
-    if (e instanceof Unsupported) return null;
+    if (e instanceof Unsupported) return runWithJs(calc, valueOf, dec);
     return null;
   }
 }

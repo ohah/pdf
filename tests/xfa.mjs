@@ -74,5 +74,32 @@ d.close();
   ok('돌리지 않는다', formCalc('globalThis.__x = 1', at) === null && globalThis.__x === undefined);
 }
 
+// ── 스크립트가 서식을 바꾸는 XFA ─────────────────────────────────────
+//
+// 값만 정하는 것이 아니라 칸을 감추고 표의 줄 수를 바꾼다. 문서가 준
+// 코드를 host 로 넘기지 않고 우리 해석기가 돌린다.
+{
+  const d3 = await PDFDocument.open(new URL('./fixtures/xfa-script.pdf', import.meta.url).pathname);
+  const f3 = readXfa(d3.xfaXml);
+  const all3 = f3.pages.flatMap((p) => p.boxes);
+  ok('스크립트가 칸을 감춘다', f3.hidden === 1 && !all3.some((b) => b.text.includes('감춰야')),
+    [f3.hidden, all3.filter((b) => b.text.includes('감춰야')).length]);
+  ok('스크립트가 줄 수를 바꾼다', all3.filter((b) => b.name === 'nm').length === 7,
+    all3.filter((b) => b.name === 'nm').length);
+  ok('스크립트가 값을 셈한다', all3.find((b) => b.name === 'vat')?.text === '100',
+    all3.find((b) => b.name === 'vat')?.text);
+  ok('띄우려 한 말을 모은다', f3.said.join('|') === '숨겼습니다', f3.said);
+  ok('못 읽은 스크립트 없음', f3.unreadScripts === 0, f3.unreadScripts);
+  d3.close();
+}
+// 되풀이하는 줄이 뭉개지지 않는다 — 스크립트가 쓴 이름만 얹는다
+{
+  const d4 = await PDFDocument.open(new URL('./fixtures/xfa-dyn.pdf', import.meta.url).pathname);
+  const f4 = readXfa(d4.xfaXml);
+  const nm = f4.pages.flatMap((p) => p.boxes).filter((b) => b.name === 'nm').slice(0, 3).map((b) => b.text);
+  ok('줄마다 제 값 그대로', nm.join('|') === '품목 1|품목 2|품목 3', nm);
+  d4.close();
+}
+
 console.log(fails === 0 ? 'XFA 통과' : `XFA 실패 ${fails}개`);
 process.exit(fails === 0 ? 0 : 1);

@@ -235,6 +235,19 @@ for (const x of ["", "<template>", "<template><subform x=\"1in\"><field/></subfo
                  "<".repeat(2000), "<template>" + "<subform>".repeat(300) + "</template>"]) {
   await bounded("readXfa(이상한 XML)", () => lib.readXfa(x));
 }
+hit("runJs");
+// 문서가 준 코드가 host 로 새면 자국이 남는다
+globalThis.__jsPwn = false;
+for (const src of ['out.v = 1;', 'while(1){}', 'globalThis.__jsPwn = true;',
+                   '[].constructor("globalThis.__jsPwn = true")();',
+                   '"".constructor("globalThis.__jsPwn = true")();',
+                   'this.constructor.constructor("globalThis.__jsPwn = true")();',
+                   'out.__proto__.x = 1;', 'x'.repeat(9000), '((((((((((1))))))))))',
+                   'function f(){return f()} f();', '', ';;;;', 'var a = {', 'out.v = `x`;']) {
+  await bounded("runJs(고약한 것)", () => lib.runJs(src, { out: {} }, { steps: 5000, ms: 50 }));
+}
+if (globalThis.__jsPwn) note("runJs", "문서가 준 코드가 host 로 샜다");
+hit("JsStop");
 hit("formCalc");
 for (const src of ['Sum(a,b)', 'a*b', 'xfa.host.gotoURL("//x")', '', 'Sum(' + '"a",'.repeat(300) + '"b")',
                    'a'.repeat(5000), '((((1))))', 'Count(a[*])', '1/0']) {

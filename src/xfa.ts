@@ -44,10 +44,17 @@ export type XfaForm = {
   calculated: number;
   /** 못 읽은 스크립트 수 — 그 칸은 값이 비어 있을 수 있다 */
   unreadScripts: number;
+  /** 스크립트가 감춘 마디 수 (presence = "hidden") */
+  hidden: number;
+  /** 스크립트가 줄 수를 바꾼 마디 수 (instanceManager) */
+  instanced: number;
+  /** 스크립트가 띄우려 한 말 (xfa.host.messageBox) */
+  said: string[];
 };
 
 /** "12.7mm" · "1in" · "36pt" · "0.5cm" · "10px" 를 pt 로 */
 import { runCalc, type ValueOf } from "./formjs.js";
+import { runJs } from "./jsmini.js";
 
 export function toPt(v: string | undefined, dflt = 0): number {
   if (!v) return dflt;
@@ -169,13 +176,41 @@ function datasetValue(ds: Node | undefined, name: string): string {
  * 쪽이 여럿이면 <pageArea> 마다 하나씩 준다. 자리를 못 정한 마디는 세어서
  * `skipped` 로 알린다 — 그 수가 크면 화면이 "제대로 못 그렸다" 고 말해야 한다.
  */
+/**
+ * 스크립트가 서식을 바꾼 것 — 다시 훑을 때 그대로 반영한다.
+ *
+ * XFA 스크립트는 값만 정하지 않는다. 칸을 감추고(presence) 표의 줄 수를
+ * 바꾼다(instanceManager). 그래서 한 번 훑고, 스크립트를 돌리고, 바뀐 것이
+ * 있으면 그 값을 얹어 한 번 더 훑는다.
+ */
+type Twist = { hide: Set<string>; count: Map<string, number> };
+
 export function readXfa(xml: string): XfaForm {
+  const first = layoutXfa(xml, { hide: new Set(), count: new Map() });
+  const tw = runXfaScripts(xml, first);
+  if (tw.hide.size === 0 && tw.count.size === 0) {
+    applyValues(first, tw.values);
+    first.said = tw.said2;
+    return first;
+  }
+  // 서식이 바뀌었다 — 그 값을 얹어 다시 훑고 스크립트를 한 번 더 돌린다
+  const again = layoutXfa(xml, tw);
+  const tw2 = runXfaScripts(xml, again);
+  applyValues(again, tw2.values);
+  again.hidden = tw.hide.size;
+  again.instanced = tw.count.size;
+  again.said = tw2.said2;
+  return again;
+}
+
+function layoutXfa(xml: string, twist: Twist): XfaForm {
   const root = parseXml(xml);
   const template = findDeep(root, "template");
   const datasets = findDeep(root, "datasets");
   const out: XfaForm = {
     pages: [], skipped: 0, dynamic: false,
     flowed: 0, repeated: 0, calculated: 0, unreadScripts: 0,
+    hidden: 0, instanced: 0, said: [],
   };
   if (!template) return out;
 
@@ -208,9 +243,10 @@ export function readXfa(xml: string): XfaForm {
     cur.boxes.push({ ...b, y: b.y - carry });
   };
 
-  /** 보이지 않기로 한 마디인가 */
+  /** 보이지 않기로 한 마디인가 — 스크립트가 감춘 것도 여기서 걸린다 */
   const gone = (k: Node) =>
-    k.attr.presence === "hidden" || k.attr.presence === "invisible";
+    k.attr.presence === "hidden" || k.attr.presence === "invisible" ||
+    (!!k.attr.name && twist.hide.has(k.attr.name));
 
   /** 자료에서 이 이름의 마디들을 찾는다 — 되풀이할 만큼 */
   const records = (name: string): Node[] => {
@@ -258,7 +294,11 @@ export function readXfa(xml: string): XfaForm {
         const oc = find(k, "occur");
         const many = oc && (oc.attr.max === "-1" || Number(oc.attr.max ?? 1) > 1);
         const recs = many ? records(k.attr.name ?? "") : [];
-        const times = recs.length > 1 ? recs.length : 1;
+        // 스크립트가 줄 수를 정했으면 그것을 따른다
+        const forced = twist.count.get(k.attr.name ?? "");
+        const times = forced !== undefined
+          ? Math.max(0, Math.min(2000, forced))
+          : recs.length > 1 ? recs.length : 1;
         if (times > 1) out.repeated += times - 1;
         for (let t = 0; t < times; t++) {
           const kh = toPt(k.attr.h, 0);
@@ -348,10 +388,11 @@ export function readXfa(xml: string): XfaForm {
             const src = (sc?.text ?? "").trim();
             if (!src) continue;
             const ct = sc?.attr.contentType ?? "";
-            jobs.push({
-              name: k.attr.name, src,
-              kind: /formcalc/i.test(ct) ? "fc" : "js",
-            });
+            const fc = /formcalc/i.test(ct);
+            // XFA 꼴로 쓴 자바스크립트(this.rawValue·presence·instanceManager)는
+            // 뒤 단계가 맡는다 — 여기서 못 읽었다고 세면 두 번 세는 셈이다
+            if (!fc && /this\.(rawValue|value)|presence|instanceManager|messageBox|xfa\./.test(src)) continue;
+            jobs.push({ name: k.attr.name, src, kind: fc ? "fc" : "js" });
           }
         }
         hunt(k);
@@ -370,6 +411,134 @@ export function readXfa(xml: string): XfaForm {
     }
   }
   return out;
+}
+
+/**
+ * 서식을 바꾸는 스크립트를 돌린다.
+ *
+ * 값만 정하는 것은 위에서 이미 셈했다. 여기서는 **칸을 감추고 줄 수를
+ * 바꾸는** 것을 본다 — 동적 XFA 가 실제로 하는 일이다.
+ *
+ *   this.presence = "hidden"
+ *   item.instanceManager.setInstances(3)
+ *   xfa.host.messageBox("확인하세요")
+ *
+ * 문서가 준 코드를 host 자바스크립트로 넘기지 않는다. jsmini 가 한 마디씩
+ * 해석하고, 걸음·시간에 한도가 있다. 코드가 볼 수 있는 이름은 우리가
+ * 건넨 것뿐이라 fetch·document·globalThis 는 이름조차 없다.
+ */
+function runXfaScripts(
+  xml: string, form: XfaForm,
+): Twist & { said2: string[]; values: Map<string, string> } {
+  const hide = new Set<string>();
+  const count = new Map<string, number>();
+  const said: string[] = [];
+  const root = parseXml(xml);
+  const template = findDeep(root, "template");
+  if (!template) return { hide, count, said2: said, values: new Map() };
+
+  // 이름으로 찾을 수 있게 칸을 늘어놓는다
+  const at = new Map<string, string>();
+  for (const pg of form.pages)
+    for (const b of pg.boxes) if (b.name && b.text && !at.has(b.name)) at.set(b.name, b.text);
+
+  /**
+   * 스크립트가 실제로 값을 쓴 이름.
+   *
+   * 쓴 것만 쪽에 얹는다. 안 그러면 되풀이하는 줄(같은 이름이 여럿)이
+   * 마지막 값 하나로 뭉개진다 — 표의 모든 줄이 "품목 1" 이 됐다.
+   */
+  const touched = new Set<string>();
+
+  /** 스크립트가 만지는 마디 하나 */
+  const nodeOf = (name: string) => ({
+    name,
+    get rawValue() { return at.get(name) ?? ""; },
+    set rawValue(v: unknown) { at.set(name, String(v)); touched.add(name); },
+    get value() { return at.get(name) ?? ""; },
+    set value(v: unknown) { at.set(name, String(v)); touched.add(name); },
+    get presence() { return hide.has(name) ? "hidden" : "visible"; },
+    set presence(v: unknown) {
+      if (String(v) === "hidden" || String(v) === "invisible") hide.add(name);
+      else hide.delete(name);
+    },
+    instanceManager: {
+      setInstances: (n: unknown) => { count.set(name, Math.max(0, Number(n) || 0)); },
+      addInstance: () => { count.set(name, (count.get(name) ?? 1) + 1); },
+      removeInstance: () => { count.set(name, Math.max(0, (count.get(name) ?? 1) - 1)); },
+      get count() { return count.get(name) ?? 1; },
+    },
+  });
+
+  const named: Record<string, unknown> = {};
+  const seen = new Set<string>();
+  const collect = (n: Node) => {
+    for (const k of n.kids) {
+      const nm = k.attr.name;
+      if (nm && !seen.has(nm) && (k.tag === "field" || k.tag === "subform" || k.tag === "draw")) {
+        seen.add(nm);
+        named[nm] = nodeOf(nm);
+      }
+      collect(k);
+    }
+  };
+  collect(template);
+
+  const xfa = {
+    host: {
+      messageBox: (m: unknown) => { said.push(String(m)); return 0; },
+      setFocus: () => undefined,
+      name: "@ohah/pdf",
+    },
+    resolveNode: (path: unknown) => {
+      const nm = String(path).split(".").pop() ?? "";
+      return named[nm];
+    },
+  };
+
+  // 서식을 바꾸는 스크립트만 돌린다 — 값만 정하는 것은 이미 셈했다
+  const runOne = (owner: string, src: string) => {
+    const box: Record<string, unknown> = { ...named, xfa, this: named[owner] ?? nodeOf(owner) };
+    try {
+      runJs(src, box);
+    } catch {
+      form.unreadScripts++;
+    }
+  };
+  const hunt = (n: Node) => {
+    for (const k of n.kids) {
+      const nm = k.attr.name ?? "";
+      for (const ev of k.kids) {
+        if (ev.tag !== "event") continue;
+        const act = ev.attr.activity ?? "";
+        if (act !== "initialize" && act !== "calculate" && act !== "ready") continue;
+        const sc = find(ev, "script");
+        const src = (sc?.text ?? "").trim();
+        if (!src) continue;
+        // FormCalc 는 위에서 셈했다. 여기는 자바스크립트만.
+        if (/formcalc/i.test(sc?.attr.contentType ?? "")) continue;
+        // XFA 꼴로 쓴 것만 여기서 돌린다 (event.value 꼴은 앞에서 셈했다)
+        if (!/this\.(rawValue|value)|presence|instanceManager|messageBox|xfa\./.test(src)) continue;
+        runOne(nm, src);
+      }
+      hunt(k);
+    }
+  };
+  hunt(template);
+  // 스크립트가 **고친** 값만 돌려준다
+  const values = new Map<string, string>();
+  for (const k of touched) values.set(k, at.get(k) ?? "");
+  return { hide, count, said2: said, values };
+}
+
+/** 스크립트가 정한 값을 쪽에 얹는다. */
+function applyValues(form: XfaForm, values: Map<string, string>) {
+  for (const pg of form.pages)
+    for (const b of pg.boxes) {
+      if (!b.name) continue;
+      const v = values.get(b.name);
+      if (v !== undefined && v !== b.text) { b.text = v; form.calculated++; }
+    }
 }
 
 /**

@@ -23,6 +23,7 @@ export type { TextRun, Stencil } from "./draw.js";
 export type { SigCheck } from "./sig.js";
 export { checkSignature } from "./sig.js";
 export { runCalc, recalculate, type CalcField, type ValueOf } from "./formjs.js";
+export { runJs, JsStop, type Sandbox, type RunOpts } from "./jsmini.js";
 export { readXfa, drawXfa, toPt, formCalc, type XfaForm, type XfaPage, type XfaBox } from "./xfa.js";
 export { toLines, drawOps } from "./draw.js";
 export { renderTextLayer, type TextLayer, type TextLayerOpts } from "./textlayer.js";

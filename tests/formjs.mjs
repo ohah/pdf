@@ -32,9 +32,17 @@ const again = recalculate(
 ok('수량을 고치면 따라 바뀐다', again.values.amount === '15000.00' && again.values.total === '15000',
   [again.values.amount, again.values.total]);
 
-// 못 읽는 문법은 조용히 건너뛴다 — 그 칸은 그대로 둔다
-ok('모르는 문법은 null', runCalc('app.alert("hi"); event.value = 1;', () => '') === null);
-ok('창구를 뒤지려는 것도 null', runCalc('event.value = globalThis.fetch("//x")', () => '') === null);
+// 좁은 읽기로 못 읽는 것은 해석기가 맡는다 — 예전에는 여기서 포기했다
+ok('app.alert 이 섞여도 셈한다', runCalc('app.alert("hi"); event.value = 1;', () => '') === '1');
+ok('반복문도 셈한다',
+  runCalc('var t = 0; for (var i = 1; i <= 4; i++) t += i; event.value = t;', () => '') === '10');
+ok('if 도 셈한다',
+  runCalc('if (2 > 1) { event.value = "큼"; } else { event.value = "작음"; }', () => '') === '큼');
+// 그래도 밖으로는 못 나간다
+ok('창구를 뒤지려 하면 null', runCalc('event.value = globalThis.fetch("//x")', () => '') === null);
+ok('host 함수를 만들려 해도 null',
+  runCalc('event.value = [].constructor("return 1")();', () => '') === null);
+ok('무한 반복은 null', runCalc('while (1) {} event.value = 1;', () => '') === null);
 ok('식은 셈한다', runCalc('event.value = (2 + 3) * 4 - 1;', () => '') === '19');
 ok('Math 도', runCalc('event.value = Math.round(3.6);', () => '') === '4');
 ok('꾸민 값도 숫자로', runCalc('event.value = this.getField("a").value * 2;',
