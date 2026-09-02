@@ -3,10 +3,17 @@
 // 보통 JPEG 은 브라우저에 그냥 넘긴다 — 빠르고 하드웨어가 거들기도 한다.
 // 그런데 **CMYK JPEG 은 브라우저가 못 푼다.** Acrobat 으로 만든 인쇄용
 // 문서에 흔한데, createImageBitmap 이 조용히 실패해 그림이 통째로 사라진다.
-// 그래서 성분이 넷인 것만 여기서 직접 푼다.
+// 그래서 성분이 넷인 것은 여기서 직접 푼다. Node 처럼 브라우저가 없는
+// 자리에서는 성분이 하나·셋인 것도 여기서 푼다.
 //
-// 규격은 ITU-T T.81 이다. 베이스라인(SOF0·SOF1)만 다룬다 — 프로그레시브
-// CMYK 는 만나기 어렵다.
+// 규격은 ITU-T T.81 이다. 베이스라인(SOF0·SOF1)과 프로그레시브(SOF2)를
+// 다 푼다.
+//
+// 프로그레시브는 한 블록을 한 번에 담지 않는다. 먼저 모든 블록의 DC 를
+// 성기게 훑고, 그다음 훑기(scan)마다 AC 계수를 띠(Ss~Se)로 나눠 담거나
+// 이미 담은 값의 아랫자리를 한 비트씩 채운다. 그래서 블록 하나를 만나는
+// 즉시 화소로 펼 수가 없다 — 훑기를 다 모은 뒤에야 편다. 흐린 그림이
+// 점점 또렷해지는 그 방식이다.
 const std = @import("std");
 
 pub const Info = struct {
@@ -205,7 +212,7 @@ pub fn decodeCmyk(d: []const u8, dst: []u8, scratch: []u8, invert: bool) u32 {
 ///
 /// 브라우저에서는 이 일을 브라우저가 해 주지만, Node 에는 해 줄 사람이
 /// 없다. 그래서 우리가 푼다 — 그러지 않으면 스캔 문서가 흰 종이로 나온다.
-/// 프로그레시브 JPEG 은 아직 못 푼다(0xC2 에서 0 을 준다).
+/// 베이스라인(SOF0·SOF1)과 프로그레시브(SOF2)를 다 푼다.
 pub fn decodeAny(d: []const u8, dst: []u8, scratch: []u8) u32 {
     return decode(d, dst, scratch, false);
 }
@@ -221,6 +228,17 @@ fn decode(d: []const u8, dst: []u8, scratch: []u8, invert: bool) u32 {
     var ri: u32 = 0;
     var transform: u8 = 0;
     var have_transform = false;
+    // 프로그레시브에 쓰는 것들
+    var prog = false;
+    var setup = false;
+    var coef_n: usize = 0;
+    var coff: [4]usize = .{ 0, 0, 0, 0 };
+    var bw: [4]u32 = .{ 0, 0, 0, 0 };
+    var bh: [4]u32 = .{ 0, 0, 0, 0 };
+    var mcux: u32 = 0;
+    var mcuy: u32 = 0;
+    var hmax: u8 = 1;
+    var vmax: u8 = 1;
 
     var p: usize = 2;
     while (p + 4 <= d.len) {
@@ -270,8 +288,9 @@ fn decode(d: []const u8, dst: []u8, scratch: []u8, invert: bool) u32 {
                     q += 16 + total;
                 }
             },
-            0xC0, 0xC1 => { // 베이스라인 머리말
+            0xC0, 0xC1, 0xC2 => { // 머리말 (베이스라인·프로그레시브)
                 if (seg.len < 6) return 0;
+                prog = m == 0xC2;
                 h = (@as(u32, seg[1]) << 8) | seg[2];
                 w = (@as(u32, seg[3]) << 8) | seg[4];
                 ncomp = seg[5];
@@ -287,7 +306,6 @@ fn decode(d: []const u8, dst: []u8, scratch: []u8, invert: bool) u32 {
                     comps[i].tq = seg[at + 2] & 3;
                 }
             },
-            0xC2 => return 0, // 프로그레시브는 다루지 않는다
             0xDD => { // 재시작 간격
                 if (seg.len >= 2) ri = (@as(u32, seg[0]) << 8) | seg[1];
             },
@@ -297,10 +315,11 @@ fn decode(d: []const u8, dst: []u8, scratch: []u8, invert: bool) u32 {
                     have_transform = true;
                 }
             },
-            0xDA => { // 스캔 시작
+            0xDA => { // 훑기 시작
                 if (seg.len < 1) return 0;
                 const ns = seg[0];
-                if (ns != ncomp) return 0;
+                if (ns == 0 or ns > ncomp) return 0;
+                var order: [4]u8 = .{ 0, 0, 0, 0 };
                 var i: u8 = 0;
                 while (i < ns) : (i += 1) {
                     const at = 1 + @as(usize, i) * 2;
@@ -311,17 +330,291 @@ fn decode(d: []const u8, dst: []u8, scratch: []u8, invert: bool) u32 {
                         if (comps[k].id == cid) {
                             comps[k].td = seg[at + 1] >> 4;
                             comps[k].ta = seg[at + 1] & 15;
+                            order[i] = k;
                         }
                     }
                 }
-                return scan(d, p + 2 + len, w, h, &comps, ncomp, &qt, &hdc, &hac, ri,
-                    invert, transform, have_transform, dst, scratch);
+                if (!prog) {
+                    if (ns != ncomp) return 0;
+                    return scan(d, p + 2 + len, w, h, &comps, ncomp, &qt, &hdc, &hac, ri,
+                        invert, transform, have_transform, dst, scratch);
+                }
+                // 프로그레시브 — 훑기마다 계수에 담아 두고 끝에 한 번에 편다
+                const at2 = 1 + @as(usize, ns) * 2;
+                if (at2 + 2 >= seg.len) return 0;
+                const ss = seg[at2];
+                const se = @min(@as(u8, 63), seg[at2 + 1]);
+                const ah: u5 = @intCast(seg[at2 + 2] >> 4);
+                const al: u5 = @intCast(seg[at2 + 2] & 15);
+                if (!setup) {
+                    var hmax0: u8 = 1;
+                    var vmax0: u8 = 1;
+                    var q: u8 = 0;
+                    while (q < ncomp) : (q += 1) {
+                        hmax0 = @max(hmax0, comps[q].hs);
+                        vmax0 = @max(vmax0, comps[q].vs);
+                    }
+                    mcux = (w + @as(u32, hmax0) * 8 - 1) / (@as(u32, hmax0) * 8);
+                    mcuy = (h + @as(u32, vmax0) * 8 - 1) / (@as(u32, vmax0) * 8);
+                    var need: usize = 0;
+                    q = 0;
+                    while (q < ncomp) : (q += 1) {
+                        comps[q].w = (w * comps[q].hs + hmax0 - 1) / hmax0;
+                        comps[q].h = (h * comps[q].vs + vmax0 - 1) / vmax0;
+                        bw[q] = mcux * comps[q].hs;
+                        bh[q] = mcuy * comps[q].vs;
+                        coff[q] = need;
+                        need += @as(usize, bw[q]) * bh[q] * 64;
+                    }
+                    const bytes = need * 2;
+                    if (bytes + 64 > scratch.len) return 0;
+                    coef_n = need;
+                    @memset(scratch[0..bytes], 0);
+                    var used: usize = bytes;
+                    q = 0;
+                    while (q < ncomp) : (q += 1) {
+                        const npx = @as(usize, comps[q].w) * comps[q].h;
+                        if (used + npx > scratch.len) return 0;
+                        comps[q].off = used;
+                        used += npx;
+                    }
+                    hmax = hmax0;
+                    vmax = vmax0;
+                    setup = true;
+                }
+                const coef = @as([*]i16, @ptrCast(@alignCast(scratch.ptr)))[0..coef_n];
+                const after = scanProg(d, p + 2 + len, &comps, ncomp, &hdc, &hac, ri,
+                    ns, &order, ss, se, ah, al, coef, &coff, &bw, &bh, mcux, mcuy);
+                // 다음 표식까지 건너뛴다
+                p = after;
+                while (p + 1 < d.len and !(d[p] == 0xFF and d[p + 1] != 0 and
+                    !(d[p + 1] >= 0xD0 and d[p + 1] <= 0xD7))) p += 1;
+                continue;
             },
             else => {},
         }
         p += 2 + len;
     }
+    if (prog and setup) {
+        // 모은 계수를 블록마다 되돌려 화소로 편다
+        const coef = @as([*]i16, @ptrCast(@alignCast(scratch.ptr)))[0..coef_n];
+        var q: u8 = 0;
+        while (q < ncomp) : (q += 1) {
+            const c = &comps[q];
+            // 양자화표는 지그재그 차례로 들어 있다 — 제자리 차례로 옮긴다
+            var qnat: [64]u16 = undefined;
+            var k: usize = 0;
+            while (k < 64) : (k += 1) qnat[ZIGZAG[k]] = qt[c.tq][k];
+            const cbw = (c.w + 7) / 8;
+            const cbh = (c.h + 7) / 8;
+            var by: u32 = 0;
+            while (by < cbh) : (by += 1) {
+                var bx: u32 = 0;
+                while (bx < cbw) : (bx += 1) {
+                    const at = coff[q] + (@as(usize, by) * bw[q] + bx) * 64;
+                    if (at + 64 > coef.len) continue;
+                    var blk: [64]f32 = undefined;
+                    var px: [64]u8 = undefined;
+                    var z: usize = 0;
+                    while (z < 64) : (z += 1)
+                        blk[z] = @floatFromInt(@as(i32, coef[at + z]) * @as(i32, qnat[z]));
+                    idct(&blk, &px);
+                    var yy: u32 = 0;
+                    while (yy < 8) : (yy += 1) {
+                        const dy = by * 8 + yy;
+                        if (dy >= c.h) break;
+                        var xx: u32 = 0;
+                        while (xx < 8) : (xx += 1) {
+                            const dx = bx * 8 + xx;
+                            if (dx >= c.w) break;
+                            scratch[c.off + dy * c.w + dx] = px[yy * 8 + xx];
+                        }
+                    }
+                }
+            }
+        }
+        emit(w, h, &comps, ncomp, hmax, vmax, invert, transform, have_transform, dst, scratch);
+        return w * h;
+    }
     return 0;
+}
+
+/// 프로그레시브 훑기 하나를 계수에 담는다. 계수 자리는 scratch 앞쪽이다.
+///
+/// T.81 G.1.2 그대로다. 훑기마다 무엇을 담는지가 넷으로 갈린다.
+///   DC 첫 훑기   — 차이를 읽어 Al 만큼 올려 담는다
+///   DC 다듬기    — 비트 하나를 아랫자리에 붙인다
+///   AC 첫 훑기   — Ss~Se 띠를 담는다. 0 이 이어지면 EOBRUN 으로 건너뛴다
+///   AC 다듬기    — 이미 담은 값에 비트를 붙이고, 새로 생긴 값을 끼운다
+fn scanProg(
+    d: []const u8, start: usize, comps: *[4]Comp, ncomp: u8,
+    hdc: *[4]Huff, hac: *[4]Huff, ri: u32,
+    ns: u8, order: *const [4]u8, ss: u8, se: u8, ah: u5, al: u5,
+    coef: []i16, coff: *const [4]usize, bw: *const [4]u32, bh: *const [4]u32,
+    mcux: u32, mcuy: u32,
+) usize {
+    var bs = Bits{ .d = d, .p = start };
+    var eobrun: u32 = 0;
+    var i: u8 = 0;
+    while (i < ncomp) : (i += 1) comps[i].dc = 0;
+
+    const al4: u4 = @intCast(@min(al, 15));
+    const p1: i16 = @as(i16, 1) << al4;
+    const m1: i16 = -(@as(i16, 1) << al4);
+
+    // 블록 하나를 담는다
+    const Blk = struct {
+        fn one(
+            bsp: *Bits, c: *Comp, blk: []i16, hdc2: *[4]Huff, hac2: *[4]Huff,
+            ss2: u8, se2: u8, ah2: u5, al2: u5, eob: *u32, pp1: i16, mm1: i16,
+        ) void {
+            if (ss2 == 0) {
+                if (ah2 == 0) {
+                    const t = decodeHuff(bsp, &hdc2[c.td]);
+                    const diff = if (t == 0) 0 else extend(bsp.bits(@intCast(@min(t, 16))), @intCast(@min(t, 16)));
+                    c.dc += diff;
+                    blk[0] = @truncate(@as(i32, c.dc) << al2);
+                } else {
+                    if (bsp.bit() != 0) blk[0] |= pp1;
+                }
+                return;
+            }
+            if (ah2 == 0) {
+                // AC 첫 훑기
+                if (eob.* > 0) { eob.* -= 1; return; }
+                var k: u32 = ss2;
+                while (k <= se2) {
+                    const rs = decodeHuff(bsp, &hac2[c.ta]);
+                    const sz: u5 = @intCast(rs & 15);
+                    const r: u32 = rs >> 4;
+                    if (sz == 0) {
+                        if (r < 15) {
+                            eob.* = (@as(u32, 1) << @intCast(r)) - 1;
+                            if (r > 0) eob.* += bsp.bits(@intCast(r));
+                            return;
+                        }
+                        k += 16;
+                        continue;
+                    }
+                    k += r;
+                    if (k > 63) return;
+                    blk[ZIGZAG[k]] = @truncate(extend(bsp.bits(sz), sz) << al2);
+                    k += 1;
+                }
+                return;
+            }
+            // AC 다듬기 — 이미 담은 값에는 비트를 붙이고, 새 값은 끼운다
+            var k: u32 = ss2;
+            if (eob.* == 0) {
+                while (k <= se2) {
+                    const rs = decodeHuff(bsp, &hac2[c.ta]);
+                    const sz = rs & 15;
+                    var r: i32 = @intCast(rs >> 4);
+                    var val: i16 = 0;
+                    if (sz == 0) {
+                        if (r < 15) {
+                            eob.* = (@as(u32, 1) << @intCast(r));
+                            if (r > 0) eob.* += bsp.bits(@intCast(r));
+                            break;
+                        }
+                    } else {
+                        val = if (bsp.bit() != 0) pp1 else mm1;
+                    }
+                    while (k <= se2) {
+                        const z = ZIGZAG[k];
+                        if (blk[z] != 0) {
+                            if (bsp.bit() != 0) {
+                                if ((blk[z] & pp1) == 0) {
+                                    blk[z] += if (blk[z] >= 0) pp1 else mm1;
+                                }
+                            }
+                        } else {
+                            if (r == 0) {
+                                if (val != 0) blk[z] = val;
+                                k += 1;
+                                break;
+                            }
+                            r -= 1;
+                        }
+                        k += 1;
+                    }
+                }
+            }
+            if (eob.* > 0) {
+                // 남은 자리는 비트만 붙인다
+                while (k <= se2) : (k += 1) {
+                    const z = ZIGZAG[k];
+                    if (blk[z] == 0) continue;
+                    if (bsp.bit() != 0 and (blk[z] & pp1) == 0) {
+                        blk[z] += if (blk[z] >= 0) pp1 else mm1;
+                    }
+                }
+                eob.* -= 1;
+            }
+        }
+    };
+
+    var done: u32 = 0;
+    if (ns == 1) {
+        // 성분 하나만 담는 훑기 — 그 성분의 블록을 줄줄이 훑는다
+        const ci = order[0];
+        const c = &comps[ci];
+        const cbw = (c.w + 7) / 8;
+        const cbh = (c.h + 7) / 8;
+        var by: u32 = 0;
+        while (by < cbh) : (by += 1) {
+            var bx: u32 = 0;
+            while (bx < cbw) : (bx += 1) {
+                const at = coff[ci] + (@as(usize, by) * bw[ci] + bx) * 64;
+                if (at + 64 > coef.len) return bs.p;
+                Blk.one(&bs, c, coef[at .. at + 64], hdc, hac, ss, se, ah, al, &eobrun, p1, m1);
+                done += 1;
+                if (ri > 0 and done % ri == 0) {
+                    bs.reset();
+                    eobrun = 0;
+                    var q: u8 = 0;
+                    while (q < ncomp) : (q += 1) comps[q].dc = 0;
+                    // 재시작 표식을 건너뛴다
+                    while (bs.p + 1 < d.len and !(d[bs.p] == 0xFF and d[bs.p + 1] >= 0xD0 and d[bs.p + 1] <= 0xD7)) bs.p += 1;
+                    if (bs.p + 1 < d.len) bs.p += 2;
+                }
+            }
+        }
+    } else {
+        var my: u32 = 0;
+        while (my < mcuy) : (my += 1) {
+            var mx: u32 = 0;
+            while (mx < mcux) : (mx += 1) {
+                var q: u8 = 0;
+                while (q < ns) : (q += 1) {
+                    const ci = order[q];
+                    const c = &comps[ci];
+                    var vy: u8 = 0;
+                    while (vy < c.vs) : (vy += 1) {
+                        var vx: u8 = 0;
+                        while (vx < c.hs) : (vx += 1) {
+                            const bx = mx * c.hs + vx;
+                            const by = my * c.vs + vy;
+                            if (bx >= bw[ci] or by >= bh[ci]) continue;
+                            const at = coff[ci] + (@as(usize, by) * bw[ci] + bx) * 64;
+                            if (at + 64 > coef.len) return bs.p;
+                            Blk.one(&bs, c, coef[at .. at + 64], hdc, hac, ss, se, ah, al, &eobrun, p1, m1);
+                        }
+                    }
+                }
+                done += 1;
+                if (ri > 0 and done % ri == 0) {
+                    bs.reset();
+                    eobrun = 0;
+                    var q2: u8 = 0;
+                    while (q2 < ncomp) : (q2 += 1) comps[q2].dc = 0;
+                    while (bs.p + 1 < d.len and !(d[bs.p] == 0xFF and d[bs.p + 1] >= 0xD0 and d[bs.p + 1] <= 0xD7)) bs.p += 1;
+                    if (bs.p + 1 < d.len) bs.p += 2;
+                }
+            }
+        }
+    }
+    return bs.p;
 }
 
 fn scan(
@@ -420,7 +713,16 @@ fn scan(
         }
     }
 
-    // 성분을 합쳐 RGB 로 편다
+    emit(w, h, comps, ncomp, hmax, vmax, invert, transform, have_transform, dst, scratch);
+    return w * h;
+}
+
+/// 성분 판을 합쳐 RGB 로 편다. 베이스라인과 프로그레시브가 함께 쓴다.
+fn emit(
+    w: u32, h: u32, comps: *[4]Comp, ncomp: u8, hmax: u8, vmax: u8,
+    invert: bool, transform: u8, have_transform: bool, dst: []u8, scratch: []u8,
+) void {
+    var i: u8 = 0;
     var y: u32 = 0;
     while (y < h) : (y += 1) {
         var x: u32 = 0;
@@ -488,5 +790,4 @@ fn scan(
             dst[o + 2] = @intFromFloat(@max(0, @min(255, (255 - y2) * (255 - k2) / 255)));
         }
     }
-    return w * h;
 }

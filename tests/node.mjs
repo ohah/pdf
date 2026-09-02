@@ -193,6 +193,38 @@ const t = (name, cond, got) => {
       t(`Node 그림: ${name}`, ink >= least, `잉크 ${ink} (적어도 ${least})`);
       p2.close();
     }
+
+    // 프로그레시브 JPEG.
+    //
+    // 한 블록을 한 번에 담지 않고, 훑기를 나눠 DC 부터 성기게 담았다가
+    // 아랫자리를 채워 간다. 흐린 그림이 또렷해지는 그 방식이다. 예전에는
+    // 이걸 만나면 자리만 비웠다. 같은 그림을 베이스라인으로도 넣어 두고
+    // 둘이 **똑같이** 나오는지 본다 — 다르면 어느 한쪽이 틀린 것이다.
+    {
+      const shot = async (n) => {
+        const q = await PDFDocument.open(`${FX}/${n}.pdf`);
+        const c3 = createCanvas(160, 120);
+        await q.render(1, c3);
+        const d3 = c3.getContext("2d").getImageData(0, 0, 160, 120).data;
+        let ink = 0;
+        const sum = [0, 0, 0];
+        for (let i = 0; i < d3.length; i += 4) {
+          if (d3[i] < 240 || d3[i + 1] < 240 || d3[i + 2] < 240) ink++;
+          sum[0] += d3[i]; sum[1] += d3[i + 1]; sum[2] += d3[i + 2];
+        }
+        q.close();
+        return { ink, avg: sum.map((v) => Math.round(v / (d3.length / 4))).join(",") };
+      };
+      const base = await shot("jpg-base");
+      const prog = await shot("jpg-prog");
+      const gray = await shot("jpg-prog-gray");
+      t("프로그레시브: 베이스라인과 같다",
+        prog.ink === base.ink && prog.avg === base.avg,
+        `프로그레시브 ${prog.ink}/${prog.avg} · 베이스라인 ${base.ink}/${base.avg}`);
+      t("프로그레시브: 빈 그림이 아니다", prog.ink > 8000, prog.ink);
+      t("프로그레시브 흑백도", gray.ink > 8000 && /^(\d+),\1,\1$/.test(gray.avg),
+        `${gray.ink} ${gray.avg}`);
+    }
   }
 }
 

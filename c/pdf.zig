@@ -3499,12 +3499,14 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
             // 안 그러면 createImageBitmap 이 조용히 실패해 그림이 사라진다.
             const nfo = jpeg.probe(dst[0..got]);
             // 크기가 딕셔너리와 다르면 손대지 않는다 — 바깥이 /Width·/Height 로 읽는다
-            if (nfo.comps == 4 and nfo.w == w and nfo.h == h and !nfo.progressive) {
+            if (nfo.comps == 4 and nfo.w == w and nfo.h == h) {
                 const px = @as(usize, nfo.w) * nfo.h;
-                // 원본 뒤에 RGB 자리와 성분별 중간 자리를 잡는다
-                if (got + px * 3 + px * 5 <= room) {
+                // 원본 뒤에 RGB 자리와 성분별 중간 자리를 잡는다.
+                // 프로그레시브는 계수를 다 들고 있어야 해서 더 든다.
+                const extra: usize = if (nfo.progressive) px * 7 else px * 5;
+                if (got + px * 3 + extra <= room) {
                     const rgb = dst[got..][0 .. px * 3];
-                    const scratch = dst[got + px * 3 ..][0 .. px * 5];
+                    const scratch = dst[got + px * 3 ..][0..extra];
                     const n2 = jpeg.decodeCmyk(dst[0..got], rgb, scratch, flip);
                     if (n2 > 0) {
                         // 앞으로 당겨 놓는다 — 바깥은 dst 앞부터 읽는다
@@ -3762,7 +3764,7 @@ fn colorKeyMask(slot: u32, lo: []const u32, hi: []const u32) void {
 ///
 /// 브라우저에서는 브라우저가 JPEG 을 풀어 주므로 이 길로 오지 않는다.
 /// Node 처럼 풀어 줄 사람이 없는 자리에서만 부른다 — 그러지 않으면 스캔
-/// 문서가 흰 종이로 나온다. 프로그레시브 JPEG 은 아직 못 푼다.
+/// 문서가 흰 종이로 나온다. 베이스라인과 프로그레시브를 다 푼다.
 export fn jpegToRgb(i: u32) i32 {
     if (i >= img_n) return -1;
     const im = imgsBuf()[i];
@@ -3773,8 +3775,9 @@ export fn jpegToRgb(i: u32) i32 {
     if (!imgsRoom(img_n + 1)) return -1;
     const src = @as([*]const u8, @ptrFromInt(imgArea() + im.off))[0..im.len];
     const dst = @as([*]u8, @ptrFromInt(imgArea() + img_used))[0..need];
-    // 성분마다 부표본 화소를 담을 자리. 화소당 넉넉히 넷.
-    const tmp = bigScratch(px * 4 + 1024 * 1024) orelse return -1;
+    // 성분마다 부표본 화소를 담을 자리. 프로그레시브는 계수를 다 들고
+    // 있어야 해서 더 든다 — 화소당 여섯에 여유를 얹는다.
+    const tmp = bigScratch(px * 6 + 4 * 1024 * 1024) orelse return -1;
     const got = jpeg.decodeAny(src, dst, tmp);
     if (got == 0) return -1;
     const slot = img_n;
