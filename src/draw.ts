@@ -11,6 +11,7 @@ export const OP = {
   SAVE: 14, RESTORE: 15, TRANSFORM: 16, TEXT: 17, IMAGE: 18, TEXTCLIP: 29,
   SMASK_BEGIN: 30, SMASK_END: 31, SMASK_OFF: 32,
   GROUP_BEGIN: 33, GROUP_END: 34,
+  TILE_BEGIN: 35, TILE_END: 36,
   LINECAP: 19, LINEJOIN: 20, ALPHA: 21, INLINE: 22, SALPHA: 23, DASH: 24,
   MITER: 25, BLEND: 26, SHFILL: 27, SHCOLOR: 28,
 } as const;
@@ -308,6 +309,13 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
   type ClipLayer = { mask: CanvasRenderingContext2D; layer: CanvasRenderingContext2D;
     parent: CanvasRenderingContext2D; depth: number };
   const clips: ClipLayer[] = [];
+  /** 타일 무늬 한 판을 그리는 딴 판 */
+  type TileLayer = {
+    ctx: CanvasRenderingContext2D; parent: CanvasRenderingContext2D;
+    mat: [number, number, number, number, number, number];
+    xs: number; ys: number; sx: number; sy: number; depth: number;
+  };
+  const tiles: (TileLayer | null)[] = [];
   const like = () => {
     const c = scratch(canvas.width, canvas.height, canvas);
     return c ? c.getContext("2d") as CanvasRenderingContext2D | null : null;
@@ -422,6 +430,71 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
         carry(g, layer);
         clips.push({ mask: ctx, layer, parent: g, depth });
         g = layer;
+        break;
+      }
+      case OP.TILE_BEGIN: {
+        // 타일 무늬 — 한 판만 딴 캔버스에 그려 두고, 되풀이는 캔버스가 한다.
+        //
+        // 예전에는 엔진이 타일을 3600번까지 되풀이해 명령으로 냈다. 무늬
+        // 하나에 명령이 수만 개였고 그리는 시간도 그만큼 들었다.
+        const xs = Math.abs(ops[a]) || 1;
+        const ys = Math.abs(ops[a + 1]) || 1;
+        const m = [ops[a + 2], ops[a + 3], ops[a + 4], ops[a + 5], ops[a + 6], ops[a + 7]] as
+          [number, number, number, number, number, number];
+        // 지금 화면 밀도. 무늬 판을 그 밀도로 그려야 흐려지지 않는다.
+        const cur = g.getTransform();
+        const sx = Math.max(0.05, Math.hypot(cur.a, cur.b));
+        const sy = Math.max(0.05, Math.hypot(cur.c, cur.d));
+        // 너무 큰 판은 만들지 않는다 — 4096 화소를 넘으면 밀도를 낮춘다
+        let tw = Math.ceil(xs * sx);
+        let th = Math.ceil(ys * sy);
+        let k = 1;
+        if (tw > 4096 || th > 4096) {
+          k = Math.min(4096 / Math.max(1, tw), 4096 / Math.max(1, th));
+          tw = Math.max(1, Math.ceil(tw * k));
+          th = Math.max(1, Math.ceil(th * k));
+        }
+        const cv = scratch(Math.max(1, tw), Math.max(1, th), canvas);
+        const tg = cv ? (cv.getContext("2d") as CanvasRenderingContext2D | null) : null;
+        if (!tg) { tiles.push(null); break; }
+        tg.setTransform(sx * k, 0, 0, sy * k, 0, 0);
+        carry(g, tg);
+        tiles.push({ ctx: tg, parent: g, mat: m, xs, ys, sx: sx * k, sy: sy * k, depth });
+        g = tg;
+        break;
+      }
+      case OP.TILE_END: {
+        const top = tiles.pop();
+        if (!top) break;
+        g = top.parent;
+        let pat: CanvasPattern | null = null;
+        try {
+          pat = g.createPattern(top.ctx.canvas as CanvasImageSource, "repeat");
+        } catch {
+          pat = null;
+        }
+        g.save();
+        // 무늬 좌표계로 옮긴 뒤, 한 판이 XStep×YStep 을 덮도록 되돌린다
+        g.transform(top.mat[0], top.mat[1], top.mat[2], top.mat[3], top.mat[4], top.mat[5]);
+        g.scale(1 / top.sx, 1 / top.sy);
+        const bw = top.xs * top.sx;
+        const bh = top.ys * top.sy;
+        if (pat) {
+          g.fillStyle = pat;
+          // 오려 낸 자리 안만 칠해진다 — 넉넉히 덮는다
+          g.fillRect(-2e4, -2e4, 4e4, 4e4);
+        } else {
+          // 무늬를 못 만드는 자리(옛 웹뷰·일부 Node 캔버스)에서는 손으로 깐다.
+          // 되풀이 수는 오려 낸 자리에 맞춰 넉넉히 잡되 한도를 둔다.
+          const nx = Math.min(200, Math.ceil(4e4 / Math.max(1, bw)));
+          const ny = Math.min(200, Math.ceil(4e4 / Math.max(1, bh)));
+          for (let j = -1; j < ny; j++) {
+            for (let i2 = -1; i2 < nx; i2++) {
+              g.drawImage(top.ctx.canvas as CanvasImageSource, i2 * bw, j * bh);
+            }
+          }
+        }
+        g.restore();
         break;
       }
       case OP.GROUP_BEGIN: {

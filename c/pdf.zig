@@ -6545,41 +6545,27 @@ fn drawAnnots(b: []const u8, body: usize, end: usize) void {
 ///
 /// 경로로 자른 뒤 타일 내용을 XStep·YStep 만큼 옮겨 가며 되풀이한다.
 /// 무늬를 진짜로 깔지 않으면 단색으로 뭉개져 보인다.
+/// 타일 무늬를 지금 경로 안에 깐다.
+///
+/// 예전에는 타일 내용을 XStep·YStep 만큼 옮겨 가며 최대 60×60 = 3600 번
+/// 되풀이해 명령으로 냈다. 무늬 하나를 그리는 데 명령이 수만 개 나갔고,
+/// 그걸 캔버스가 한 번씩 다 실행했다.
+///
+/// 이제는 한 번만 낸다. 화면 쪽(draw.ts)이 그 한 판을 작은 캔버스에 그려
+/// createPattern 으로 되풀이한다 — 되풀이는 브라우저가 하는 일이다.
+/// pdf.js 도 같은 길을 간다.
 fn paintTile(idx: u32, depth: u32) void {
     const t = &tilesBuf()[idx];
     const xs = if (t.xstep > 0.01) t.xstep else 1;
     const ys = if (t.ystep > 0.01) t.ystep else 1;
+    const stream = subStream(t.obj, depth) orelse return;
     emitOp(14, &[_]f32{}); // save
     emitOp(10, &[_]f32{0}); // 지금 경로로 자른다
     emitOp(9, &[_]f32{}); // 경로 비우기
-    emitOp(16, &[_]f32{ t.mat[0], t.mat[1], t.mat[2], t.mat[3], t.mat[4], t.mat[5] });
-    // 칠할 경로가 차지한 자리에만 깐다. 쪽 전체를 깔면 헛일이 크다.
-    const bx0 = if (path_x0 < 1e29) path_x0 else 0;
-    const by0 = if (path_y0 < 1e29) path_y0 else 0;
-    const bx1 = if (path_x1 > -1e29) path_x1 else page_w;
-    const by1 = if (path_y1 > -1e29) path_y1 else page_h;
-    const tx0: i32 = @intFromFloat(@floor(bx0 / xs) - 1);
-    const ty0: i32 = @intFromFloat(@floor(by0 / ys) - 1);
-    const nx: u32 = @intFromFloat(@min(@as(f32, 60), @max(@as(f32, 1), (bx1 - bx0) / xs + 3)));
-    const ny: u32 = @intFromFloat(@min(@as(f32, 60), @max(@as(f32, 1), (by1 - by0) / ys + 3)));
-    const stream = subStream(t.obj, depth) orelse {
-        emitOp(15, &[_]f32{});
-        return;
-    };
-    var j: u32 = 0;
-    while (j < ny) : (j += 1) {
-        var i: u32 = 0;
-        while (i < nx) : (i += 1) {
-            emitOp(14, &[_]f32{});
-            emitOp(16, &[_]f32{ 1, 0, 0, 1,
-                @as(f32, @floatFromInt(tx0 + @as(i32, @intCast(i)))) * xs,
-                @as(f32, @floatFromInt(ty0 + @as(i32, @intCast(j)))) * ys });
-            runOps(stream, depth + 1);
-            emitOp(15, &[_]f32{});
-            if (opsRoomLow()) break;
-        }
-        if (opsRoomLow()) break;
-    }
+    // 한 판 크기와 무늬 좌표계를 알려 준다
+    emitOp(35, &[_]f32{ xs, ys, t.mat[0], t.mat[1], t.mat[2], t.mat[3], t.mat[4], t.mat[5] });
+    runOps(stream, depth + 1);
+    emitOp(36, &[_]f32{});
     emitOp(15, &[_]f32{}); // restore
 }
 

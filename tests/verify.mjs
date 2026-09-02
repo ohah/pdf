@@ -69,6 +69,20 @@ async function load(file, page = 0, feed = true, formOn = true) {
   return { ex, ops, counts, text, need, drew, slot, fld, pages: ex.pageCount() };
 }
 
+// --- 타일 무늬는 한 판만 낸다
+//
+// 예전에는 타일 내용을 XStep·YStep 만큼 옮겨 가며 최대 3600번 되풀이해
+// 명령으로 냈다. 무늬 하나에 명령 10,846개가 나갔다. 이제는 한 판만 내고
+// 되풀이는 캔버스가 한다(createPattern). 그림은 그대로다.
+{
+  const r = await load('tile.pdf');
+  let cnt = 0;
+  for (let i = 0; i < (r?.ops.length ?? 0);) { cnt++; i += 2 + r.ops[i + 1]; }
+  ok('타일: 명령이 한 줌', r && cnt < 200, cnt);
+  ok('타일: 시작과 끝이 짝', r && (r.counts[35] ?? 0) > 0 && r.counts[35] === r.counts[36],
+    r && [r.counts[35], r.counts[36]]);
+}
+
 // --- 세는 상한이 없다
 //
 // 예전에는 쪽당 그림 12개·글꼴 32개·명령 524288개로 못박혀 있었다.
@@ -466,7 +480,10 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
 // --- 새로 붙인 것들
 {
   const r = await load('tile.pdf');
-  ok('타일 무늬: 실제로 깔림', r && r.counts[6] > 100, r && r.counts[6]);
+  // 예전에는 "채우기가 100번 넘게 나오는가" 로 봤다 — 타일을 3600번
+  // 되풀이해 내던 때의 자국이다. 이제는 한 판만 내므로 무늬 마디로 본다.
+  ok('타일 무늬: 실제로 깔림', r && (r.counts[35] ?? 0) >= 1 && (r.counts[6] ?? 0) >= 1,
+    r && [r.counts[35], r.counts[6]]);
   ok('타일 무늬: 경로로 자름', r && r.counts[10] === 1, r && r.counts[10]);
 }
 {
