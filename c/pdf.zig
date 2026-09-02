@@ -12131,7 +12131,18 @@ fn attachFontFile(data: []const u8, is_cff: bool) void {
     const f = &fontsBuf()[font_n - 1];
     const room = font_cap - font_used;
     if (room < 4096) return;
-    const area = @as([*]u8, @ptrFromInt(fontArea() + font_used))[0..room];
+    // 필요한 만큼만 떼어 준다.
+    //
+    // 예전에는 남은 자리를 통째로 넘겼다. 그런데 글꼴을 다시 짜는 쪽은
+    // "받은 자리의 절반" 을 임시 자리로 쓴다(scratch = dst.len / 2). 8MB 를
+    // 통째로 주면 4MB 지점에 쓰고, OTTO 는 6MB 지점에도 쓴다 — 실제로는
+    // 100KB 도 안 쓰면서 8MB 전체를 만지게 되고, 그만큼이 진짜 메모리가
+    // 된다. 한글 문서 하나를 그리는 데 13MB 가 그렇게 나갔다.
+    //
+    // 원본의 네 배에 여유를 얹으면 넉넉하다 — 표를 다시 짜고 cmap 을
+    // 새로 붙여도 그 안에 든다.
+    const want = @min(room, @max(@as(usize, 256 * 1024), data.len * 4 + 128 * 1024));
+    const area = @as([*]u8, @ptrFromInt(fontArea() + font_used))[0..want];
     var n: u32 = 0;
     if (is_cff) {
         n = buildOtto(data, f, area);

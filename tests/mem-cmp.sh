@@ -20,7 +20,7 @@ one() { node --expose-gc tests/mem.mjs "$1" "$2" 2>/dev/null \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['$3'])"; }
 
 printf "회차마다 프로세스를 새로 띄워 %s번 재고 가운데 값. 캔버스 라이브러리 값은 양쪽이 같아 뺐다.\n\n" "$N"
-printf "%-18s %-7s %9s %9s %11s %9s %9s\n" "문서" "" "들이기" "열고 그리기" "(폭)" "합" "wasm 예약"
+printf "%-18s %-7s %9s %9s %11s %11s %9s %9s\n" "문서" "" "들이기" "열고 그리기" "(폭)" "둘째부터" "합" "wasm 예약"
 for f in tests/fixtures/multi.pdf tests/fixtures/korean.pdf tests/fixtures/cmap2.pdf \
          tests/fixtures/pdf/scanned.pdf tests/fixtures/tile.pdf; do
   name=$(basename "$f")
@@ -31,8 +31,9 @@ for f in tests/fixtures/multi.pdf tests/fixtures/korean.pdf tests/fixtures/cmap2
     c=$(for i in $(seq 1 "$N"); do one "$w" "$f" canvas; done | mid)
     m=$(one "$w" "$f" wasm)
     sp=$(for i in $(seq 1 "$N"); do one "$w" "$f" work; done | span)
-    printf "%-18s %-7s %8.1fMB %8.1fMB %11s %8.1fMB %8.1fMB\n" \
-      "$name" "$w" "$l" "$k" "$sp" "$(echo "$t - $c" | bc)" "$m"
+    ag=$(for i in $(seq 1 "$N"); do one "$w" "$f" again; done | mid)
+    printf "%-18s %-7s %8.1fMB %8.1fMB %11s %10.1fMB %8.1fMB %8.1fMB\n" \
+      "$name" "$w" "$l" "$k" "$sp" "$ag" "$(echo "$t - $c" | bc)" "$m"
     name=""
   done
 done
