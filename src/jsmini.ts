@@ -39,7 +39,7 @@ export class JsStop extends Error {}
 
 // ── 토막내기 ──────────────────────────────────────────────────────────────
 
-type Tok = { k: "num" | "str" | "name" | "punc" | "regex"; v: string; nl: boolean };
+type Tok = { k: "num" | "str" | "name" | "punc" | "regex" | "tpl"; v: string; nl: boolean };
 
 const PUNCS = [
   ">>>=", "===", "!==", "**=", "...", "<<=", ">>=", ">>>",
@@ -61,6 +61,54 @@ function lex(src: string): Tok[] {
     if (c === "/" && src[i + 1] === "*") {
       const e = src.indexOf("*/", i + 2);
       i = e < 0 ? src.length : e + 2;
+      continue;
+    }
+    // 정규식 — 식이 시작되는 자리의 / 만 정규식으로 본다. 나눗셈과 갈린다.
+    if (c === "/") {
+      const prev = out[out.length - 1];
+      const canRe = !prev || (prev.k === "punc" && !")]}".includes(prev.v)) ||
+        (prev.k === "name" && ["return", "typeof", "case", "in", "of", "new", "delete"].includes(prev.v));
+      if (canRe) {
+        let j = i + 1;
+        let cls = false;
+        let body = "";
+        while (j < src.length) {
+          const ch = src[j];
+          if (ch === "\\") { body += ch + (src[j + 1] ?? ""); j += 2; continue; }
+          if (ch === "[") cls = true;
+          else if (ch === "]") cls = false;
+          else if (ch === "/" && !cls) break;
+          else if (ch === "\n") { j = src.length; break; }
+          body += ch;
+          j++;
+        }
+        if (j < src.length && src[j] === "/") {
+          j++;
+          let flags = "";
+          while (j < src.length && /[a-z]/.test(src[j])) { flags += src[j]; j++; }
+          out.push({ k: "regex", v: body + "\u0000" + flags, nl });
+          nl = false;
+          i = j;
+          continue;
+        }
+      }
+    }
+    // 템플릿 글자 — `가${1 + 2}나`
+    if (c === "`") {
+      let j = i + 1;
+      let raw = "";
+      let depth = 0;
+      while (j < src.length) {
+        if (src[j] === "\\") { raw += src[j] + (src[j + 1] ?? ""); j += 2; continue; }
+        if (src[j] === "$" && src[j + 1] === "{") depth++;
+        if (src[j] === "}" && depth > 0) depth--;
+        if (src[j] === "`" && depth === 0) break;
+        raw += src[j];
+        j++;
+      }
+      out.push({ k: "tpl", v: raw, nl });
+      nl = false;
+      i = j + 1;
       continue;
     }
     if (/[0-9]/.test(c) || (c === "." && /[0-9]/.test(src[i + 1] ?? ""))) {
@@ -118,6 +166,11 @@ function lex(src: string): Tok[] {
 
 type Node2 = { t: string; [k: string]: unknown };
 
+/** 풀어 받기 꼴 */
+type Pat =
+  | { kind: "arr"; items: (string | null)[] }
+  | { kind: "obj"; pairs: { key: string; name: string }[] };
+
 class Parser {
   private at = 0;
   constructor(private t: Tok[]) {}
@@ -170,6 +223,26 @@ class Parser {
         }
         case "break": this.next(); this.eat(";"); return { t: "Break" };
         case "continue": this.next(); this.eat(";"); return { t: "Continue" };
+        case "switch": {
+          this.next(); this.want("(");
+          const disc = this.expr(); this.want(")"); this.want("{");
+          const cases: { test: Node2 | null; body: Node2[] }[] = [];
+          while (!this.is("}")) {
+            if (this.done()) throw new JsStop("} 가 없다");
+            let test: Node2 | null = null;
+            if (this.eat("case")) { test = this.expr(); this.want(":"); }
+            else if (this.eat("default")) { this.want(":"); }
+            else throw new JsStop("case 가 있어야 한다");
+            const body: Node2[] = [];
+            while (!this.is("case") && !this.is("default") && !this.is("}")) {
+              if (this.done()) throw new JsStop("} 가 없다");
+              body.push(this.statement());
+            }
+            cases.push({ test, body });
+          }
+          this.want("}");
+          return { t: "Switch", disc, cases };
+        }
         case "throw": {
           this.next();
           const arg = this.expr();
@@ -209,14 +282,51 @@ class Parser {
 
   private decl(): Node2 {
     this.next();
-    const list: { name: string; init: Node2 | null }[] = [];
+    const list: { name: string; init: Node2 | null; pat?: Pat }[] = [];
     do {
+      // 풀어 받기 — var [a, b] = … · var {a, b: c} = …
+      if (this.is("[") || this.is("{")) {
+        const pat = this.pattern();
+        this.want("=");
+        list.push({ name: "", init: this.assign(), pat });
+        continue;
+      }
       const name = this.next().v;
       const init = this.eat("=") ? this.assign() : null;
       list.push({ name, init });
     } while (this.eat(","));
     this.eat(";");
     return { t: "Decl", list };
+  }
+
+  /** [a, b] 또는 {a, b: c} 를 읽는다 */
+  private pattern(): Pat {
+    if (this.eat("[")) {
+      const items: (string | null)[] = [];
+      while (!this.eat("]")) {
+        if (this.eat(",")) { items.push(null); continue; }
+        const t = this.next();
+        if (t.k !== "name") throw new JsStop("이름이 있어야 한다");
+        items.push(t.v);
+        if (!this.is("]")) this.want(",");
+      }
+      return { kind: "arr", items };
+    }
+    this.want("{");
+    const pairs: { key: string; name: string }[] = [];
+    while (!this.eat("}")) {
+      const k = this.next();
+      if (k.k !== "name" && k.k !== "str") throw new JsStop("이름이 있어야 한다");
+      let nm = k.v;
+      if (this.eat(":")) {
+        const v = this.next();
+        if (v.k !== "name") throw new JsStop("이름이 있어야 한다");
+        nm = v.v;
+      }
+      pairs.push({ key: k.v, name: nm });
+      if (!this.is("}")) this.want(",");
+    }
+    return { kind: "obj", pairs };
   }
 
   private ifStmt(): Node2 {
@@ -277,6 +387,9 @@ class Parser {
   }
 
   assign(): Node2 {
+    // 화살표 함수 — x => …  또는  (a, b) => …
+    const arrow = this.tryArrow();
+    if (arrow) return arrow;
     const left = this.ternary();
     for (const op of ["=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^="]) {
       if (this.is(op)) {
@@ -285,6 +398,49 @@ class Parser {
       }
     }
     return left;
+  }
+
+  /** 화살표 함수면 읽어 준다. 아니면 자리를 되돌리고 null. */
+  private tryArrow(): Node2 | null {
+    const save = this.at;
+    const t = this.peek();
+    if (t?.k === "name" && this.peek(1)?.v === "=>" && this.peek(1)?.k === "punc") {
+      this.next(); this.next();
+      return this.arrowBody([t.v]);
+    }
+    if (t?.k === "punc" && t.v === "(") {
+      // 짝이 맞는 ) 를 찾아 그 뒤가 => 인지 본다
+      let d = 0;
+      let i = this.at;
+      while (i < this.t.length) {
+        const x = this.t[i];
+        if (x.k === "punc" && x.v === "(") d++;
+        else if (x.k === "punc" && x.v === ")") { d--; if (d === 0) break; }
+        i++;
+      }
+      const after = this.t[i + 1];
+      if (after && after.k === "punc" && after.v === "=>") {
+        const params: string[] = [];
+        this.next();
+        while (!this.eat(")")) {
+          const n2 = this.next();
+          if (n2.k === "name") params.push(n2.v);
+          else if (n2.v !== ",") { this.at = save; return null; }
+        }
+        this.want("=>");
+        return this.arrowBody(params);
+      }
+    }
+    return null;
+  }
+
+  private arrowBody(params: string[]): Node2 {
+    if (this.is("{")) {
+      const body = this.block();
+      return { t: "FnExpr", name: "", params, body };
+    }
+    const e = this.assign();
+    return { t: "FnExpr", name: "", params, body: { t: "Block", body: [{ t: "Return", arg: e }] } };
   }
 
   private ternary(): Node2 {
@@ -372,7 +528,16 @@ class Parser {
     const t = this.next();
     if (t.k === "num") return { t: "Num", v: Number(t.v) };
     if (t.k === "str") return { t: "Str", v: t.v };
+    if (t.k === "regex") {
+      const cut = t.v.indexOf("\u0000");
+      return { t: "Regex", src: t.v.slice(0, cut), flags: t.v.slice(cut + 1) };
+    }
+    if (t.k === "tpl") return { t: "Tpl", parts: tplParts(t.v) };
     if (t.k === "name") {
+      // 못 다루는 낱말은 조용히 undefined 로 넘기지 않는다 — 틀린 값을
+      // 내놓느니 "못 읽었다" 고 말하는 편이 낫다
+      if (["class", "import", "export", "async", "await", "yield", "with", "debugger", "super"]
+        .includes(t.v)) throw new JsStop(`${t.v} 는 못 읽는다`);
       switch (t.v) {
         case "true": return { t: "Bool", v: true };
         case "false": return { t: "Bool", v: false };
@@ -408,6 +573,35 @@ class Parser {
     }
     throw new JsStop(`못 읽는 자리 ${t.v}`);
   }
+}
+
+/** `가${1+2}나` 를 [글자, 식, 글자…] 로 나눈다. 식은 다시 읽는다. */
+function tplParts(raw: string): { s?: string; e?: Node2 }[] {
+  const out: { s?: string; e?: Node2 }[] = [];
+  let i = 0;
+  let lit = "";
+  while (i < raw.length) {
+    if (raw[i] === "\\") { lit += raw[i + 1] ?? ""; i += 2; continue; }
+    if (raw[i] === "$" && raw[i + 1] === "{") {
+      let d = 1;
+      let j = i + 2;
+      let src = "";
+      while (j < raw.length && d > 0) {
+        if (raw[j] === "{") d++;
+        else if (raw[j] === "}") { d--; if (d === 0) break; }
+        src += raw[j];
+        j++;
+      }
+      if (lit) { out.push({ s: lit }); lit = ""; }
+      out.push({ e: new Parser(lex(src)).expr() });
+      i = j + 1;
+      continue;
+    }
+    lit += raw[i];
+    i++;
+  }
+  if (lit) out.push({ s: lit });
+  return out;
 }
 
 const PREC: Record<string, number> = {
@@ -480,6 +674,7 @@ class Machine {
     if (typeof obj === "string") return strMember(obj, key);
     if (typeof obj === "number") return numMember(obj, key);
     if (Array.isArray(obj)) return arrMember(obj, key);
+    if (isRe(obj)) return reMember(obj, key);
     if (typeof obj === "object") {
       const o = obj as Record<string, unknown>;
       // 우리가 건넨 host 객체는 제 것만 준다
@@ -541,8 +736,18 @@ class Machine {
       case "Empty": return null;
       case "ExprStmt": this.eval(n.expr as Node2, sc); return null;
       case "Decl": {
-        for (const d of n.list as { name: string; init: Node2 | null }[]) {
-          sc.vars.set(d.name, d.init ? this.eval(d.init, sc) : undefined);
+        for (const d of n.list as { name: string; init: Node2 | null; pat?: Pat }[]) {
+          const v = d.init ? this.eval(d.init, sc) : undefined;
+          if (d.pat) {
+            if (d.pat.kind === "arr") {
+              const arr = Array.isArray(v) ? v : [];
+              d.pat.items.forEach((nm, i) => { if (nm) sc.vars.set(nm, arr[i]); });
+            } else {
+              for (const pr of d.pat.pairs) sc.vars.set(pr.name, this.member(v, pr.key));
+            }
+            continue;
+          }
+          sc.vars.set(d.name, v);
         }
         return null;
       }
@@ -600,6 +805,35 @@ class Machine {
         } as Fn);
         return null;
       }
+      case "Switch": {
+        const d = this.eval(n.disc as Node2, sc);
+        const cases = n.cases as { test: Node2 | null; body: Node2[] }[];
+        let on = false;
+        const inner: Scope = { vars: new Map(), up: sc };
+        for (const c of cases) {
+          if (!on && c.test !== null && d === this.eval(c.test, inner)) on = true;
+          if (!on) continue;
+          for (const st of c.body) {
+            const f = this.run(st, inner);
+            if (f === BREAK) return null;
+            if (f) return f;
+          }
+        }
+        if (!on) {
+          // 맞는 것이 없으면 default 부터 흐른다
+          let seen = false;
+          for (const c of cases) {
+            if (!seen && c.test !== null) continue;
+            seen = true;
+            for (const st of c.body) {
+              const f = this.run(st, inner);
+              if (f === BREAK) return null;
+              if (f) return f;
+            }
+          }
+        }
+        return null;
+      }
       case "Return": return { s: "return", v: n.arg ? this.eval(n.arg as Node2, sc) : undefined };
       case "Break": return BREAK;
       case "Continue": return CONT;
@@ -638,6 +872,14 @@ class Machine {
         const hit = this.look(sc, n.name as string);
         if (!hit) return undefined;
         return hit.sc.vars.get(n.name as string);
+      }
+      case "Regex": return makeRe(n.src as string, n.flags as string);
+      case "Tpl": {
+        let out = "";
+        for (const p of n.parts as { s?: string; e?: Node2 }[]) {
+          out += p.s !== undefined ? p.s : str(this.eval(p.e as Node2, sc));
+        }
+        return out;
       }
       case "Arr": return (n.items as Node2[]).map((i) => this.eval(i, sc));
       case "Obj": {
@@ -813,6 +1055,48 @@ function cmp(a: unknown, b: unknown): number {
 // 프로토타입을 그대로 열어 주면 `"".constructor("코드")` 로 host 함수를
 // 만들 수 있다. 그래서 쓰는 것만 손으로 적어 준다.
 
+/**
+ * 정규식을 만든다.
+ *
+ * 문서가 준 무늬를 host 의 정규식 엔진에 그대로 넘기면, `(a+)+b` 같은
+ * 무늬 하나로 몇 초씩 잡아먹을 수 있다(되돌이 폭발). 그건 우리 걸음
+ * 한도로 못 막는다 — host 안에서 도는 일이라서다. 그래서 무늬 길이를
+ * 재고, 겹친 반복이 보이면 아예 안 만든다.
+ */
+export type Re = { __re: RegExp; source: string; flags: string };
+function makeRe(src: string, flags: string): Re {
+  if (src.length > 200) throw new JsStop("정규식이 너무 길다");
+  // (…+)+ · (…*)* 처럼 반복 안에 반복이 겹친 것
+  if (/\([^)]*[+*][^)]*\)\s*[+*]/.test(src)) throw new JsStop("되돌이가 터질 수 있는 정규식이다");
+  const f = flags.replace(/[^gimsuy]/g, "");
+  try {
+    return { __re: new RegExp(src, f), source: src, flags: f };
+  } catch {
+    throw new JsStop("읽을 수 없는 정규식이다");
+  }
+}
+function isRe(v: unknown): v is Re {
+  return !!v && typeof v === "object" && "__re" in (v as object);
+}
+/** 정규식에 넣을 글자는 길이를 재 둔다 — 긴 글에 무거운 무늬면 오래 끈다 */
+function safeSubject(s: string): string {
+  return s.length > 20000 ? s.slice(0, 20000) : s;
+}
+
+function reMember(r: Re, k: string): unknown {
+  switch (k) {
+    case "test": return (v: unknown) => r.__re.test(safeSubject(str(v)));
+    case "exec": return (v: unknown) => {
+      const m = r.__re.exec(safeSubject(str(v)));
+      return m ? Array.from(m) : null;
+    };
+    case "source": return r.source;
+    case "flags": return r.flags;
+    case "toString": return () => `/${r.source}/${r.flags}`;
+    default: return undefined;
+  }
+}
+
 function strMember(s: string, k: string): unknown {
   switch (k) {
     case "length": return s.length;
@@ -827,8 +1111,17 @@ function strMember(s: string, k: string): unknown {
     case "slice": return (a: unknown, b?: unknown) => s.slice(num(a), b === undefined ? undefined : num(b));
     case "substring": return (a: unknown, b?: unknown) => s.substring(num(a), b === undefined ? undefined : num(b));
     case "substr": return (a: unknown, b?: unknown) => s.substr(num(a), b === undefined ? undefined : num(b));
-    case "split": return (t: unknown) => s.split(str(t));
-    case "replace": return (a: unknown, b: unknown) => s.split(str(a)).join(str(b));
+    case "split": return (t: unknown) => (isRe(t) ? s.split(t.__re) : s.split(str(t)));
+    case "replace": return (a: unknown, b: unknown) => {
+      if (isRe(a)) return safeSubject(s).replace(a.__re, str(b));
+      return s.split(str(a)).join(str(b));
+    };
+    case "match": return (t: unknown) => {
+      if (!isRe(t)) return null;
+      const m = safeSubject(s).match(t.__re);
+      return m ? Array.from(m) : null;
+    };
+    case "search": return (t: unknown) => (isRe(t) ? safeSubject(s).search(t.__re) : s.indexOf(str(t)));
     case "concat": return (...a: unknown[]) => s + a.map(str).join("");
     case "startsWith": return (t: unknown) => s.startsWith(str(t));
     case "endsWith": return (t: unknown) => s.endsWith(str(t));
@@ -892,6 +1185,36 @@ function baseScope(): Map<string, unknown> {
     (v.length === 1 && typeof v[0] === "number" ? new Array(v[0]).fill(undefined) : v));
   m.set("NaN", NaN);
   m.set("Infinity", Infinity);
+  // 날짜 — 양식이 오늘 날짜를 찍는 일이 흔하다
+  const dateOf = (ms: number) => {
+    const d = new Date(ms);
+    return {
+      getFullYear: () => d.getFullYear(),
+      getMonth: () => d.getMonth(),
+      getDate: () => d.getDate(),
+      getDay: () => d.getDay(),
+      getHours: () => d.getHours(),
+      getMinutes: () => d.getMinutes(),
+      getSeconds: () => d.getSeconds(),
+      getTime: () => d.getTime(),
+      toISOString: () => d.toISOString(),
+      toString: () => d.toString(),
+    };
+  };
+  const DateFn = (...a: unknown[]) => (a.length === 0 ? dateOf(Date.now()) : dateOf(num(a[0])));
+  (DateFn as unknown as Record<string, unknown>).now = () => Date.now();
+  m.set("Date", DateFn);
+  m.set("RegExp", (src2: unknown, f: unknown) => makeRe(str(src2), f === undefined ? "" : str(f)));
+  m.set("JSON", {
+    stringify: (v: unknown) => {
+      try { return JSON.stringify(v) ?? "undefined"; } catch { return "null"; }
+    },
+    parse: (v: unknown) => {
+      const t = str(v);
+      if (t.length > 100000) throw new JsStop("JSON 이 너무 길다");
+      try { return JSON.parse(t); } catch { throw new JsStop("JSON 을 못 읽는다"); }
+    },
+  });
   return m;
 }
 

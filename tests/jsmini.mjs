@@ -69,7 +69,50 @@ ok('host 함수를 만들 길이 없다', (() => {
 ok('무한 반복은 멎는다', stops('while (1) { }'));
 ok('무한 되부름도 멎는다', stops('function f(){ return f(); } f();'));
 ok('깊은 반복도 멎는다', stops('for (var i = 0; i < 1e9; i++) { }'));
-ok('모르는 문법은 멎는다', stops('out.v = `가${1}`;'));
+ok('템플릿 글자', val('out.v = `가${1 + 1}나`;') === '가2나');
+ok('switch', val('var x = 2; switch (x) { case 1: out.v = "하나"; break; case 2: out.v = "둘"; break; default: out.v = "몰라"; }') === '둘');
+ok('switch 기본값', val('switch (9) { case 1: out.v = "하나"; break; default: out.v = "몰라"; }') === '몰라');
+ok('화살표 함수', val('var f = (x) => x * 2; out.v = f(4);') === 8);
+ok('화살표 한 인자', val('var f = x => x + 1; out.v = f(1);') === 2);
+ok('정규식 test', val('out.v = /^[0-9]+$/.test("12345");') === true);
+ok('정규식 replace', val('out.v = "1,234,567".replace(/,/g, "");') === '1234567');
+ok('정규식 match', val('out.v = ("가2나3".match(/[0-9]/g) || []).length;') === 2);
+ok('정규식 split', val('out.v = "a1b2c".split(/[0-9]/).length;') === 3);
+ok('날짜', val('out.v = typeof new Date().getFullYear();') === 'number');
+ok('JSON', val('out.v = JSON.parse(JSON.stringify({a: 5})).a;') === 5);
+ok('되돌이 터질 정규식은 막는다', stops('out.v = /(a+)+b/.test("aaaaaaaaaaaaaaaaaaaaaaaaaa!");'));
+ok('풀어 받기(배열)', val('var [a, b] = [1, 2]; out.v = a + b;') === 3);
+ok('풀어 받기(객체)', val('var {x, y: z} = {x: 3, y: 4}; out.v = x * z;') === 12);
+ok('모르는 문법은 멎는다', stops('out.v = class X {};'));
+ok('await 도 멎는다', stops('await x;'));
+
+// 실제 양식에서 흔한 꼴 — 몇이나 도는지 세어 둔다
+{
+  const real = [
+    'var t=0; for (var i=1;i<=3;i++) t+=Number(this.getField("a"+i).value); event.value=t;',
+    'if (this.getField("kind").value == "개인") event.value = 0.1; else event.value = 0.2;',
+    'AFNumber_Format(2, 0, 0, 0, "원", true);',
+    'if (event.value == "") { app.alert("채우세요"); event.rc = false; }',
+    'switch (this.getField("t").value) { case "A": event.value=1; break; default: event.value=0; }',
+    'event.value = /^[0-9]+$/.test(event.value) ? "맞음" : "틀림";',
+    'event.value = event.value.replace(/,/g, "");',
+    'event.value = new Date().getFullYear();',
+    'event.value = `${1+1}개`;',
+    'var f = (x) => x * 2; event.value = f(4);',
+    'var [a, b] = [1, 2]; event.value = a + b;',
+    'let fs=[]; for (let i=0;i<3;i++) fs.push(function(){return i;}); event.value=fs[0]();',
+    'event.value = JSON.stringify({a:1}).length;',
+    'event.value = util.printf("%.2f", 3.14159);',
+    'event.value = 1 ? 2 ? "a" : "b" : "c";',
+  ];
+  let ran = 0;
+  for (const src of real) {
+    const box = { event: { value: '5', rc: true }, this: { getField: () => ({ value: '1' }) },
+      app: { alert: () => 1 }, util: { printf: () => '3.14' }, AFNumber_Format: () => {} };
+    try { runJs(src, box); ran++; } catch { /* 못 읽음 */ }
+  }
+  ok(`실제 양식 꼴 ${ran}/${real.length}`, ran === real.length, ran);
+}
 
 console.log(fails === 0 ? '해석기 통과' : `해석기 실패 ${fails}개`);
 process.exit(fails === 0 ? 0 : 1);
