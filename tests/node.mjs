@@ -224,6 +224,31 @@ const t = (name, cond, got) => {
       t("프로그레시브: 빈 그림이 아니다", prog.ink > 8000, prog.ink);
       t("프로그레시브 흑백도", gray.ink > 8000 && /^(\d+),\1,\1$/.test(gray.avg),
         `${gray.ink} ${gray.avg}`);
+
+      // 색차를 늘리는 방식이 libjpeg 과 같은지 화소로 본다.
+      //
+      // JPEG 은 색을 절반으로 줄여 담는다(4:2:0). 늘릴 때 가장 가까운 값을
+      // 쓰면 색 경계가 계단처럼 각져, 아래 기준값과 최대 62 까지 벌어졌다.
+      // 네 이웃을 섞으면(쌍선형) 5 안으로 들어온다. 기준값은 같은 JPEG 을
+      // PIL(libjpeg)로 푼 것이다.
+      const want = [[5, 5, 245, 252, 244], [40, 35, 220, 30, 40], [115, 55, 30, 90, 220],
+                    [80, 95, 20, 160, 61], [155, 10, 249, 250, 244], [20, 110, 69, 144, 87],
+                    [159, 119, 249, 250, 244], [75, 60, 253, 247, 249]];
+      const q4 = await PDFDocument.open(`${FX}/jpg-prog.pdf`);
+      const c4 = createCanvas(160, 120);
+      await q4.render(1, c4);
+      const d4 = c4.getContext("2d").getImageData(0, 0, 160, 120).data;
+      let worst = 0;
+      let where = "";
+      for (const [x, y, r, g, b] of want) {
+        const at = (y * 160 + x) * 4;
+        for (const [k, v] of [[0, r], [1, g], [2, b]]) {
+          const dv = Math.abs(d4[at + k] - v);
+          if (dv > worst) { worst = dv; where = `[${x},${y}] ${d4[at]},${d4[at + 1]},${d4[at + 2]} vs ${r},${g},${b}`; }
+        }
+      }
+      t("색차 늘리기가 libjpeg 과 맞는다", worst <= 6, `최대차 ${worst} ${where}`);
+      q4.close();
     }
   }
 }

@@ -734,9 +734,37 @@ fn emit(
             while (i < ncomp) : (i += 1) {
                 const c = &comps[i];
                 if (c.w == 0 or c.h == 0) continue;
-                const sx = @min(c.w - 1, x * c.hs / hmax);
-                const sy = @min(c.h - 1, y * c.vs / vmax);
-                v[i] = @floatFromInt(scratch[c.off + sy * c.w + sx]);
+                if (c.hs == hmax and c.vs == vmax) {
+                    // 이 성분은 줄이지 않고 담겼다 — 그대로 읽는다
+                    const sx = @min(c.w - 1, x);
+                    const sy = @min(c.h - 1, y);
+                    v[i] = @floatFromInt(scratch[c.off + sy * c.w + sx]);
+                    continue;
+                }
+                // 줄여 담은 성분(대개 색차)을 늘린다.
+                //
+                // 눈은 밝기보다 색에 둔해서 JPEG 은 색을 절반·사분의 일로
+                // 줄여 담는다(4:2:0). 그린 것을 다시 늘려야 하는데, 가장
+                // 가까운 값을 그대로 쓰면 색 경계가 계단처럼 각진다.
+                // 네 이웃을 거리에 따라 섞으면(쌍선형) 그 계단이 사라진다 —
+                // libjpeg 이 "fancy upsampling" 이라 부르는 것과 같은 일이다.
+                const fx = (@as(f32, @floatFromInt(x)) + 0.5) *
+                    @as(f32, @floatFromInt(c.hs)) / @as(f32, @floatFromInt(hmax)) - 0.5;
+                const fy = (@as(f32, @floatFromInt(y)) + 0.5) *
+                    @as(f32, @floatFromInt(c.vs)) / @as(f32, @floatFromInt(vmax)) - 0.5;
+                const gx = @max(@as(f32, 0), fx);
+                const gy = @max(@as(f32, 0), fy);
+                const x0: u32 = @min(c.w - 1, @as(u32, @intFromFloat(gx)));
+                const y0: u32 = @min(c.h - 1, @as(u32, @intFromFloat(gy)));
+                const x1: u32 = @min(c.w - 1, x0 + 1);
+                const y1: u32 = @min(c.h - 1, y0 + 1);
+                const tx = gx - @as(f32, @floatFromInt(x0));
+                const ty = gy - @as(f32, @floatFromInt(y0));
+                const a: f32 = @floatFromInt(scratch[c.off + y0 * c.w + x0]);
+                const b2: f32 = @floatFromInt(scratch[c.off + y0 * c.w + x1]);
+                const c2: f32 = @floatFromInt(scratch[c.off + y1 * c.w + x0]);
+                const d2: f32 = @floatFromInt(scratch[c.off + y1 * c.w + x1]);
+                v[i] = (a * (1 - tx) + b2 * tx) * (1 - ty) + (c2 * (1 - tx) + d2 * tx) * ty;
             }
             const o0 = (@as(usize, y) * w + x) * 3;
             if (ncomp == 1) {
