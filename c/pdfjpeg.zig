@@ -197,6 +197,20 @@ const Comp = struct {
 ///
 /// scratch 는 성분별 중간 화소를 담을 자리다. dst 와 겹치면 안 된다.
 pub fn decodeCmyk(d: []const u8, dst: []u8, scratch: []u8, invert: bool) u32 {
+    return decode(d, dst, scratch, invert);
+}
+
+/// 성분이 하나(흑백)거나 셋(YCbCr·RGB)이거나 넷(CMYK·YCCK)인 JPEG 을 풀어
+/// RGB 로 담는다.
+///
+/// 브라우저에서는 이 일을 브라우저가 해 주지만, Node 에는 해 줄 사람이
+/// 없다. 그래서 우리가 푼다 — 그러지 않으면 스캔 문서가 흰 종이로 나온다.
+/// 프로그레시브 JPEG 은 아직 못 푼다(0xC2 에서 0 을 준다).
+pub fn decodeAny(d: []const u8, dst: []u8, scratch: []u8) u32 {
+    return decode(d, dst, scratch, false);
+}
+
+fn decode(d: []const u8, dst: []u8, scratch: []u8, invert: bool) u32 {
     var qt = [_][64]u16{[_]u16{0} ** 64} ** 4;
     var hdc = [_]Huff{Huff{}} ** 4;
     var hac = [_]Huff{Huff{}} ** 4;
@@ -261,7 +275,8 @@ pub fn decodeCmyk(d: []const u8, dst: []u8, scratch: []u8, invert: bool) u32 {
                 h = (@as(u32, seg[1]) << 8) | seg[2];
                 w = (@as(u32, seg[3]) << 8) | seg[4];
                 ncomp = seg[5];
-                if (ncomp != 4 or w == 0 or h == 0) return 0;
+                // 성분 하나(흑백)·셋(YCbCr)·넷(CMYK) 을 다 받는다
+                if (ncomp == 0 or ncomp > 4 or ncomp == 2 or w == 0 or h == 0) return 0;
                 if (seg.len < 6 + @as(usize, ncomp) * 3) return 0;
                 var i: u8 = 0;
                 while (i < ncomp) : (i += 1) {
@@ -300,7 +315,7 @@ pub fn decodeCmyk(d: []const u8, dst: []u8, scratch: []u8, invert: bool) u32 {
                     }
                 }
                 return scan(d, p + 2 + len, w, h, &comps, ncomp, &qt, &hdc, &hac, ri,
-                    invert, if (have_transform) transform else 0, dst, scratch);
+                    invert, transform, have_transform, dst, scratch);
             },
             else => {},
         }
@@ -312,7 +327,7 @@ pub fn decodeCmyk(d: []const u8, dst: []u8, scratch: []u8, invert: bool) u32 {
 fn scan(
     d: []const u8, start: usize, w: u32, h: u32, comps: *[4]Comp, ncomp: u8,
     qt: *const [4][64]u16, hdc: *[4]Huff, hac: *[4]Huff, ri: u32,
-    invert: bool, transform: u8, dst: []u8, scratch: []u8,
+    invert: bool, transform: u8, have_transform: bool, dst: []u8, scratch: []u8,
 ) u32 {
     var hmax: u8 = 1;
     var vmax: u8 = 1;
@@ -412,11 +427,40 @@ fn scan(
         while (x < w) : (x += 1) {
             var v: [4]f32 = .{ 0, 0, 0, 0 };
             i = 0;
-            while (i < 4) : (i += 1) {
+            // 성분이 넷보다 적으면 그만큼만 읽는다 — 안 쓰는 성분 자리를
+            // 읽으면 c.w 가 0 이라 나눗셈에서 죽는다
+            while (i < ncomp) : (i += 1) {
                 const c = &comps[i];
+                if (c.w == 0 or c.h == 0) continue;
                 const sx = @min(c.w - 1, x * c.hs / hmax);
                 const sy = @min(c.h - 1, y * c.vs / vmax);
                 v[i] = @floatFromInt(scratch[c.off + sy * c.w + sx]);
+            }
+            const o0 = (@as(usize, y) * w + x) * 3;
+            if (ncomp == 1) {
+                // 흑백 — 한 성분을 셋에 그대로 편다
+                const g8: u8 = @intFromFloat(@max(0, @min(255, v[0])));
+                dst[o0] = g8;
+                dst[o0 + 1] = g8;
+                dst[o0 + 2] = g8;
+                continue;
+            }
+            if (ncomp == 3) {
+                // Adobe 표식이 0 이면 이미 RGB 다. 없으면 YCbCr 로 본다 —
+                // 규격이 그렇게 정하고, 실제 파일도 거의 다 그렇다.
+                if (have_transform and transform == 0) {
+                    dst[o0] = @intFromFloat(@max(0, @min(255, v[0])));
+                    dst[o0 + 1] = @intFromFloat(@max(0, @min(255, v[1])));
+                    dst[o0 + 2] = @intFromFloat(@max(0, @min(255, v[2])));
+                } else {
+                    const yy3 = v[0];
+                    const cb3 = v[1] - 128;
+                    const cr3 = v[2] - 128;
+                    dst[o0] = @intFromFloat(@max(0, @min(255, yy3 + 1.402 * cr3)));
+                    dst[o0 + 1] = @intFromFloat(@max(0, @min(255, yy3 - 0.344136 * cb3 - 0.714136 * cr3)));
+                    dst[o0 + 2] = @intFromFloat(@max(0, @min(255, yy3 + 1.772 * cb3)));
+                }
+                continue;
             }
             var cy = v[0];
             var mm = v[1];

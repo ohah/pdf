@@ -182,6 +182,7 @@ type Exports = {
   setOcOn?: (i: number, on: number) => void;
   sigCount?: () => number;
   sigRange?: (i: number, k: number) => number;
+  jpegToRgb?: (i: number) => number;
   xfaXmlLen?: () => number;
   xfaXmlPtr?: () => number;
   openPage?: () => number;
@@ -355,20 +356,50 @@ export function runWork(slot: Slot, t: string, a: unknown): Promise<{ r: unknown
 }
 
 /**
- * 그림을 만들 수 있는 곳인가.
+ * 브라우저가 그림을 만들어 줄 수 있는 곳인가.
  *
- * Node 에는 createImageBitmap 도 OffscreenCanvas 도 없다. 글자·주석·양식만
- * 뽑는 데는 그림이 필요 없으므로, 없으면 그림 자리를 비워 두고 나머지는
- * 그대로 준다 — 예외를 던져 통째로 못 쓰게 만들지 않는다.
+ * Node 에는 createImageBitmap 도 OffscreenCanvas 도 없다. 없다고 그림을
+ * 버리지는 않는다 — 날 화소(RGBA)로 넘겨 그리는 쪽이 캔버스에 얹는다.
+ * JPEG 처럼 브라우저가 풀어 주던 것은 엔진이 대신 푼다(jpegToRgb).
  */
 const canImage =
   typeof createImageBitmap === "function" && typeof OffscreenCanvas === "function";
+
+/** 브라우저가 없는 곳에서 넘기는 날 화소. 그리는 쪽이 캔버스에 얹는다. */
+export type RawImage = { w: number; h: number; rgba: Uint8ClampedArray };
+
+/** 성분 수만큼 읽어 RGBA 로 편다. 알파 판이 있으면 함께 얹는다. */
+function toRgba(
+  comps: number, iw: number, ih: number, raw: Uint8Array,
+  alpha?: { w: number; h: number; bytes: Uint8Array },
+): Uint8ClampedArray {
+  const rgba = new Uint8ClampedArray(iw * ih * 4);
+  for (let k = 0, s2 = 0, d2 = 0; k < iw * ih; k++, s2 += comps, d2 += 4) {
+    if (comps === 3) {
+      rgba[d2] = raw[s2]; rgba[d2 + 1] = raw[s2 + 1]; rgba[d2 + 2] = raw[s2 + 2];
+    } else {
+      rgba[d2] = rgba[d2 + 1] = rgba[d2 + 2] = raw[s2];
+    }
+    rgba[d2 + 3] = alpha
+      ? (alpha.bytes[Math.min(alpha.h - 1, Math.floor((Math.floor(k / iw) * alpha.h) / ih)) * alpha.w
+          + Math.min(alpha.w - 1, Math.floor(((k % iw) * alpha.w) / iw))] ?? 255)
+      : 255;
+  }
+  return rgba;
+}
 
 async function decodeImage(
   kind: number, iw: number, ih: number, raw: Uint8Array,
   alpha?: { w: number; h: number; bytes: Uint8Array },
 ) {
-  if (kind === 0 || iw === 0 || ih === 0 || !canImage) return undefined;
+  if (kind === 0 || iw === 0 || ih === 0) return undefined;
+  if (!canImage) {
+    // 브라우저가 없는 곳 — 날 화소로 넘긴다. JPEG(3)은 여기 오기 전에
+    // 엔진이 풀어 kind 1 로 바꿔 둔다.
+    if (kind === 3) return undefined;
+    if (raw.length < iw * ih * (kind === 1 ? 3 : 1)) return undefined;
+    return { w: iw, h: ih, rgba: toRgba(kind === 1 ? 3 : 1, iw, ih, raw, alpha) } as RawImage;
+  }
   try {
     if (kind === 3) {
       // JPEG 은 브라우저가 푼다
@@ -641,7 +672,7 @@ async function page(i: number, formOn: boolean, light = false) {
   const rawAt = (si: number) =>
     new Uint8Array(e.memory.buffer, e.imageAreaPtr!() + e.slotOff!(si), e.slotLen!(si)).slice();
   const slots = light ? 0 : (e.imageSlots?.() ?? 0);
-  const bitmaps: (ImageBitmap | undefined)[] = [];
+  const bitmaps: (ImageBitmap | RawImage | undefined)[] = [];
   const stencils: ({ w: number; h: number; flip: boolean; bytes: Uint8Array; key: string } | undefined)[] = [];
   for (let si = 0; si < slots; si++) {
     const k = e.slotKind!(si);
@@ -676,6 +707,14 @@ async function page(i: number, formOn: boolean, light = false) {
     const alpha = ms > 0
       ? { w: e.slotWidth!(ms - 1), h: e.slotHeight!(ms - 1), bytes: rawAt(ms - 1) }
       : undefined;
+    // 브라우저가 없으면 JPEG 은 엔진이 푼다 — 안 그러면 스캔 문서가 백지다
+    if (!canImage && k === 3 && e.jpegToRgb) {
+      const to = e.jpegToRgb(si);
+      if (to >= 0) {
+        bitmaps.push(await decodeImage(1, e.slotWidth!(to), e.slotHeight!(to), rawAt(to), alpha));
+        continue;
+      }
+    }
     bitmaps.push(await decodeImage(k, iw, ih, rawAt(si), alpha));
   }
   let bitmap = bitmaps[0];

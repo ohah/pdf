@@ -66,9 +66,9 @@ export type DrawInput = {
   rotate?: number;
   /** 바탕색. 기본은 흰색이다 — 투명하게 두려면 "transparent" 를 준다. */
   background?: string;
-  bitmap?: ImageBitmap;
+  bitmap?: ImageBitmap | RawPix;
   /** 쪽이 쓰는 그림들. Do 가 번호로 고른다. */
-  bitmaps?: (ImageBitmap | undefined)[];
+  bitmaps?: (ImageBitmap | RawPix | undefined)[];
   /** 글꼴 번호 → CSS font-family. 없으면 시스템 글꼴로 그린다. */
   fontFamily?: (idx: number) => string | undefined;
   /** 글꼴 번호 → 글리프를 번호로 집는 글꼴인가.
@@ -236,6 +236,36 @@ function scratch(
     if (Ctor) return new Ctor(W, H);
   } catch { /* 없다 */ }
   return null;
+}
+
+/**
+ * 브라우저가 ImageBitmap 을 못 만드는 자리(Node)에서 오는 날 화소.
+ * 처음 그릴 때 캔버스로 한 번 옮겨 두고 그다음부터는 그것을 쓴다.
+ */
+export type RawPix = { w: number; h: number; rgba: Uint8ClampedArray };
+
+const painted = new WeakMap<object, CanvasImageSource>();
+
+/** 그릴 수 있는 것으로 바꾼다. 날 화소면 캔버스에 한 번 얹어 둔다. */
+function asImage(
+  v: ImageBitmap | RawPix | undefined, like: unknown,
+): CanvasImageSource | null {
+  if (!v) return null;
+  if (!("rgba" in v)) return v as CanvasImageSource;
+  const hit = painted.get(v);
+  if (hit) return hit;
+  const cv = scratch(v.w, v.h, (like ?? null) as { constructor: unknown } | null);
+  const g = cv ? (cv.getContext("2d") as CanvasRenderingContext2D | null) : null;
+  if (!cv || !g) return null;
+  try {
+    const Ctor = (globalThis as { ImageData?: new (d: Uint8ClampedArray, w: number, h: number) => ImageData }).ImageData;
+    const im = Ctor ? new Ctor(v.rgba, v.w, v.h) : g.createImageData(v.w, v.h);
+    if (!Ctor) im.data.set(v.rgba);
+    g.putImageData(im, 0, 0);
+  } catch { return null; }
+  const out = cv as unknown as CanvasImageSource;
+  painted.set(v, out);
+  return out;
 }
 
 export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] {
@@ -757,7 +787,7 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
           }
           break;
         }
-        const pick = slot > 0 ? input.bitmaps?.[slot - 1] : undefined;
+        const pick = asImage(slot > 0 ? input.bitmaps?.[slot - 1] : undefined, canvas);
         if (pick) {
           g.save();
           g.transform(1, 0, 0, -1, 0, 1);
@@ -765,11 +795,12 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
           g.restore();
           break;
         }
-        if (!input.bitmap) break;
+        const one = asImage(input.bitmap, canvas);
+        if (!one) break;
         // 그림은 현재 변환의 단위 정사각형에 놓인다. 위아래를 뒤집어 맞춘다.
         g.save();
         g.transform(1, 0, 0, -1, 0, 1);
-        g.drawImage(input.bitmap, 0, 0, 1, 1);
+        g.drawImage(one, 0, 0, 1, 1);
         g.restore();
         break;
       }

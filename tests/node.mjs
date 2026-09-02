@@ -171,6 +171,28 @@ const t = (name, cond, got) => {
     t("Node 에서 그리기", Math.abs(inked - 25235) < 500, `${cv.width}x${cv.height} 잉크 ${inked}`);
     t("그리며 글자 자리도 준다", Array.isArray(r.runs), typeof r.runs);
     pdf.close();
+
+    // 그림도 그린다.
+    //
+    // 예전에는 Node 에 createImageBitmap 이 없다는 이유로 그림 자리를 통째로
+    // 비웠다. 그래서 스캔 문서(글자가 없고 사진만 있는 문서)가 흰 종이로
+    // 나왔다 — 견본 123개 중 19개가 그랬다. 이제 날 화소로 넘겨 캔버스에
+    // 얹고, JPEG 은 엔진이 푼다.
+    // 기대치는 브라우저에서 같은 크기로 그려 나온 값이다. 작은 것(가리개
+    // 견본 32칸)까지 그대로여야 "브라우저와 같다" 고 말할 수 있다.
+    for (const [name, least] of [["scan4.pdf", 50000], ["cmyk.pdf", 6900],
+                                 ["indexed.pdf", 14000], ["jpx-53.pdf", 16000],
+                                 ["mask-stencil.pdf", 30], ["bpc16.pdf", 26]]) {
+      const p2 = await PDFDocument.open(`${FX}/${name}`);
+      const c2 = createCanvas(400, 520);
+      await p2.render(1, c2);
+      const px = c2.getContext("2d").getImageData(0, 0, 400, 520).data;
+      let ink = 0;
+      for (let i = 0; i < px.length; i += 4)
+        if (px[i + 3] > 8 && (px[i] < 240 || px[i + 1] < 240 || px[i + 2] < 240)) ink++;
+      t(`Node 그림: ${name}`, ink >= least, `잉크 ${ink} (적어도 ${least})`);
+      p2.close();
+    }
   }
 }
 

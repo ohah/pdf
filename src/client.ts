@@ -54,9 +54,13 @@ export type PageMsg = {
     format: string;
   }[];
   fonts: { bytes: Uint8Array | null; pua: boolean; name: string; kind: number; len: number }[];
-  bitmaps: (ImageBitmap | undefined)[];
+  /**
+   * 쪽에 놓인 그림. 브라우저에서는 ImageBitmap 이고, 그것을 못 만드는
+   * 자리(Node)에서는 날 화소로 온다 — 그리는 쪽이 캔버스에 얹는다.
+   */
+  bitmaps: (ImageBitmap | { w: number; h: number; rgba: Uint8ClampedArray } | undefined)[];
   stencils: ({ w: number; h: number; flip: boolean; bytes: Uint8Array; key: string } | undefined)[];
-  bitmap?: ImageBitmap;
+  bitmap?: ImageBitmap | { w: number; h: number; rgba: Uint8ClampedArray };
   images: number;
   forms: number;
   /** 글자와 자리만 담긴 것인가 */

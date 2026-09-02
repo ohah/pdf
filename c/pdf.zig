@@ -3758,6 +3758,35 @@ fn colorKeyMask(slot: u32, lo: []const u32, hi: []const u32) void {
     img_used += @intCast((px + 3) & ~@as(usize, 3));
 }
 
+/// JPEG 칸을 엔진 안에서 풀어 RGB 칸을 새로 만든다. 새 칸 번호, 못 풀면 -1.
+///
+/// 브라우저에서는 브라우저가 JPEG 을 풀어 주므로 이 길로 오지 않는다.
+/// Node 처럼 풀어 줄 사람이 없는 자리에서만 부른다 — 그러지 않으면 스캔
+/// 문서가 흰 종이로 나온다. 프로그레시브 JPEG 은 아직 못 푼다.
+export fn jpegToRgb(i: u32) i32 {
+    if (i >= img_n) return -1;
+    const im = imgsBuf()[i];
+    if (im.kind != 3 or im.w == 0 or im.h == 0) return -1;
+    const px = @as(usize, im.w) * im.h;
+    const need = px * 3;
+    if (need + 4096 > img_cap - img_used) return -1;
+    if (!imgsRoom(img_n + 1)) return -1;
+    const src = @as([*]const u8, @ptrFromInt(imgArea() + im.off))[0..im.len];
+    const dst = @as([*]u8, @ptrFromInt(imgArea() + img_used))[0..need];
+    // 성분마다 부표본 화소를 담을 자리. 화소당 넉넉히 넷.
+    const tmp = bigScratch(px * 4 + 1024 * 1024) orelse return -1;
+    const got = jpeg.decodeAny(src, dst, tmp);
+    if (got == 0) return -1;
+    const slot = img_n;
+    imgsBuf()[slot] = .{
+        .name_len = 0, .name = undefined, .kind = 1, .w = im.w, .h = im.h,
+        .off = img_used, .len = @intCast(need), .flip = 0, .smask = im.smask,
+    };
+    img_n += 1;
+    img_used += @intCast((need + 3) & ~@as(usize, 3));
+    return @intCast(slot);
+}
+
 fn findImg(name: []const u8) i32 {
     var i: u32 = 0;
     while (i < img_n) : (i += 1)
