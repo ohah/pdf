@@ -29,15 +29,26 @@ export type XfaBox = {
 
 export type XfaPage = { width: number; height: number; boxes: XfaBox[] };
 
-/** 뽑아 본 결과. `dynamic` 이면 서식이 스크립트로 바뀌는 문서다. */
+/** 뽑아 본 결과. */
 export type XfaForm = {
   pages: XfaPage[];
   /** 못 읽고 지나친 마디 수 — 0 이 아니면 실제와 다를 수 있다 */
   skipped: number;
+  /** 서식이 흐르거나 스크립트로 바뀌는 문서인가 */
   dynamic: boolean;
+  /** 흐름 배치(layout="tb"·"lr-tb")를 실제로 쓴 마디 수 */
+  flowed: number;
+  /** 자료만큼 되풀이한 마디 수 (<occur max="-1">) */
+  repeated: number;
+  /** 셈해서 값을 채운 칸 수 (calculate·initialize 스크립트) */
+  calculated: number;
+  /** 못 읽은 스크립트 수 — 그 칸은 값이 비어 있을 수 있다 */
+  unreadScripts: number;
 };
 
 /** "12.7mm" · "1in" · "36pt" · "0.5cm" · "10px" 를 pt 로 */
+import { runCalc, type ValueOf } from "./formjs.js";
+
 export function toPt(v: string | undefined, dflt = 0): number {
   if (!v) return dflt;
   const m = /^\s*(-?[\d.]+)\s*(mm|cm|in|pt|px)?\s*$/.exec(v);
@@ -162,23 +173,106 @@ export function readXfa(xml: string): XfaForm {
   const root = parseXml(xml);
   const template = findDeep(root, "template");
   const datasets = findDeep(root, "datasets");
-  const out: XfaForm = { pages: [], skipped: 0, dynamic: false };
+  const out: XfaForm = {
+    pages: [], skipped: 0, dynamic: false,
+    flowed: 0, repeated: 0, calculated: 0, unreadScripts: 0,
+  };
   if (!template) return out;
 
-  // 서식이 스크립트로 바뀌는 문서인가
-  out.dynamic = /<(script|event)\b/.test(xml) || /layout\s*=\s*"(tb|row|table)"/.test(xml);
+  // 서식이 흐르거나 스크립트로 바뀌는 문서인가
+  out.dynamic = /<(script|event)\b/.test(xml) || /layout\s*=\s*"(tb|lr-tb|row|table)"/.test(xml);
 
   // 쪽 크기 — <pageArea><contentArea> 또는 <medium short long>
   const area = findDeep(template, "contentArea");
   const medium = findDeep(template, "medium");
   const width = toPt(medium?.attr.short, toPt(area?.attr.w, 612));
   const height = toPt(medium?.attr.long, toPt(area?.attr.h, 792));
+  /** 종이 안에서 글이 놓이는 자리 — 여기를 넘으면 다음 쪽으로 넘긴다 */
+  const areaTop = toPt(area?.attr.y, 0);
+  const areaBottom = areaTop + toPt(area?.attr.h, height);
   const page: XfaPage = { width, height, boxes: [] };
+  out.pages.push(page);
+  /** 지금 담고 있는 쪽 */
+  let cur = page;
+  /** 흐름 배치가 다음 쪽으로 넘어간 만큼 y 를 되돌린다 */
+  let carry = 0;
 
-  const walk = (n: Node, ox: number, oy: number) => {
+  const put = (b: XfaBox) => {
+    // 자리가 종이 밖으로 나가면 새 쪽을 낸다. 흐름 배치가 있는 문서는
+    // 자료가 길어지면 저절로 여러 쪽이 된다 — 그게 동적 XFA 다.
+    if (b.y - carry + b.h > areaBottom && b.y - carry > areaTop) {
+      carry = b.y - areaTop;
+      cur = { width, height, boxes: [] };
+      out.pages.push(cur);
+    }
+    cur.boxes.push({ ...b, y: b.y - carry });
+  };
+
+  /** 보이지 않기로 한 마디인가 */
+  const gone = (k: Node) =>
+    k.attr.presence === "hidden" || k.attr.presence === "invisible";
+
+  /** 자료에서 이 이름의 마디들을 찾는다 — 되풀이할 만큼 */
+  const records = (name: string): Node[] => {
+    if (!datasets || !name) return [];
+    const hit: Node[] = [];
+    const walk2 = (n: Node) => {
+      for (const k of n.kids) {
+        if (k.tag === name) hit.push(k);
+        else walk2(k);
+      }
+    };
+    walk2(datasets);
+    return hit;
+  };
+
+  const walk = (n: Node, ox: number, oy: number, bind?: Node) => {
+    // 이 마디가 아이를 어떻게 놓는가. position 이면 아이마다 제 x·y 를
+    // 쓰고, tb·lr-tb 면 차례로 쌓는다 — 자료가 길어지면 아래로 흐른다.
+    const how = n.attr.layout ?? "position";
+    const flow = how === "tb" || how === "lr-tb" || how === "row" || how === "table";
+    if (flow) out.flowed++;
+    let cx = 0;
+    let cy = 0;
+    let rowH = 0;
+    const parentW = toPt(n.attr.w, width);
+
+    /** 흐름 배치에서 이 크기의 마디를 놓을 자리를 정한다 */
+    const spot = (w: number, h: number) => {
+      if (!flow) return null;
+      if ((how === "lr-tb" || how === "row" || how === "table") && cx > 0 && cx + w > parentW) {
+        cx = 0;
+        cy += rowH;
+        rowH = 0;
+      }
+      const at = { x: cx, y: cy };
+      if (how === "tb") { cy += h; }
+      else { cx += w; rowH = Math.max(rowH, h); }
+      return at;
+    };
+
     for (const k of n.kids) {
+      if (gone(k)) continue;
       if (k.tag === "subform" || k.tag === "area" || k.tag === "exclGroup") {
-        walk(k, ox + toPt(k.attr.x), oy + toPt(k.attr.y));
+        // <occur max="-1"> 이면 자료에 있는 만큼 되풀이한다
+        const oc = find(k, "occur");
+        const many = oc && (oc.attr.max === "-1" || Number(oc.attr.max ?? 1) > 1);
+        const recs = many ? records(k.attr.name ?? "") : [];
+        const times = recs.length > 1 ? recs.length : 1;
+        if (times > 1) out.repeated += times - 1;
+        for (let t = 0; t < times; t++) {
+          const kh = toPt(k.attr.h, 0);
+          const at = spot(toPt(k.attr.w, parentW), kh || 0);
+          walk(k,
+            ox + (at ? at.x : toPt(k.attr.x)),
+            oy + (at ? at.y : toPt(k.attr.y)),
+            recs[t] ?? bind);
+          // 흐름 배치인데 높이를 안 적어 두었으면 담은 만큼 내려간다
+          if (at && how === "tb" && !kh) {
+            const low = cur.boxes.reduce((m, b) => Math.max(m, b.y + b.h + carry), 0);
+            cy = Math.max(cy, low - oy);
+          }
+        }
         continue;
       }
       if (k.tag !== "draw" && k.tag !== "field") {
@@ -189,15 +283,19 @@ export function readXfa(xml: string): XfaForm {
         if (!frame) walk(k, ox, oy);
         continue;
       }
-      const x = ox + toPt(k.attr.x);
-      const y = oy + toPt(k.attr.y);
       const w = toPt(k.attr.w, 0);
       const h = toPt(k.attr.h, 0);
+      const at = spot(w || 100, h || 14);
+      const x = ox + (at ? at.x : toPt(k.attr.x));
+      const y = oy + (at ? at.y : toPt(k.attr.y));
       const font = findDeep(k, "font");
       const para = findDeep(k, "para");
       const name = k.attr.name ?? "";
       let text = valueText(k);
-      if (!text && k.tag === "field") text = datasetValue(datasets, name);
+      // 되풀이하는 마디는 제 자료 조각에서 값을 찾는다 — 표의 줄마다
+      // 다른 값이 들어가야 하는데, 문서 전체에서 찾으면 다 같은 값이 된다.
+      if (!text && k.tag === "field") text = datasetValue(bind ?? datasets, name);
+      if (!text && k.tag === "field" && bind) text = datasetValue(datasets, name);
       const cap = find(k, "caption");
       const capText = cap ? valueText(cap) : "";
       const size = toPt(font?.attr.size, 10);
@@ -205,12 +303,12 @@ export function readXfa(xml: string): XfaForm {
       const align = (para?.attr.hAlign as XfaBox["align"]) ?? "left";
       const border = !!findDeep(k, "border") || k.tag === "field";
       if (capText) {
-        page.boxes.push({
+        put({
           x, y, w: w || 100, h: h || size * 1.4, text: capText, name: "",
           size, bold, align, border: false, field: false,
         });
       }
-      page.boxes.push({
+      put({
         x: capText ? x + (w || 100) : x, y,
         w: w || 100, h: h || size * 1.4,
         text, name, size, bold, align, border, field: k.tag === "field",
@@ -218,8 +316,117 @@ export function readXfa(xml: string): XfaForm {
     }
   };
   walk(template, 0, 0);
-  out.pages.push(page);
+
+  // ── 셈하는 마디 (동적 XFA) ─────────────────────────────────────────────
+  //
+  // 값이 자료가 아니라 스크립트로 정해지는 칸이 있다. 표의 합계가 대개
+  // 그렇다. 스크립트는 자바스크립트이거나 FormCalc 인데, 둘 다 **돌리지
+  // 않고 읽어서** 셈한다 — 문서가 준 코드를 실행하지 않는다는 원칙은
+  // 여기서도 같다. 못 읽은 것은 세어 둔다.
+  {
+    const at = new Map<string, string>();
+    const many = new Map<string, string[]>();
+    for (const pg of out.pages)
+      for (const b of pg.boxes) {
+        if (!b.name || !b.text) continue;
+        at.set(b.name, b.text);
+        const list = many.get(b.name) ?? [];
+        list.push(b.text);
+        many.set(b.name, list);
+      }
+    const valueOf = (n: string) => at.get(n) ?? "";
+    const allOf = (n: string) => many.get(n) ?? [];
+    const jobs: { name: string; src: string; kind: "js" | "fc" }[] = [];
+    const hunt = (n: Node) => {
+      for (const k of n.kids) {
+        if (k.tag === "field" && k.attr.name) {
+          for (const ev of k.kids) {
+            if (ev.tag !== "event") continue;
+            const act = ev.attr.activity ?? "";
+            if (act !== "calculate" && act !== "initialize") continue;
+            const sc = find(ev, "script");
+            const src = (sc?.text ?? "").trim();
+            if (!src) continue;
+            const ct = sc?.attr.contentType ?? "";
+            jobs.push({
+              name: k.attr.name, src,
+              kind: /formcalc/i.test(ct) ? "fc" : "js",
+            });
+          }
+        }
+        hunt(k);
+      }
+    };
+    hunt(template);
+    for (const j of jobs) {
+      const got = j.kind === "fc"
+        ? formCalc(j.src, valueOf, allOf)
+        : runCalc(j.src, valueOf);
+      if (got === null) { out.unreadScripts++; continue; }
+      at.set(j.name, got);
+      out.calculated++;
+      for (const pg of out.pages)
+        for (const b of pg.boxes) if (b.name === j.name) b.text = got;
+    }
+  }
   return out;
+}
+
+/**
+ * FormCalc 한 줄을 읽어 셈한다. 못 읽으면 null.
+ *
+ * XFA 가 쓰는 제 나름의 식 언어다. 자바스크립트와 달리 Sum(a, b) 처럼
+ * 함수가 대문자로 시작하고, 마디 이름을 그대로 쓴다. 여기서는 실제 양식이
+ * 거의 다 쓰는 것만 읽는다 — Sum·Avg·Min·Max·Count 와 사칙연산.
+ */
+export function formCalc(
+  src: string, valueOf: ValueOf, allOf: (name: string) => string[] = () => [],
+): string | null {
+  const line = src.replace(/\/\/[^\n]*/g, " ").replace(/\s+/g, " ").trim();
+  const num = (v: string) => {
+    const n = parseFloat(String(v).replace(/[^0-9.\-]/g, ""));
+    return isFinite(n) ? n : 0;
+  };
+  const fn = /^(Sum|Avg|Min|Max|Count)\s*\(([^()]*)\)$/i.exec(line);
+  if (fn) {
+    const args = fn[2].split(",").map((t) => t.trim()).filter(Boolean);
+    const vals: number[] = [];
+    for (const a of args) {
+      // 이름[*] 은 "그 이름을 가진 것 전부" 라는 뜻이다. 표의 합계가 바로
+      // 이것이라, 하나만 집으면 마지막 줄 값이 합계로 나온다.
+      const star = /\[\s*\*\s*\]/.test(a);
+      const bare = a.replace(/\[[^\]]*\]/g, "");
+      if (/^[-+]?[\d.]+$/.test(bare)) { vals.push(Number(bare)); continue; }
+      if (star) {
+        const many = allOf(bare);
+        if (many.length > 0) { for (const v of many) vals.push(num(v)); continue; }
+      }
+      vals.push(num(valueOf(bare)));
+    }
+    if (vals.length === 0) return "";
+    switch (fn[1].toLowerCase()) {
+      case "sum": return String(vals.reduce((a, b) => a + b, 0));
+      case "avg": return String(vals.reduce((a, b) => a + b, 0) / vals.length);
+      case "min": return String(Math.min(...vals));
+      case "max": return String(Math.max(...vals));
+      case "count": return String(vals.length);
+      default: return null;
+    }
+  }
+  // 이름과 숫자와 사칙연산만 있는 식이면 셈한다
+  if (!/^[\w.\[\]*\s+\-*/()]+$/.test(line)) return null;
+  const filled = line.replace(/[A-Za-z_][\w.]*(\[[^\]]*\])?/g, (m) => {
+    const bare = m.replace(/\[[^\]]*\]/g, "");
+    return String(num(valueOf(bare)));
+  });
+  if (!/^[\d.\s+\-*/()]+$/.test(filled)) return null;
+  try {
+    // 숫자와 연산자만 남았으므로 우리 계산기로 셈한다
+    const got = runCalc(`event.value = ${filled};`, () => "");
+    return got;
+  } catch {
+    return null;
+  }
 }
 
 /**

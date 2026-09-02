@@ -1,5 +1,5 @@
 // XFA 양식 — XML 을 읽어 자리와 글자를 뽑고, 캔버스에 그린다.
-import { PDFDocument, readXfa, drawXfa, toPt } from '../dist/index.js';
+import { PDFDocument, readXfa, drawXfa, toPt, formCalc } from '../dist/index.js';
 import { createCanvas } from '@napi-rs/canvas';
 
 let fails = 0;
@@ -39,6 +39,40 @@ ok('그리면 잉크가 남는다', ink > 500, ink);
 const t = await d.text(1);
 ok('PDF 쪽에는 안내 한 줄뿐', /Acrobat/.test(t), t.slice(0, 40));
 d.close();
+
+// ── 동적 XFA ──────────────────────────────────────────────────────────
+//
+// 자료가 길어지면 줄이 흐르고, 넘치면 쪽이 늘고, 합계는 스크립트가 셈한다.
+// 그게 "동적" 이다. 스크립트는 여기서도 돌리지 않고 읽어서 셈한다.
+{
+  const d2 = await PDFDocument.open(new URL('./fixtures/xfa-dyn.pdf', import.meta.url).pathname);
+  const f2 = readXfa(d2.xfaXml);
+  ok('동적으로 알아본다', f2.dynamic === true);
+  ok('자료만큼 되풀이한다', f2.repeated === 29, f2.repeated);
+  ok('흐름 배치를 쓴다', f2.flowed > 0, f2.flowed);
+  ok('넘치면 쪽이 는다', f2.pages.length === 2, f2.pages.length);
+  const all = f2.pages.flatMap((p) => p.boxes);
+  ok('줄이 아래로 흐른다',
+    all.filter((b) => b.name === 'nm').slice(0, 3).map((b) => Math.round(b.y)).join(',') === '50,70,90',
+    all.filter((b) => b.name === 'nm').slice(0, 3).map((b) => Math.round(b.y)));
+  ok('줄마다 제 값', all.filter((b) => b.name === 'nm').slice(0, 2).map((b) => b.text).join('|') === '품목 1|품목 2',
+    all.filter((b) => b.name === 'nm').slice(0, 2).map((b) => b.text));
+  ok('FormCalc 합계', all.find((b) => b.name === 'total')?.text === '465000',
+    all.find((b) => b.name === 'total')?.text);
+  ok('셈한 칸 수', f2.calculated === 1 && f2.unreadScripts === 0, [f2.calculated, f2.unreadScripts]);
+  ok('숨긴 마디는 안 그린다', !all.some((b) => b.text.includes('안 보여야')));
+  d2.close();
+}
+// FormCalc 낱개
+{
+  const v = { a: '10', b: '4' };
+  const at = (n) => v[n] ?? '';
+  ok('FormCalc Sum', formCalc('Sum(a, b)', at) === '14', formCalc('Sum(a, b)', at));
+  ok('FormCalc 곱', formCalc('a * b', at) === '40', formCalc('a * b', at));
+  ok('FormCalc Max', formCalc('Max(a, b, 7)', at) === '10', formCalc('Max(a, b, 7)', at));
+  ok('FormCalc 모르는 것은 null', formCalc('xfa.host.messageBox("x")', at) === null);
+  ok('돌리지 않는다', formCalc('globalThis.__x = 1', at) === null && globalThis.__x === undefined);
+}
 
 console.log(fails === 0 ? 'XFA 통과' : `XFA 실패 ${fails}개`);
 process.exit(fails === 0 ? 0 : 1);

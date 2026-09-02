@@ -12,7 +12,7 @@ import {
   type Layer, type Attachment, type Destination, type StructNode, type Viewport,
   type RenderResult, type BuildOpts, type OpenOpts, type Paths, type TextRun,
   type OpenAction, type CalcField, type ValueOf, type XfaForm, type XfaPage, type XfaBox,
-  readXfa, drawXfa, toPt, runCalc, recalculate,
+  readXfa, drawXfa, toPt, runCalc, recalculate, formCalc,
 } from "../src/index.js";
 
 export async function demo(pdf: PDFDocument) {
@@ -41,6 +41,8 @@ export async function demo(pdf: PDFDocument) {
   const page: XfaPage | undefined = form.pages[0];
   const box: XfaBox | undefined = page?.boxes[0];
   const pt: number = toPt("1in");
+  const fc: string | null = formCalc("Sum(a,b)", (n) => n);
+  const flow: number = form.flowed + form.repeated + form.calculated + form.unreadScripts;
   const calcs: CalcField[] = fields.map((f) => ({ name: f.name, calc: f.calc, format: f.format }));
   const at: ValueOf = (n) => n;
   const one: string | null = runCalc("event.value = 1;", at);
@@ -48,5 +50,5 @@ export async function demo(pdf: PDFDocument) {
   const partial: boolean = pdf.partial;
   void drawXfa;
   return {
-    open, order, xml, form, page, box, pt, calcs, one, many, partial, items, fields, links, annots, sigs, merged, outline, perm, layers, atts, dests, tree, vp, spec, opts, paths, runs };
+    open, order, xml, form, page, box, pt, calcs, one, many, partial, fc, flow, items, fields, links, annots, sigs, merged, outline, perm, layers, atts, dests, tree, vp, spec, opts, paths, runs };
 }

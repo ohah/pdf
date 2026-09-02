@@ -1,0 +1,95 @@
+%PDF-1.7
+1 0 obj<</Type/Catalog/Pages 2 0 R/AcroForm<</Fields[]/XFA[(template) 5 0 R (datasets) 6 0 R]>>>>endobj
+2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Resources<</Font<</F1 7 0 R>>>>/Contents 4 0 R>>endobj
+4 0 obj<</Length 57>>stream
+BT /F1 12 Tf 60 700 Td (Please open with Acrobat.) Tj ET
+endstream endobj
+5 0 obj<</Length 1447>>stream
+<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.0/">
+  <subform name="form1" layout="position" w="595pt" h="842pt">
+    <pageSet>
+      <pageArea name="Page1">
+        <contentArea x="0pt" y="20pt" w="595pt" h="700pt"/>
+        <medium short="595pt" long="842pt"/>
+      </pageArea>
+    </pageSet>
+    <draw x="40pt" y="24pt" w="300pt" h="20pt">
+      <value><text>거래 명세서 (동적)</text></value>
+      <font size="14pt" weight="bold"/>
+    </draw>
+    <subform name="table" x="40pt" y="50pt" w="500pt" layout="tb">
+      <subform name="item" layout="lr-tb" w="500pt" h="20pt">
+        <occur min="1" max="-1"/>
+        <field name="nm" w="200pt" h="20pt"><font size="10pt"/></field>
+        <field name="qty" w="80pt" h="20pt"><font size="10pt"/></field>
+        <field name="amt" w="120pt" h="20pt"><font size="10pt"/></field>
+      </subform>
+    </subform>
+    <field name="total" x="400pt" y="760pt" w="150pt" h="20pt">
+      <caption><value><text>합계</text></value></caption>
+      <font size="11pt" weight="bold"/>
+      <event activity="calculate">
+        <script contentType="application/x-formcalc">Sum(amt[*])</script>
+      </event>
+    </field>
+    <draw name="secret" x="40pt" y="800pt" w="200pt" h="14pt" presence="hidden">
+      <value><text>이건 안 보여야 한다</text></value>
+    </draw>
+  </subform>
+</template>
+
+endstream endobj
+6 0 obj<</Length 2130>>stream
+<xfa:datasets xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/">
+  <xfa:data><form1><table>
+      <item><nm>품목 1</nm><qty>1</qty><amt>1000</amt></item>
+      <item><nm>품목 2</nm><qty>2</qty><amt>2000</amt></item>
+      <item><nm>품목 3</nm><qty>3</qty><amt>3000</amt></item>
+      <item><nm>품목 4</nm><qty>4</qty><amt>4000</amt></item>
+      <item><nm>품목 5</nm><qty>5</qty><amt>5000</amt></item>
+      <item><nm>품목 6</nm><qty>6</qty><amt>6000</amt></item>
+      <item><nm>품목 7</nm><qty>7</qty><amt>7000</amt></item>
+      <item><nm>품목 8</nm><qty>8</qty><amt>8000</amt></item>
+      <item><nm>품목 9</nm><qty>9</qty><amt>9000</amt></item>
+      <item><nm>품목 10</nm><qty>10</qty><amt>10000</amt></item>
+      <item><nm>품목 11</nm><qty>11</qty><amt>11000</amt></item>
+      <item><nm>품목 12</nm><qty>12</qty><amt>12000</amt></item>
+      <item><nm>품목 13</nm><qty>13</qty><amt>13000</amt></item>
+      <item><nm>품목 14</nm><qty>14</qty><amt>14000</amt></item>
+      <item><nm>품목 15</nm><qty>15</qty><amt>15000</amt></item>
+      <item><nm>품목 16</nm><qty>16</qty><amt>16000</amt></item>
+      <item><nm>품목 17</nm><qty>17</qty><amt>17000</amt></item>
+      <item><nm>품목 18</nm><qty>18</qty><amt>18000</amt></item>
+      <item><nm>품목 19</nm><qty>19</qty><amt>19000</amt></item>
+      <item><nm>품목 20</nm><qty>20</qty><amt>20000</amt></item>
+      <item><nm>품목 21</nm><qty>21</qty><amt>21000</amt></item>
+      <item><nm>품목 22</nm><qty>22</qty><amt>22000</amt></item>
+      <item><nm>품목 23</nm><qty>23</qty><amt>23000</amt></item>
+      <item><nm>품목 24</nm><qty>24</qty><amt>24000</amt></item>
+      <item><nm>품목 25</nm><qty>25</qty><amt>25000</amt></item>
+      <item><nm>품목 26</nm><qty>26</qty><amt>26000</amt></item>
+      <item><nm>품목 27</nm><qty>27</qty><amt>27000</amt></item>
+      <item><nm>품목 28</nm><qty>28</qty><amt>28000</amt></item>
+      <item><nm>품목 29</nm><qty>29</qty><amt>29000</amt></item>
+      <item><nm>품목 30</nm><qty>30</qty><amt>30000</amt></item></table></form1></xfa:data>
+</xfa:datasets>
+</xdp:xdp>
+endstream endobj
+7 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000113 00000 n 
+0000000162 00000 n 
+0000000272 00000 n 
+0000000374 00000 n 
+0000001869 00000 n 
+0000004047 00000 n 
+trailer<</Size 8/Root 1 0 R>>
+startxref
+4108
+%%EOF

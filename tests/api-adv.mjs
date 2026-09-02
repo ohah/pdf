@@ -235,6 +235,11 @@ for (const x of ["", "<template>", "<template><subform x=\"1in\"><field/></subfo
                  "<".repeat(2000), "<template>" + "<subform>".repeat(300) + "</template>"]) {
   await bounded("readXfa(이상한 XML)", () => lib.readXfa(x));
 }
+hit("formCalc");
+for (const src of ['Sum(a,b)', 'a*b', 'xfa.host.gotoURL("//x")', '', 'Sum(' + '"a",'.repeat(300) + '"b")',
+                   'a'.repeat(5000), '((((1))))', 'Count(a[*])', '1/0']) {
+  await bounded("formCalc", () => lib.formCalc(src, () => "1", () => ["1", "2"]));
+}
 hit("drawXfa");
 await bounded("drawXfa(캔버스 없이)", () => lib.drawXfa({ getContext: () => null, width: 1, height: 1 },
   { width: 10, height: 10, boxes: [] }, 1));
