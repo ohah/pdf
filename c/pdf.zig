@@ -453,17 +453,46 @@ fn prevTrailer(b: []const u8, ts: usize, te: usize) ?usize {
 /// 한 바이트씩 밀며 비교하면 바이트마다 서너 클럭이 든다. 첫 글자만 찾을
 /// 때는 여덟 바이트를 u64 로 한 번에 읽어 본다 — 그 안에 첫 글자가 없으면
 /// 여덟 칸을 통째로 건너뛴다. 찾는 것과 답은 같고 훑는 값만 준다.
+/// PDF 바이트열에 흔해서 걸림돌로 못 쓰는 글자들.
+///
+/// 여덟 바이트씩 건너뛰는 수법은 걸림 글자가 드물어야 값이 난다. 34MB 문서에서
+/// 공백은 19.5% — 여덟 바이트 묶음의 82% 에 들어 있어 사실상 한 칸씩 기어간다.
+/// 'j' 는 0.8% 라 6% 에만 들어 있다.
+fn tooCommon(c: u8) bool {
+    return switch (c) {
+        ' ', '\n', '\r', '\t', '/', '<', '>', '0'...'9',
+        'e', 't', 'o', 'a', 'i', 'n', 's', 'r', 'l', 'd', 'c' => true,
+        else => false,
+    };
+}
+
 fn find(h: []const u8, n: []const u8, from: usize) ?usize {
     if (n.len == 0 or n.len > h.len) return null;
     const last = h.len - n.len;
-    const c0 = n[0];
+    if (from > last) return null;
+    // 찾을 말에서 가장 드문 글자를 걸림돌로 삼는다. 뒤에서부터 흔하지 않은
+    // 글자를 찾고, 다 흔하면 마지막 글자로 건다.
+    var k: usize = n.len - 1;
+    {
+        var j: usize = n.len;
+        while (j > 0) {
+            j -= 1;
+            if (!tooCommon(n[j])) {
+                k = j;
+                break;
+            }
+        }
+    }
+    const ck = n[k];
     const ones: u64 = 0x0101010101010101;
     const highs: u64 = 0x8080808080808080;
-    const spread: u64 = ones *% @as(u64, c0);
-    var i: usize = from;
-    while (i <= last) {
-        // 여덟 바이트 중에 첫 글자가 있는지 — 없으면 여덟 칸 건너뛴다
-        while (i + 8 <= last) {
+    const spread: u64 = ones *% @as(u64, ck);
+    // 걸림돌이 놓일 수 있는 자리
+    const end = last + k;
+    var i: usize = from + k;
+    while (i <= end) {
+        // 여덟 바이트 중에 걸림돌이 있는지 — 없으면 여덟 칸 건너뛴다
+        while (i + 8 <= end) {
             const w: u64 = @bitCast(h[i..][0..8].*);
             const x = w ^ spread;
             const hit = (x -% ones) & ~x & highs;
@@ -473,8 +502,8 @@ fn find(h: []const u8, n: []const u8, from: usize) ?usize {
             }
             i += 8;
         }
-        if (i > last) return null;
-        if (h[i] == c0 and std_mem_eq(h[i .. i + n.len], n)) return i;
+        if (i > end) return null;
+        if (h[i] == ck and std_mem_eq(h[i - k ..][0..n.len], n)) return i - k;
         i += 1;
     }
     return null;
