@@ -839,6 +839,16 @@ fn scan(
     return w * h;
 }
 
+/// YCbCr 값 하나를 RGB 로 옮겨 넣는다 (정수, 16.16 고정소수).
+inline fn storeRgb(dst: []u8, o: usize, yy: i32, cb: i32, cr: i32) void {
+    const r = yy + @divTrunc(91881 * cr, 65536);
+    const g = yy - @divTrunc(22554 * cb + 46802 * cr, 65536);
+    const b = yy + @divTrunc(116130 * cb, 65536);
+    dst[o] = @intCast(@max(0, @min(255, r)));
+    dst[o + 1] = @intCast(@max(0, @min(255, g)));
+    dst[o + 2] = @intCast(@max(0, @min(255, b)));
+}
+
 /// 흔한 꼴(성분 셋 · YCbCr)을 위한 빠른 길.
 ///
 /// 화소마다 실수로 곱하고 나누면 192만 화소짜리 사진에서 그것만 수천만
@@ -892,6 +902,16 @@ fn emitFast(
         }
     }
 
+    // 가로가 온해상도인 성분은 표를 볼 것도, 옆 화소를 섞을 것도 없다.
+    // 4:2:0·4:2:2 면 Y 가, 4:4:4 면 셋 다 여기 걸린다.
+    var hdir: [3]bool = undefined;
+    var cwm1: [3]u32 = undefined;
+    i = 0;
+    while (i < 3) : (i += 1) {
+        hdir[i] = comps[i].hs == hmax;
+        cwm1[i] = comps[i].w - 1;
+    }
+
     var y: u32 = 0;
     while (y < h) : (y += 1) {
         // 세로 무게는 줄마다 한 번만
@@ -918,6 +938,53 @@ fn emitFast(
             yw[i] = @intFromFloat(@max(0, @min(65536, (g - @as(f32, @floatFromInt(l))) * 65536)));
         }
         var x: u32 = 0;
+        // 갈래를 화소마다 물으면 아낀 읽기를 가지 검사로 도로 물어낸다.
+        // 줄 밖에서 한 번만 갈라 두고 안쪽은 곧게 편다.
+        const all_dir = hdir[0] and hdir[1] and hdir[2] and
+            yw[0] == 0 and yw[1] == 0 and yw[2] == 0;
+        const y_dir = hdir[0] and yw[0] == 0;
+        if (all_dir) {
+            // 4:4:4 — 성분마다 자리 하나씩, 셋이 끝
+            const b0 = ylo[0];
+            const b1 = ylo[1];
+            const b2 = ylo[2];
+            const m0 = cwm1[0];
+            const m1 = cwm1[1];
+            const m2 = cwm1[2];
+            while (x < w) : (x += 1) {
+                const yy: i32 = scratch[b0 + @min(m0, x)];
+                const cb: i32 = @as(i32, scratch[b1 + @min(m1, x)]) - 128;
+                const cr: i32 = @as(i32, scratch[b2 + @min(m2, x)]) - 128;
+                storeRgb(dst, (@as(usize, y) * w + x) * 3, yy, cb, cr);
+            }
+        } else if (y_dir) {
+            // 4:2:0·4:2:2 — Y 는 자리 하나, 색차만 섞는다
+            const b0 = ylo[0];
+            const m0 = cwm1[0];
+            while (x < w) : (x += 1) {
+                const yy: i32 = scratch[b0 + @min(m0, x)];
+                var v2: [2]i32 = .{ 0, 0 };
+                i = 1;
+                while (i < 3) : (i += 1) {
+                    const base = @as(usize, i) * @as(usize, w) * 3 + @as(usize, x) * 3;
+                    const lo = tbl[base];
+                    const hi = tbl[base + 1];
+                    const tx: i32 = @intCast(tbl[base + 2]);
+                    const a: i32 = scratch[ylo[i] + lo];
+                    const b: i32 = scratch[ylo[i] + hi];
+                    const top = a + @divTrunc((b - a) * tx, 65536);
+                    if (yw[i] == 0) {
+                        v2[i - 1] = top;
+                        continue;
+                    }
+                    const c2: i32 = scratch[yhi[i] + lo];
+                    const d2: i32 = scratch[yhi[i] + hi];
+                    const bot = c2 + @divTrunc((d2 - c2) * tx, 65536);
+                    v2[i - 1] = top + @divTrunc((bot - top) * yw[i], 65536);
+                }
+                storeRgb(dst, (@as(usize, y) * w + x) * 3, yy, v2[0] - 128, v2[1] - 128);
+            }
+        }
         while (x < w) : (x += 1) {
             var v: [3]i32 = .{ 0, 0, 0 };
             i = 0;
@@ -934,17 +1001,7 @@ fn emitFast(
                 const bot = c2 + @divTrunc((d2 - c2) * tx, 65536);
                 v[i] = top + @divTrunc((bot - top) * yw[i], 65536);
             }
-            // YCbCr → RGB (정수)
-            const yy = v[0];
-            const cb = v[1] - 128;
-            const cr = v[2] - 128;
-            const r = yy + @divTrunc(91881 * cr, 65536);
-            const g2 = yy - @divTrunc(22554 * cb + 46802 * cr, 65536);
-            const b3 = yy + @divTrunc(116130 * cb, 65536);
-            const o = (@as(usize, y) * w + x) * 3;
-            dst[o] = @intCast(@max(0, @min(255, r)));
-            dst[o + 1] = @intCast(@max(0, @min(255, g2)));
-            dst[o + 2] = @intCast(@max(0, @min(255, b3)));
+            storeRgb(dst, (@as(usize, y) * w + x) * 3, v[0], v[1] - 128, v[2] - 128);
         }
     }
     return true;
