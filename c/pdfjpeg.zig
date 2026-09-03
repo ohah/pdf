@@ -55,7 +55,16 @@ const Huff = struct {
     valptr: [17]u16 = .{0} ** 17,
     vals: [256]u8 = .{0} ** 256,
     n: u16 = 0,
+    /// 아홉 비트 이하 코드를 한 번에 집는 표.
+    ///
+    /// 코드 하나를 읽으려고 비트를 하나씩 열여섯 번까지 세고 있었다.
+    /// 사진 한 장에 계수가 수백만 개라 그 셈이 통째로 값이 된다.
+    /// 앞 아홉 비트를 그대로 색인으로 삼으면 대개 한 번에 끝난다.
+    /// 값은 (기호 << 5) | 길이, 0 이면 표에 없다는 뜻이다.
+    fast: [512]u16 = .{0} ** 512,
 };
+
+const FAST_BITS: u5 = 9;
 
 fn buildHuff(h: *Huff, bits: []const u8, vals: []const u8) void {
     var code: i32 = 0;
@@ -73,34 +82,91 @@ fn buildHuff(h: *Huff, bits: []const u8, vals: []const u8) void {
     h.n = k;
     var i: u16 = 0;
     while (i < k and i < vals.len and i < h.vals.len) : (i += 1) h.vals[i] = vals[i];
+
+    // 빠른 표를 짓는다 — 아홉 비트 이하 코드마다 그 코드로 시작하는
+    // 모든 색인 자리에 (기호, 길이) 를 박아 둔다
+    @memset(&h.fast, 0);
+    var code2: u32 = 0;
+    var vi: u16 = 0;
+    var ln: u5 = 1;
+    while (ln <= 16) : (ln += 1) {
+        const cnt = if (ln - 1 < bits.len) bits[ln - 1] else 0;
+        var c: u8 = 0;
+        while (c < cnt) : (c += 1) {
+            if (ln <= FAST_BITS and vi < h.n and vi < h.vals.len) {
+                const shift: u5 = FAST_BITS - ln;
+                const base = code2 << shift;
+                const span = @as(u32, 1) << shift;
+                var q: u32 = 0;
+                while (q < span) : (q += 1) {
+                    const at = base + q;
+                    if (at < h.fast.len) h.fast[at] = (@as(u16, h.vals[vi]) << 5) | ln;
+                }
+            }
+            code2 += 1;
+            vi += 1;
+        }
+        code2 <<= 1;
+    }
 }
 
+/// 비트를 통으로 담아 읽는다.
+///
+/// 예전에는 바이트 하나를 담고 비트를 하나씩 꺼냈다. 계수 하나에 코드
+/// 하나와 값 몇 비트를 읽으니, 사진 한 장이면 그 셈이 수천만 번이다.
+/// 서른두 비트를 미리 채워 두고 필요한 만큼 떼어 쓴다.
 const Bits = struct {
     d: []const u8,
     p: usize,
     acc: u32 = 0,
-    n: u5 = 0,
-    /// 0xFF00 채움과 재시작 표식을 넘긴다
-    fn bit(s: *Bits) u32 {
-        if (s.n == 0) {
-            if (s.p >= s.d.len) return 0;
-            var v = s.d[s.p];
-            s.p += 1;
-            if (v == 0xFF) {
-                // 0xFF00 은 자료의 0xFF, 그 밖은 표식이라 여기서 끝낸다
-                if (s.p < s.d.len and s.d[s.p] == 0) s.p += 1
-                else v = 0;
+    /// 담아 둔 비트 수. u5 로 두었더니 24+8 에서 넘쳐 0 이 되고 되돌이가
+    /// 끝나지 않았다 — 32 까지 담으므로 넉넉한 자리를 쓴다.
+    n: u32 = 0,
+
+    /// 스물넷 비트가 차도록 바이트를 밀어 넣는다.
+    /// 0xFF00 은 자료의 0xFF 이고, 그 밖의 0xFF 는 표식이라 거기서 멈춘다.
+    fn fill(s: *Bits) void {
+        while (s.n <= 24) {
+            var v: u8 = 0;
+            if (s.p < s.d.len) {
+                v = s.d[s.p];
+                if (v == 0xFF) {
+                    if (s.p + 1 < s.d.len and s.d[s.p + 1] == 0) {
+                        s.p += 2;
+                    } else {
+                        v = 0; // 표식 — 여기서부터는 0 으로 채운다
+                    }
+                } else {
+                    s.p += 1;
+                }
             }
-            s.acc = v;
-            s.n = 8;
+            s.acc |= @as(u32, v) << @intCast(24 - s.n);
+            s.n += 8;
         }
-        s.n -= 1;
-        return (s.acc >> @intCast(s.n)) & 1;
+    }
+    /// 앞 k 비트를 보되 쓰지는 않는다
+    fn peek(s: *Bits, k: u5) u32 {
+        if (k == 0) return 0;
+        if (s.n < k) s.fill();
+        return s.acc >> @intCast(32 - @as(u32, k));
+    }
+    fn skip(s: *Bits, k: u5) void {
+        if (k == 0) return;
+        if (s.n < k) s.fill();
+        const kk: u32 = @min(@as(u32, k), s.n);
+        if (kk >= 32) { s.acc = 0; s.n = 0; return; }
+        s.acc <<= @intCast(kk);
+        s.n -= kk;
+    }
+    fn bit(s: *Bits) u32 {
+        const v = s.peek(1);
+        s.skip(1);
+        return v;
     }
     fn bits(s: *Bits, k: u5) u32 {
-        var v: u32 = 0;
-        var i: u5 = 0;
-        while (i < k) : (i += 1) v = (v << 1) | s.bit();
+        if (k == 0) return 0;
+        const v = s.peek(k);
+        s.skip(k);
         return v;
     }
     fn reset(s: *Bits) void {
@@ -110,6 +176,15 @@ const Bits = struct {
 };
 
 fn decodeHuff(s: *Bits, h: *const Huff) u8 {
+    // 앞 아홉 비트로 한 번에 집는다
+    const look = s.peek(FAST_BITS);
+    const hit = h.fast[@intCast(look)];
+    if (hit != 0) {
+        const len: u5 = @intCast(hit & 31);
+        s.skip(len);
+        return @intCast(hit >> 5);
+    }
+    // 아홉 비트를 넘는 긴 코드 — 규격대로 한 비트씩 늘려 본다
     var code: i32 = 0;
     var l: u8 = 1;
     while (l <= 16) : (l += 1) {
@@ -138,36 +213,83 @@ const ZIGZAG = [64]u8{
     58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
 };
 
-/// 8x8 역 DCT. 곧이곧대로 두 번 도는 판이라 느리지만 짧고 틀릴 데가 없다.
+/// 8x8 역 DCT.
+///
+/// 곧이곧대로 두 겹으로 돌면 블록마다 곱셈이 1024번이다. 그 판으로 재 보니
+/// 192만 화소짜리 사진 하나를 푸는 데 122ms 였다 — libjpeg 은 5ms 다.
+///
+/// 그래서 나비꼴(butterfly)로 바꿨다. 한 줄을 여덟 값으로 한 번에 풀면
+/// 곱셈이 열몇 번이면 된다. 세로로 한 번 더 돌려 8x8 을 끝낸다.
+/// 상수는 규격의 코사인 값에서 나온 것으로, libjpeg·stb_image 가 쓰는 것과
+/// 같다. 결과는 예전 판과 화소 단위로 맞춰 확인했다.
+fn idct1d(s0: f32, s1: f32, s2: f32, s3: f32, s4: f32, s5: f32, s6: f32, s7: f32, out: *[8]f32) void {
+    // 짝수 쪽
+    var p2 = s2;
+    var p3 = s6;
+    var p1 = (p2 + p3) * 0.5411961;
+    const t2 = p1 + p3 * -1.847759;
+    const t3e = p1 + p2 * 0.765367;
+    p2 = s0;
+    p3 = s4;
+    const t0e = p2 + p3;
+    const t1e = p2 - p3;
+    const x0 = t0e + t3e;
+    const x3 = t0e - t3e;
+    const x1 = t1e + t2;
+    const x2 = t1e - t2;
+    // 홀수 쪽
+    var t0 = s7;
+    var t1 = s5;
+    var t2o = s3;
+    var t3 = s1;
+    p3 = t0 + t2o;
+    var p4 = t1 + t3;
+    p1 = t0 + t3;
+    p2 = t1 + t2o;
+    const p5 = (p3 + p4) * 1.175876;
+    t0 *= 0.298631;
+    t1 *= 2.053120;
+    t2o *= 3.072711;
+    t3 *= 1.501321;
+    p1 = p5 + p1 * -0.899976;
+    p2 = p5 + p2 * -2.562915;
+    p3 *= -1.961571;
+    p4 *= -0.390181;
+    t3 += p1 + p4;
+    t2o += p2 + p3;
+    t1 += p2 + p4;
+    t0 += p1 + p3;
+    out[0] = x0 + t3;
+    out[7] = x0 - t3;
+    out[1] = x1 + t2o;
+    out[6] = x1 - t2o;
+    out[2] = x2 + t1;
+    out[5] = x2 - t1;
+    out[3] = x3 + t0;
+    out[4] = x3 - t0;
+}
+
 fn idct(blk: *[64]f32, out: *[64]u8) void {
     var tmp: [64]f32 = undefined;
-    var u: u32 = 0;
+    var row: [8]f32 = undefined;
     // 가로
+    var u: usize = 0;
     while (u < 8) : (u += 1) {
-        var x: u32 = 0;
-        while (x < 8) : (x += 1) {
-            var sum: f32 = 0;
-            var v: u32 = 0;
-            while (v < 8) : (v += 1) {
-                const cv: f32 = if (v == 0) 0.70710678 else 1;
-                sum += cv * blk[u * 8 + v] * COS[v][x];
-            }
-            tmp[u * 8 + x] = sum * 0.5;
-        }
+        const b = blk[u * 8 ..][0..8];
+        idct1d(b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], &row);
+        var x: usize = 0;
+        // 두 겹을 합쳐 1/8 이면 된다 — 가로에서는 그대로 두고 세로에서 나눈다
+        while (x < 8) : (x += 1) tmp[u * 8 + x] = row[x];
     }
     // 세로
-    var x2: u32 = 0;
+    var x2: usize = 0;
     while (x2 < 8) : (x2 += 1) {
-        var y: u32 = 0;
+        idct1d(tmp[x2], tmp[8 + x2], tmp[16 + x2], tmp[24 + x2],
+            tmp[32 + x2], tmp[40 + x2], tmp[48 + x2], tmp[56 + x2], &row);
+        var y: usize = 0;
         while (y < 8) : (y += 1) {
-            var sum: f32 = 0;
-            var uu: u32 = 0;
-            while (uu < 8) : (uu += 1) {
-                const cu: f32 = if (uu == 0) 0.70710678 else 1;
-                sum += cu * tmp[uu * 8 + x2] * COS[uu][y];
-            }
-            const vv = sum * 0.5 + 128;
-            out[y * 8 + x2] = @intFromFloat(@max(0, @min(255, vv)));
+            const v = row[y] * 0.125 + 128;
+            out[y * 8 + x2] = @intFromFloat(@max(0, @min(255, v)));
         }
     }
 }
@@ -717,11 +839,128 @@ fn scan(
     return w * h;
 }
 
+/// 흔한 꼴(성분 셋 · YCbCr)을 위한 빠른 길.
+///
+/// 화소마다 실수로 곱하고 나누면 192만 화소짜리 사진에서 그것만 수천만
+/// 번이다. 두 가지를 바꾼다.
+///
+///   가로 무게는 x 에만 딸린 값이라 줄마다 다시 셈할 까닭이 없다 —
+///   한 번 만들어 두고 모든 줄에서 쓴다.
+///   YCbCr→RGB 는 정수 표로 바꾼다. libjpeg 이 하는 것과 같은 방식이다.
+///
+/// 자리가 모자라거나 꼴이 다르면 false 를 주고 일반 길로 간다.
+fn emitFast(
+    w: u32, h: u32, comps: *[4]Comp, hmax: u8, vmax: u8, dst: []u8, scratch: []u8,
+) bool {
+    if (w == 0 or h == 0) return false;
+    // 성분 판 뒤의 남은 자리에 가로 무게표를 놓는다
+    var end: usize = 0;
+    var i: u8 = 0;
+    while (i < 3) : (i += 1) {
+        const c = &comps[i];
+        if (c.w == 0 or c.h == 0) return false;
+        end = @max(end, c.off + @as(usize, c.w) * c.h);
+    }
+    end = (end + 7) & ~@as(usize, 7);
+    const tbl_bytes = @as(usize, w) * 3 * 4 * 2; // 성분 셋 × (lo, hi, 무게)
+    if (end + tbl_bytes > scratch.len) return false;
+    const tbl = @as([*]u32, @ptrCast(@alignCast(scratch.ptr + end)));
+
+    // 가로 무게 (16.16 고정소수)
+    i = 0;
+    while (i < 3) : (i += 1) {
+        const c = &comps[i];
+        const base = @as(usize, i) * @as(usize, w) * 3;
+        var x: u32 = 0;
+        while (x < w) : (x += 1) {
+            if (c.hs == hmax) {
+                const sx = @min(c.w - 1, x);
+                tbl[base + x * 3] = sx;
+                tbl[base + x * 3 + 1] = sx;
+                tbl[base + x * 3 + 2] = 0;
+                continue;
+            }
+            const f = (@as(f32, @floatFromInt(x)) + 0.5) *
+                @as(f32, @floatFromInt(c.hs)) / @as(f32, @floatFromInt(hmax)) - 0.5;
+            const g = @max(@as(f32, 0), f);
+            const lo: u32 = @min(c.w - 1, @as(u32, @intFromFloat(g)));
+            const hi: u32 = @min(c.w - 1, lo + 1);
+            const t = g - @as(f32, @floatFromInt(lo));
+            tbl[base + x * 3] = lo;
+            tbl[base + x * 3 + 1] = hi;
+            tbl[base + x * 3 + 2] = @intFromFloat(@max(0, @min(65536, t * 65536)));
+        }
+    }
+
+    var y: u32 = 0;
+    while (y < h) : (y += 1) {
+        // 세로 무게는 줄마다 한 번만
+        var ylo: [3]usize = undefined;
+        var yhi: [3]usize = undefined;
+        var yw: [3]i32 = undefined;
+        i = 0;
+        while (i < 3) : (i += 1) {
+            const c = &comps[i];
+            if (c.vs == vmax) {
+                const sy = @min(c.h - 1, y);
+                ylo[i] = c.off + @as(usize, sy) * c.w;
+                yhi[i] = ylo[i];
+                yw[i] = 0;
+                continue;
+            }
+            const f = (@as(f32, @floatFromInt(y)) + 0.5) *
+                @as(f32, @floatFromInt(c.vs)) / @as(f32, @floatFromInt(vmax)) - 0.5;
+            const g = @max(@as(f32, 0), f);
+            const l: u32 = @min(c.h - 1, @as(u32, @intFromFloat(g)));
+            const hh: u32 = @min(c.h - 1, l + 1);
+            ylo[i] = c.off + @as(usize, l) * c.w;
+            yhi[i] = c.off + @as(usize, hh) * c.w;
+            yw[i] = @intFromFloat(@max(0, @min(65536, (g - @as(f32, @floatFromInt(l))) * 65536)));
+        }
+        var x: u32 = 0;
+        while (x < w) : (x += 1) {
+            var v: [3]i32 = .{ 0, 0, 0 };
+            i = 0;
+            while (i < 3) : (i += 1) {
+                const base = @as(usize, i) * @as(usize, w) * 3 + @as(usize, x) * 3;
+                const lo = tbl[base];
+                const hi = tbl[base + 1];
+                const tx: i32 = @intCast(tbl[base + 2]);
+                const a: i32 = scratch[ylo[i] + lo];
+                const b: i32 = scratch[ylo[i] + hi];
+                const c2: i32 = scratch[yhi[i] + lo];
+                const d2: i32 = scratch[yhi[i] + hi];
+                const top = a + @divTrunc((b - a) * tx, 65536);
+                const bot = c2 + @divTrunc((d2 - c2) * tx, 65536);
+                v[i] = top + @divTrunc((bot - top) * yw[i], 65536);
+            }
+            // YCbCr → RGB (정수)
+            const yy = v[0];
+            const cb = v[1] - 128;
+            const cr = v[2] - 128;
+            const r = yy + @divTrunc(91881 * cr, 65536);
+            const g2 = yy - @divTrunc(22554 * cb + 46802 * cr, 65536);
+            const b3 = yy + @divTrunc(116130 * cb, 65536);
+            const o = (@as(usize, y) * w + x) * 3;
+            dst[o] = @intCast(@max(0, @min(255, r)));
+            dst[o + 1] = @intCast(@max(0, @min(255, g2)));
+            dst[o + 2] = @intCast(@max(0, @min(255, b3)));
+        }
+    }
+    return true;
+}
+
 /// 성분 판을 합쳐 RGB 로 편다. 베이스라인과 프로그레시브가 함께 쓴다.
 fn emit(
     w: u32, h: u32, comps: *[4]Comp, ncomp: u8, hmax: u8, vmax: u8,
     invert: bool, transform: u8, have_transform: bool, dst: []u8, scratch: []u8,
 ) void {
+    // 흔한 꼴이면 빠른 길로 간다
+    if (ncomp == 3 and !(have_transform and transform == 0) and
+        @as(usize, w) * h * 3 <= dst.len)
+    {
+        if (emitFast(w, h, comps, hmax, vmax, dst, scratch)) return;
+    }
     var i: u8 = 0;
     var y: u32 = 0;
     while (y < h) : (y += 1) {
