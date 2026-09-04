@@ -4303,6 +4303,7 @@ fn lookup(f: *const FontMap, code: u32) u32 {
 }
 
 export fn resetPage(w: f32, h: f32) void {
+    subcReset();
     item_n = 0;
     text_n = 0;
     dtext_n = 0;
@@ -4548,13 +4549,77 @@ var doc: []const u8 = &[_]u8{};
 
 /// 겹쳐 부르는 스트림을 담을 자리. 깊이마다 따로 둔다 — 같은 자리를 쓰면
 /// 바깥에서 훑던 내용이 안쪽에서 덮인다.
+/// 같은 스트림을 되풀이해 푸는 자리를 위한 쪽 단위 곳간.
+///
+/// Type3 글꼴은 글리프 하나하나가 작은 그리기 프로그램이다. 그래서 글자를
+/// 찍을 때마다 그 스트림을 찾아 풀어야 하는데, 인쇄물 한 쪽에 글자가 수천이면
+/// subStream 도 수천 번 불린다. 글리프 그림은 몇십 바이트짜리인데 그때마다
+/// 객체를 뒤지고 필터를 풀고 옮긴다 — 여섯 쪽 문서 그리는 값의 절반이 여기서
+/// 났다(46ms 중 23ms).
+///
+/// 쓰는 글리프는 글꼴 하나에 많아야 256 가지고, 그것이 수천 번 되풀이된다.
+/// 그러니 한 번 푼 것을 들고 있으면 된다. 쪽마다 비우므로 문서가 바뀌어도
+/// 묵은 것을 내주지 않는다.
+/// 인쇄물 한 쪽이 글꼴 아흔 벌을 쓰기도 한다. 넉넉히 잡아 둔다.
+const SUBC_N = 4096;
+/// 한 칸에 담을 수 있는 크기. 글리프 그림은 이보다 훨씬 작다.
+const SUBC_MAX = 4096;
+const SUBC_POOL = 2 * 1024 * 1024;
+var subc_num: [SUBC_N]u32 = undefined;
+var subc_off: [SUBC_N]u32 = undefined;
+var subc_len: [SUBC_N]u32 = undefined;
+var subc_n: u32 = 0;
+var subc_used: u32 = 0;
+var subc_at: usize = 0;
+
+fn subcPool() []u8 {
+    if (subc_at == 0) {
+        subc_at = zoneAlloc(SUBC_POOL) orelse 0;
+        if (subc_at == 0) return &[_]u8{};
+    }
+    return @as([*]u8, @ptrFromInt(subc_at))[0..SUBC_POOL];
+}
+
+/// 쪽을 새로 그릴 때 비운다. 구역이 되감겼으면 곳간도 남의 자리다.
+fn subcReset() void {
+    subc_n = 0;
+    subc_used = 0;
+    if (subc_at != 0 and subc_at + SUBC_POOL > zoneTop()) subc_at = 0;
+}
+
+fn subcFind(num: u32) ?[]const u8 {
+    var i: u32 = 0;
+    while (i < subc_n) : (i += 1) {
+        if (subc_num[i] == num) {
+            const pool = subcPool();
+            if (pool.len == 0) return null;
+            return pool[subc_off[i]..][0..subc_len[i]];
+        }
+    }
+    return null;
+}
+
+fn subcPut(num: u32, data: []const u8) void {
+    if (subc_n >= SUBC_N or data.len > SUBC_MAX) return;
+    const pool = subcPool();
+    if (pool.len == 0 or subc_used + data.len > pool.len) return;
+    @memcpy(pool[subc_used..][0..data.len], data);
+    subc_num[subc_n] = num;
+    subc_off[subc_n] = subc_used;
+    subc_len[subc_n] = @intCast(data.len);
+    subc_n += 1;
+    subc_used += @intCast(data.len);
+}
+
 fn subStream(num: u32, depth: u32) ?[]const u8 {
     if (depth >= 3 or subArea() == 0) return null;
+    if (subcFind(num)) |s| return s;
     const slot = sub_cap / 3;
     const cs = streamOf(doc, num) orelse return null;
     const n = @min(cs.len, slot);
     const dst = @as([*]u8, @ptrFromInt(subArea() + depth * slot));
     @memcpy(dst[0..n], cs[0..n]);
+    subcPut(num, dst[0..n]);
     return dst[0..n];
 }
 
