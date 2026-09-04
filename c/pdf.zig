@@ -12633,13 +12633,27 @@ fn pushNeed(nm: []const u8) void {
 /// 표가 PDF 안에 없으니 화면 쪽이 받아 와야 한다. 무엇이 필요한지 여기서
 /// 알려 준다. Identity 는 표가 없어도 되니 뺀다. /Ordering 은 그 계열의
 /// CID→유니코드 표를 뜻한다 — ToUnicode 가 없을 때 글자를 찾는 데 쓴다.
+const NO_AT: usize = ~@as(usize, 0);
+
+/// 다음 자리를 찾되, 예전 고리가 보지 않던 끝 열두 바이트는 그대로 안 본다.
+fn seekNeed(h: []const u8, n: []const u8, from: usize) usize {
+    const at = find(h, n, from) orelse return NO_AT;
+    return if (at + 12 < h.len) at else NO_AT;
+}
+
 fn collectNeeds(b: []const u8) void {
     need_n = 0;
     need_used = 0;
-    var p: usize = 0;
-    while (p + 12 < b.len) : (p += 1) {
-        if (b[p] != '/') continue;
-        if (std_mem_eq(b[p..][0..9], "/Encoding")) {
+    // 파일을 한 바이트씩 밀며 '/' 인지 보고 있었다. 34MB 문서면 3천4백만 번,
+    // 그것만 12ms 다. 찾을 말을 통째로 주면 여덟 바이트씩 건너뛴다.
+    //
+    // 두 갈래를 따로 훑되 먼저 나온 쪽부터 처리해, 담기는 차례는 예전과 같게
+    // 둔다 — 먼저 나온 이름이 먼저 들어가야 한다.
+    var enc = seekNeed(b, "/Encoding", 0);
+    var ord = seekNeed(b, "/Ordering", 0);
+    while (enc != NO_AT or ord != NO_AT) {
+        if (enc <= ord) {
+            const p = enc;
             var q = p + 9;
             while (q < b.len and isSpace(b[q])) q += 1;
             if (q < b.len and b[q] == '/') {
@@ -12650,10 +12664,9 @@ fn collectNeeds(b: []const u8) void {
                 if (nm.len >= 3 and nm.len <= 32 and findIn(nm, "Identity", 0) == null)
                     pushNeed(nm);
             }
-            p += 8;
-            continue;
-        }
-        if (std_mem_eq(b[p..][0..9], "/Ordering")) {
+            enc = seekNeed(b, "/Encoding", p + 9);
+        } else {
+            const p = ord;
             var q = p + 9;
             while (q < b.len and isSpace(b[q])) q += 1;
             if (q < b.len and b[q] == '(') {
@@ -12667,7 +12680,7 @@ fn collectNeeds(b: []const u8) void {
                     pushNeed(tmp[0 .. nm.len + 5]);
                 }
             }
-            p += 8;
+            ord = seekNeed(b, "/Ordering", p + 9);
         }
     }
 }
@@ -13912,6 +13925,14 @@ fn sigPutStr(b: []const u8, from: usize, to: usize) [2]u32 {
 fn collectSigs(b: []const u8) void {
     sig_n = 0;
     sig_used = 0;
+    // 객체를 하나하나 열어 보기 전에 파일에 열쇠말이 있기나 한지 본다.
+    //
+    // /ByteRange 는 서명 딕셔너리에만 나온다. 그런데 이 고리는 문서에 든 객체를
+    // 전부 돌며 딕셔너리를 뒤진다 — 객체 딕셔너리를 다 합치면 결국 파일만 하다.
+    // 서명 없는 문서가 대부분인데 34MB 문서에서 19ms 를 여기서 버리고 있었다.
+    // 한 번 훑어 없으면 그대로 돌아선다(4ms). 딕셔너리마다 뒤지던 자리를 모두
+    // 덮는 훑기라, 여기서 못 찾으면 아래 고리도 못 찾는다.
+    if (find(b, "/ByteRange", 0) == null) return;
     var num: u32 = 1;
     while (num < obj_cap and sigsRoom(sig_n + 1)) : (num += 1) {
         if (objRankTable()[num] == 0) continue;
