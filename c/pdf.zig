@@ -4304,6 +4304,7 @@ fn lookup(f: *const FontMap, code: u32) u32 {
 
 export fn resetPage(w: f32, h: f32) void {
     subcReset();
+    t3cReset();
     item_n = 0;
     text_n = 0;
     dtext_n = 0;
@@ -4611,6 +4612,117 @@ fn subcPut(num: u32, data: []const u8) void {
     subc_used += @intCast(data.len);
 }
 
+/// 글리프가 낸 그리기 명령을 받아 적어 두고 그대로 다시 쓴다.
+///
+/// 글리프 프로그램은 앞뒤로 행렬을 쌓았다 무르는 사이에서 돈다(14/16/16/16 …
+/// 15). 그래서 글리프가 내는 명령 자체는 글자가 어디에 놓이든 똑같다 —
+/// 자리와 크기는 앞의 행렬이 지고 간다. 한 번 받아 적어 두면 그다음부터는
+/// 프로그램을 다시 읽을 것 없이 옮겨 붙이면 된다.
+///
+/// 다만 "늘 똑같다" 가 참이어야 한다. 글리프가 그림이나 글자를 품고 있으면
+/// 명령 안에 그림 번호·글자 자리 같은 그때그때 값이 섞여 들어가 참이 아니다.
+/// 그래서 처음 그릴 때 셈들을 앞뒤로 견줘, 하나라도 움직였으면 그 글리프는
+/// 받아 적지 않고 늘 프로그램을 돌린다.
+const T3C_N = 1024;
+/// 글리프 하나가 낼 수 있는 명령 수. 넘으면 받아 적지 않는다.
+const T3C_MAX = 1024;
+const T3C_POOL = 1024 * 1024;
+var t3c_num: [T3C_N]u32 = undefined;
+var t3c_off: [T3C_N]u32 = undefined;
+var t3c_len: [T3C_N]u32 = undefined;
+/// 받아 적을 수 없다고 판가름 난 글리프
+var t3c_ban: [T3C_N]bool = undefined;
+var t3c_n: u32 = 0;
+var t3c_used: u32 = 0;
+var t3c_at: usize = 0;
+
+fn t3cPool() []f32 {
+    if (t3c_at == 0) {
+        t3c_at = zoneAlloc(T3C_POOL) orelse 0;
+        if (t3c_at == 0) return &[_]f32{};
+    }
+    return @as([*]f32, @ptrFromInt(t3c_at))[0 .. T3C_POOL / 4];
+}
+
+fn t3cReset() void {
+    t3c_n = 0;
+    t3c_used = 0;
+    if (t3c_at != 0 and t3c_at + T3C_POOL > zoneTop()) t3c_at = 0;
+}
+
+/// 글리프를 그리는 동안 움직이면 안 되는 셈들.
+const T3Snap = struct {
+    item: u32, text: u32, dtext: u32, rtext: u32,
+    draw: u32, form: u32, form2: u32, gs: u32,
+    font: i32, alpha: f32, bm: i32, run: bool,
+};
+
+fn t3Snap() T3Snap {
+    return .{
+        .item = item_n, .text = text_n, .dtext = dtext_n, .rtext = rtext_n,
+        .draw = draw_count, .form = form_n, .form2 = form_n2, .gs = gs_n,
+        .font = cur_font, .alpha = cur_alpha, .bm = cur_bm, .run = run_on,
+    };
+}
+
+fn t3SnapEq(a: T3Snap) bool {
+    const b2 = t3Snap();
+    return a.item == b2.item and a.text == b2.text and a.dtext == b2.dtext and
+        a.rtext == b2.rtext and a.draw == b2.draw and a.form == b2.form and
+        a.form2 == b2.form2 and a.gs == b2.gs and a.font == b2.font and
+        a.alpha == b2.alpha and a.bm == b2.bm and a.run == b2.run;
+}
+
+/// 받아 적어 둔 자리를 찾는다. 못 적는다고 판가름 난 것은 null 을 준다.
+fn t3Find(num: u32) ?u32 {
+    var i: u32 = 0;
+    while (i < t3c_n) : (i += 1) {
+        if (t3c_num[i] == num) return if (t3c_ban[i] or t3c_len[i] == 0) null else i;
+    }
+    return null;
+}
+
+fn t3Slot(num: u32) ?u32 {
+    var i: u32 = 0;
+    while (i < t3c_n) : (i += 1) if (t3c_num[i] == num) return i;
+    if (t3c_n >= T3C_N) return null;
+    t3c_num[t3c_n] = num;
+    t3c_off[t3c_n] = 0;
+    t3c_len[t3c_n] = 0;
+    t3c_ban[t3c_n] = false;
+    t3c_n += 1;
+    return t3c_n - 1;
+}
+
+fn t3Replay(i: u32) void {
+    const pool = t3cPool();
+    const n = t3c_len[i];
+    if (pool.len == 0 or n == 0) return;
+    if (!opsRoom(ops_n + n)) return;
+    @memcpy(opsBuf()[ops_n..][0..n], pool[t3c_off[i]..][0..n]);
+    ops_n += n;
+}
+
+/// 방금 낸 명령을 받아 적는다. 셈이 움직였으면 못 적는 것으로 표시한다.
+fn t3Record(num: u32, start: u32, snap: T3Snap) void {
+    const i = t3Slot(num) orelse return;
+    if (t3c_ban[i] or t3c_len[i] != 0) return;
+    if (emit_mute or ops_n <= start or !t3SnapEq(snap)) {
+        t3c_ban[i] = true;
+        return;
+    }
+    const n = ops_n - start;
+    const pool = t3cPool();
+    if (n > T3C_MAX or pool.len == 0 or t3c_used + n > pool.len) {
+        t3c_ban[i] = true;
+        return;
+    }
+    @memcpy(pool[t3c_used..][0..n], opsBuf()[start..][0..n]);
+    t3c_off[i] = t3c_used;
+    t3c_len[i] = n;
+    t3c_used += n;
+}
+
 fn subStream(num: u32, depth: u32) ?[]const u8 {
     if (depth >= 3 or subArea() == 0) return null;
     if (subcFind(num)) |s| return s;
@@ -4781,13 +4893,24 @@ fn runOps(b: []const u8, depth: u32) void {
                     // Type3 는 글리프가 그림이다. 그 자리에 펼쳐 그린다.
                     if (ff) |g| {
                         if (g.type3 and code < 256 and g.t3[code] != 0) {
-                            if (subStream(g.t3[code], dep)) |gs| {
+                            const gnum = g.t3[code];
+                            // 받아 적어 둔 것이 있으면 프로그램을 다시 읽지 않는다
+                            const rec = t3Find(gnum);
+                            const gs_opt = if (rec == null) subStream(gnum, dep) else null;
+                            if (rec != null or gs_opt != null) {
                                 runFlush();
                                 emitOp(14, &[_]f32{});
                                 emitOp(16, &[_]f32{ m.a, m.b, m.c, m.d, ex2, ey2 });
                                 emitOp(16, &[_]f32{ size * th2, 0, 0, size, 0, 0 });
                                 emitOp(16, &[_]f32{ g.fm[0], g.fm[1], g.fm[2], g.fm[3], g.fm[4], g.fm[5] });
-                                runOps(gs, dep + 1);
+                                if (rec) |r| {
+                                    t3Replay(r);
+                                } else {
+                                    const snap = t3Snap();
+                                    const start = ops_n;
+                                    runOps(gs_opt.?, dep + 1);
+                                    t3Record(gnum, start, snap);
+                                }
                                 emitOp(15, &[_]f32{});
                                 m.* = advance(ff, adv, m.*);
                                 return;
