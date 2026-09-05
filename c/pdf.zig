@@ -3705,6 +3705,24 @@ pub fn inheritedKey(b: []const u8, body0: usize, end0: usize, key: []const u8) ?
 ///
 /// 폼 XObject 는 제 리소스를 따로 갖는다. 그 안의 글꼴도 등록해 두어야
 /// 폼을 그릴 때 글자가 나온다.
+/// 무늬 칸을 그리는 명령에서 대표 색을 하나 집어 낸다. 첫 ` rg` 바로 앞의
+/// 숫자 셋을 본다 — 무늬를 실제로 그리지 못할 때 그 색으로 메운다.
+/// 셋을 못 모으면 null 이다(그때는 부르는 쪽이 기본 회색을 쓴다).
+fn tileRgb(ts: []const u8) ?[3]f32 {
+    const ra = findIn(ts, " rg", 0) orelse return null;
+    var tp: usize = if (ra > 24) ra - 24 else 0;
+    var vals: [3]f32 = .{ 0.6, 0.6, 0.6 };
+    var vi: u32 = 0;
+    while (tp < ra and vi < 3) {
+        while (tp < ra and isSpace(ts[tp])) tp += 1;
+        if (tp >= ra) break;
+        if (!(isDigit(ts[tp]) or ts[tp] == '.' or ts[tp] == '-')) { tp += 1; vi = 0; continue; }
+        vals[vi] = readFloat(ts, &tp);
+        vi += 1;
+    }
+    return if (vi == 3) vals else null;
+}
+
 /// /Shading·/Pattern — 그러데이션과 무늬
 fn scanShadings(b: []const u8, rs: usize, re_: usize) void {
     // Shading 과 Pattern
@@ -3803,19 +3821,7 @@ fn scanShadings(b: []const u8, rs: usize, re_: usize) void {
                             if (w3 < se3 and isDigit(b[w3])) num5 = readUint(b, &w3);
                             if (num5 > 0) {
                                 if (streamOf(b, num5)) |ts| {
-                                    if (findIn(ts, " rg", 0)) |ra2| {
-                                        var tp: usize = if (ra2 > 24) ra2 - 24 else 0;
-                                        var vals: [3]f32 = .{ 0.6, 0.6, 0.6 };
-                                        var vi: u32 = 0;
-                                        while (tp < ra2 and vi < 3) {
-                                            while (tp < ra2 and isSpace(ts[tp])) tp += 1;
-                                            if (tp >= ra2) break;
-                                            if (!(isDigit(ts[tp]) or ts[tp] == '.' or ts[tp] == '-')) { tp += 1; vi = 0; continue; }
-                                            vals[vi] = readFloat(ts, &tp);
-                                            vi += 1;
-                                        }
-                                        if (vi == 3) { t2.r = vals[0]; t2.g = vals[1]; t2.b = vals[2]; }
-                                    }
+                                    if (tileRgb(ts)) |c| { t2.r = c[0]; t2.g = c[1]; t2.b = c[2]; }
                                 }
                             }
                         }
@@ -4146,6 +4152,21 @@ fn scanFonts(b: []const u8, rs: usize, re_: usize) void {
     }
 }
 
+/// 폼 XObject 가 제 /Resources 를 갖고 있으면 그 안까지 들어간다. 사전을
+/// 바로 적어 두기도 하고 다른 객체를 가리키기도 해서 두 갈래로 본다.
+/// 폼 안의 글꼴을 등록해 두지 않으면 폼을 그릴 때 글자가 안 나온다.
+fn scanFormResources(b: []const u8, ob: usize, oe: usize, depth: u32) void {
+    const ra = find(b[ob..oe], "/Resources", 0) orelse return;
+    var rp = ob + ra + 10;
+    while (rp < oe and isSpace(b[rp])) rp += 1;
+    if (rp < oe and b[rp] == '<') {
+        scanResources(b, rp, dictEnd(b, rp, oe), depth + 1);
+    } else if (rp < oe and isDigit(b[rp])) {
+        const rn = readUint(b, &rp);
+        if (findObj(b, rn)) |rb| scanResources(b, rb, find(b, "endobj", rb) orelse b.len, depth + 1);
+    }
+}
+
 /// /XObject — 그림과 폼. 폼은 제 자원을 따로 갖는다
 fn scanXObjects(b: []const u8, rs: usize, re_: usize, depth: u32) void {
     // 그림 한 장을 꺼낸다. 스캔 문서는 쪽마다 큰 그림 하나가 전부라,
@@ -4213,20 +4234,7 @@ fn scanXObjects(b: []const u8, rs: usize, re_: usize, depth: u32) void {
                             }
                             formn.n2 += 1;
                             // 폼 안의 글꼴·그림도 등록해 둔다
-                            if (depth < 2) {
-                                if (find(b[ob..oe], "/Resources", 0)) |ra2| {
-                                    var rp = ob + ra2 + 10;
-                                    while (rp < oe and isSpace(b[rp])) rp += 1;
-                                    if (rp < oe and b[rp] == '<') {
-                                        scanResources(b, rp, dictEnd(b, rp, oe), depth + 1);
-                                    } else if (rp < oe and isDigit(b[rp])) {
-                                        const rn2 = readUint(b, &rp);
-                                        if (findObj(b, rn2)) |rb2| {
-                                            scanResources(b, rb2, find(b, "endobj", rb2) orelse b.len, depth + 1);
-                                        }
-                                    }
-                                }
-                            }
+                            if (depth < 2) scanFormResources(b, ob, oe, depth);
                         }
                     }
                     _ = takeImage(b, ob, nm);
