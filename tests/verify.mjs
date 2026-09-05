@@ -1562,6 +1562,29 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
 }
 
 
+// ── JBIG2: 아무것도 안 가리키는 사전은 물려받지 않는다
+//
+// gatherRefs 는 "가리키는 것을 못 찾으면 지금까지 모인 것을 다 쓴다" 는
+// 대비책을 뒀는데, 그게 *아예 안 가리키는* 사전에까지 걸렸다. 그러면 앞
+// 사전의 글자를 물려받아 제 것인 양 다시 내보내고, 목록에 같은 글자가 두
+// 번 들어가 글자 번호가 하나씩 밀린다.
+//
+// 부록 H 쪽1: 사전 셋의 폭이 5·6·6 이어야 한다("p"·"c"·"a"). 겹치면 5·5·6.
+{
+  const m = await WebAssembly.instantiate(wasm, { wasi_snapshot_preview1: new Proxy({}, { get: () => () => 0 }) });
+  const ex = m.instance.exports;
+  const buf = fs.readFileSync(`${S}/jb-page1.pdf`);
+  ex.reserve(buf.length, buf.length * 3 + 201326592);
+  new Uint8Array(ex.memory.buffer, ex.inputPtr(), buf.length).set(buf);
+  ex.parse(buf.length);
+  ex.renderPage(0);
+  const n = ex.jbSymN();
+  const w = [];
+  for (let i = 0; i < n; i++) w.push(ex.jbSymW(i));
+  ok('JBIG2: 부록 H 쪽1 의 글자는 셋', n === 3, n);
+  ok('JBIG2: 안 가리키는 사전이 앞 글자를 물려받지 않는다', w.join(',') === '5,6,6', w.join(','));
+}
+
 console.log(`  기능 단언 ${pass + fail}개 중 통과 ${pass}, 실패 ${fail}`);
 if (bad.length) bad.forEach((b3) => console.log('    ✗ ' + b3));
 process.exit(fail ? 1 : 0);

@@ -1750,6 +1750,10 @@ fn findForm(name: []const u8) i32 {
 export fn imageSlots() u32 { return img.n; }
 export fn jbDbgN() u32 { return jbig2.dbg_n; }
 export fn jbSymN() u32 { return jbig2.sym_n; }
+/// 글자 사전이 만든 글자의 폭. 시험이 사전을 들여다보는 유일한 창이다 —
+/// 부록 H 쪽1 의 글자 셋은 5·6·6 이어야 한다. 물려받기가 잘못돼 같은 글자가
+/// 두 번 들어가면 5·5·6 이 된다.
+export fn jbSymW(i: u32) u32 { return if (i < jbig2.sym_n) jbig2.syms[i].w else 0; }
 export fn slotKind(i: u32) u32 { return if (i < img.n) imgs.all()[i].kind else 0; }
 export fn slotWidth(i: u32) u32 { return if (i < img.n) imgs.all()[i].w else 0; }
 export fn slotHeight(i: u32) u32 { return if (i < img.n) imgs.all()[i].h else 0; }
