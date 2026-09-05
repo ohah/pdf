@@ -1473,6 +1473,48 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   ok('내보낸 PDF 에 모듈 이름이 안 샌다', !leak, leak && leak[0]);
 }
 
+// ── 만든 PDF 가 스스로 앞뒤가 맞는가 (구조 검사)
+//
+// A/B 는 우리가 읽어 낸 값을, 왕복 시험은 pdf.js 가 그려 내는지를 본다.
+// 둘 다 우리가 쓴 바이트는 안 본다. 그래서 "/Subtype /core.Form" 이
+// 그대로 나가도 아무도 몰랐다. 여기서는 기준 판 없이 파일 하나만 보고
+// 규격에 어긋난 데를 찾는다 — tests/checkpdf.mjs 참고.
+{
+  const { checkPdf } = await import('./checkpdf.mjs');
+  const 손질 = {
+    '회전': (e) => e.setRotate(90),
+    '워터마크': (e) => { for (const c of '대외비 CONFIDENTIAL') e.addWatermarkChar(c.codePointAt(0)); },
+    '라벨': (e) => { e.addLabel(0, 40, 40, 18, 0, 0, 0); for (const c of '1 / 3') e.addLabelChar(c.codePointAt(0)); },
+    '주석': (e) => { e.addNote(1, 0, 60, 400, 540, 700, 1, 0, 0); for (const c of '메모 note') e.addNoteChar(c.codePointAt(0)); },
+    '새 입력칸': (e) => { e.clearNewFields(); e.addNewField(0, 0, 100, 100, 300, 130); for (const c of 'nm') e.addNewFieldChar(c.codePointAt(0)); },
+    '암호': (e) => { e.setEncrypt(1); for (const c of 'pw1234') e.addEncryptChar(c.codePointAt(0)); },
+    '줄이기': (e) => e.compact?.(1),
+  };
+  let 검사 = 0;
+  for (const f of ['korean.pdf', 'annots.pdf', 'form.pdf', 'shade.pdf', 'jpeg.pdf']) {
+    if (!fs.existsSync(`${S}/${f}`)) continue;
+    for (const [이름, 손대기] of Object.entries(손질)) {
+      const m = await WebAssembly.instantiate(wasm, { wasi_snapshot_preview1: new Proxy({}, { get: () => () => 0 }) });
+      const ex = m.instance.exports;
+      const buf = fs.readFileSync(`${S}/${f}`);
+      if (!ex.reserve(buf.length, buf.length * 3 + 201326592)) continue;
+      new Uint8Array(ex.memory.buffer, ex.inputPtr(), buf.length).set(buf);
+      if (!ex.parse(buf.length)) continue;
+      ex.clearPick();
+      for (let i = 0; i < ex.pageCount(); i++) ex.addPick(i);
+      ex.setRotate(0); ex.clearWatermark(); ex.clearLabels(); ex.clearNotes();
+      손대기(ex);
+      const n = ex.apply();
+      if (!n) continue;
+      const out = Buffer.from(new Uint8Array(ex.memory.buffer, ex.outputPtr(), n));
+      const 흠 = checkPdf(out);
+      ok(`${f} ${이름} 한 결과가 규격에 맞다`, 흠.length === 0, 흠.slice(0, 2).join(' · '));
+      검사++;
+    }
+  }
+  ok('구조 검사를 실제로 돌렸다', 검사 >= 25, 검사);
+}
+
 console.log(`  기능 단언 ${pass + fail}개 중 통과 ${pass}, 실패 ${fail}`);
 if (bad.length) bad.forEach((b3) => console.log('    ✗ ' + b3));
 process.exit(fail ? 1 : 0);
