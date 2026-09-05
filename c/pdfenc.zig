@@ -264,7 +264,7 @@ fn descendantOf(b: []const u8, fbody: usize, fend: usize) ?[2]usize {
 /// 방금 등록한 글꼴에 폭 표를 채운다.
 pub fn attachWidths(b: []const u8, fbody: usize) void {
     if (core.font_n == 0) return;
-    const f = &core.fontsBuf()[core.font_n - 1];
+    const f = &core.fonts.all()[core.font_n - 1];
     const fend = core.find(b, "endobj", fbody) orelse b.len;
     // Identity-H 는 두 바이트 코드가 곧 CID 다
     if (core.find(b[fbody..fend], "/Encoding", 0)) |ea2| {
@@ -395,7 +395,7 @@ fn keyRef(b: []const u8, s: usize, e: usize, name: []const u8) ?u32 {
 /// 우리는 콘텐츠 해석기를 이미 갖고 있으므로 그 스트림을 그대로 돌린다.
 pub fn attachType3(b: []const u8, fbody: usize) void {
     if (core.font_n == 0) return;
-    const f = &core.fontsBuf()[core.font_n - 1];
+    const f = &core.fonts.all()[core.font_n - 1];
     const fend = core.find(b, "endobj", fbody) orelse b.len;
     if (core.find(b[fbody..fend], "/Subtype", 0)) |sa| {
         var q = fbody + sa + 8;
@@ -519,7 +519,7 @@ pub fn q_at(b: []const u8, i: usize) u8 { return if (i < b.len) b[i] else ' '; }
 /// Type0 이면 자손 글꼴을 한 번 더 따라간다.
 pub fn attachEmbedded(b: []const u8, fbody: usize) void {
     if (core.font_n == 0) return;
-    const f = &core.fontsBuf()[core.font_n - 1];
+    const f = &core.fonts.all()[core.font_n - 1];
     const fend = core.find(b, "endobj", fbody) orelse b.len;
     var db = fbody;
     var de = fend;

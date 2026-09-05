@@ -145,7 +145,7 @@ fn t1Entry(d: []const u8, p: *usize) ?struct { name: []const u8, off: usize, len
 /// Type1 프로그램을 읽어 글리프 프로그램을 풀어 둔다.
 pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) void {
     if (root.font_n == 0 or root.t1Area() == 0) return;
-    const f = &root.fontsBuf()[root.font_n - 1];
+    const f = &root.fonts.all()[root.font_n - 1];
     if (data.len < 64) return;
 
     // 평문 구간에서 eexec 자리를 찾는다

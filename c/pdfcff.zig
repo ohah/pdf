@@ -355,7 +355,7 @@ fn buildOtto(cff: []const u8, f: *root.FontMap, dst: []u8) u32 {
 /// 방금 등록한 글꼴에 파일을 붙인다.
 pub fn attachFontFile(data: []const u8, is_cff: bool) void {
     if (root.font_n == 0 or root.fontArea() == 0) return;
-    const f = &root.fontsBuf()[root.font_n - 1];
+    const f = &root.fonts.all()[root.font_n - 1];
     const room = root.font_cap - root.font_used;
     if (room < 4096) return;
     // 필요한 만큼만 떼어 준다.

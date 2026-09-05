@@ -112,7 +112,7 @@ fn pageHasLabels(page: u32) bool {
 
 /// 한 쪽의 라벨을 그리는 콘텐츠 스트림을 짓는다.
 ///
-/// 이 쪽의 글꼴이 core.fontsBuf()[] 에 채워져 있어야 하므로 core.renderPage 를 먼저 부른다.
+/// 이 쪽의 글꼴이 core.fonts.all()[] 에 채워져 있어야 하므로 core.renderPage 를 먼저 부른다.
 /// 한글은 표준 14종에 없어서, 그 글자를 다 가진 문서 글꼴을 찾아 쓴다.
 /// 못 찾으면 우리가 얹은 Helvetica 로 아스키만 적는다.
 fn buildLabelStream(page: u32) usize {
@@ -162,10 +162,10 @@ fn buildLabelStream(page: u32) usize {
         var doc_font: u8 = 0;
         var fi: u8 = 0;
         outer: while (fi < core.font_n) : (fi += 1) {
-            if (core.fontsBuf()[fi].n == 0 or core.fontsBuf()[fi].name_len == 0) continue;
+            if (core.fonts.all()[fi].n == 0 or core.fonts.all()[fi].name_len == 0) continue;
             var ci: u32 = 0;
             while (ci < L.n) : (ci += 1) {
-                if (core.wmCode(&core.fontsBuf()[fi], lab_cp[L.off + ci]) == null) continue :outer;
+                if (core.wmCode(&core.fonts.all()[fi], lab_cp[L.off + ci]) == null) continue :outer;
             }
             use_doc = true;
             doc_font = fi;
@@ -188,7 +188,7 @@ fn buildLabelStream(page: u32) usize {
         bl += core.putFrac(dst[bl..], L.col[2]);
         put(dst, &bl, " rg BT /");
         if (use_doc) {
-            const nm = core.fontsBuf()[doc_font].name[0..core.fontsBuf()[doc_font].name_len];
+            const nm = core.fonts.all()[doc_font].name[0..core.fonts.all()[doc_font].name_len];
             put(dst, &bl, nm);
         } else {
             put(dst, &bl, "WMF");
@@ -202,11 +202,11 @@ fn buildLabelStream(page: u32) usize {
         put(dst, &bl, " Tm ");
 
         if (use_doc) {
-            const two = core.fontsBuf()[doc_font].two_byte;
+            const two = core.fonts.all()[doc_font].two_byte;
             put(dst, &bl, "<");
             var ci: u32 = 0;
             while (ci < L.n and bl + 8 < dst.len) : (ci += 1) {
-                const code = core.wmCode(&core.fontsBuf()[doc_font], lab_cp[L.off + ci]) orelse 0;
+                const code = core.wmCode(&core.fonts.all()[doc_font], lab_cp[L.off + ci]) orelse 0;
                 const digits: u32 = if (two) 4 else 2;
                 var d: u32 = 0;
                 while (d < digits) : (d += 1) {
@@ -474,10 +474,10 @@ pub fn apply() usize {
             _ = core.renderPage(core.pick()[0]);
             var fi: u8 = 0;
             outer: while (fi < core.font_n) : (fi += 1) {
-                if (core.fontsBuf()[fi].n == 0 or core.fontsBuf()[fi].name_len == 0) continue;
+                if (core.fonts.all()[fi].n == 0 or core.fonts.all()[fi].name_len == 0) continue;
                 var ci: usize = 0;
                 while (ci < core.wm_n) : (ci += 1) {
-                    if (core.wmCode(&core.fontsBuf()[fi], core.wm_cp[ci]) == null) continue :outer;
+                    if (core.wmCode(&core.fonts.all()[fi], core.wm_cp[ci]) == null) continue :outer;
                 }
                 use_doc = true;
                 doc_font = fi;
@@ -491,7 +491,7 @@ pub fn apply() usize {
         const pw2 = if (core.page_w > 1) core.page_w else 612;
         const ph2 = if (core.page_h > 1) core.page_h else 792;
         const nch: f32 = @floatFromInt(@max(core.wm_n, 1));
-        const kw: f32 = if (use_doc and core.fontsBuf()[doc_font].two_byte) 1.0 else 0.55;
+        const kw: f32 = if (use_doc and core.fonts.all()[doc_font].two_byte) 1.0 else 0.55;
         const diag = @sqrt(pw2 * pw2 + ph2 * ph2);
         var fsize = 0.62 * diag / (nch * kw);
         if (fsize > 200) fsize = 200;
@@ -539,7 +539,7 @@ pub fn apply() usize {
         @memcpy(body[bl..][0..head.len], head);
         bl += head.len;
         if (use_doc) {
-            const nm = core.fontsBuf()[doc_font].name[0..core.fontsBuf()[doc_font].name_len];
+            const nm = core.fonts.all()[doc_font].name[0..core.fonts.all()[doc_font].name_len];
             @memcpy(body[bl..][0..nm.len], nm);
             bl += nm.len;
         } else {
@@ -563,10 +563,10 @@ pub fn apply() usize {
             // 글꼴 안의 코드로 적는다
             body[bl] = '<';
             bl += 1;
-            const two = core.fontsBuf()[doc_font].two_byte;
+            const two = core.fonts.all()[doc_font].two_byte;
             var ci: usize = 0;
             while (ci < core.wm_n and bl + 8 < body.len) : (ci += 1) {
-                const code = core.wmCode(&core.fontsBuf()[doc_font], core.wm_cp[ci]) orelse 0;
+                const code = core.wmCode(&core.fonts.all()[doc_font], core.wm_cp[ci]) orelse 0;
                 const digits: u32 = if (two) 4 else 2;
                 var d: u32 = 0;
                 while (d < digits) : (d += 1) {
@@ -1109,7 +1109,7 @@ pub fn apply() usize {
         var wrote_font = false;
         var ei: u32 = 0;
         while (ei < core.edit_n and new_n + 3 < new_nums.len and core.outRoom(pos, 4096)) : (ei += 1) {
-            const e = core.editsBuf()[ei];
+            const e = core.edits.all()[ei];
             // 지울 칸은 다시 적지 않는다. 쪽의 /Annots 와 양식의 /Fields 에서
             // 이름이 빠지므로 아무도 가리키지 않는 객체가 된다.
             if (e.kind == 4) continue;

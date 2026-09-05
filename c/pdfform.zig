@@ -716,7 +716,7 @@ pub fn drawAnnots(b: []const u8, body: usize, end: usize) void {
 /// createPattern 으로 되풀이한다 — 되풀이는 브라우저가 하는 일이다.
 /// pdf.js 도 같은 길을 간다.
 pub fn paintTile(idx: u32, depth: u32) void {
-    const t = &core.tilesBuf()[idx];
+    const t = &core.tiles.all()[idx];
     const xs = if (t.xstep > 0.01) t.xstep else 1;
     const ys = if (t.ystep > 0.01) t.ystep else 1;
     const stream = core.subStream(t.obj, depth) orelse return;
