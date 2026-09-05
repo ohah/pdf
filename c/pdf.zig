@@ -4271,12 +4271,19 @@ fn scanExtGStates(b: []const u8, rs: usize, re_: usize) void {
                             "ColorDodge", "ColorBurn", "HardLight", "SoftLight", "Difference",
                             "Exclusion", "Hue", "Saturation", "Color", "Luminosity",
                         };
-                        var bi: i32 = 0;
+                        // 이름 끝까지 맞아야 하고, 맞으면 멈춘다.
+                        //
+                        // 앞머리만 보고 계속 돌았더니 /ColorDodge 가 뒤의
+                        // "Color" 에도 걸려 마지막 것이 이겼다 — ColorDodge·
+                        // ColorBurn 이 Color 로 바뀌어, 캔버스가 모르는 값이
+                        // 되고 결국 안 섞인 채 그려졌다.
                         for (names, 0..) |nmx, ix| {
-                            if (bp + 1 + nmx.len <= de2 and std_mem_eq(b[bp + 1 .. bp + 1 + nmx.len], nmx)) {
-                                bi = @intCast(ix);
-                                g2.bm = bi;
-                            }
+                            if (bp + 1 + nmx.len > de2) continue;
+                            if (!std_mem_eq(b[bp + 1 .. bp + 1 + nmx.len], nmx)) continue;
+                            const after = bp + 1 + nmx.len;
+                            if (after < de2 and ((b[after] >= 'A' and b[after] <= 'Z') or (b[after] >= 'a' and b[after] <= 'z'))) continue;
+                            g2.bm = @intCast(ix);
+                            break;
                         }
                         if (g2.bm < 0) g2.bm = 0;
                     }
