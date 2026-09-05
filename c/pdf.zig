@@ -17,7 +17,7 @@ extern fn pw_inflate(src: [*]const u8, src_len: c_uint, dst: [*]u8, dst_cap: c_u
 
 const PAGE: usize = 64 * 1024;
 var in_len: usize = 0;
-var out_len: usize = 0;
+pub var out_len: usize = 0;
 var out_off: usize = 0;
 /// 객체 스트림(ObjStm)을 풀어 평문 객체로 펼쳐 두는 자리.
 /// 원본 뒤에 이어 두고, 객체를 찾을 때 원본과 이 영역을 모두 훑는다.
@@ -36,15 +36,15 @@ var img_off: usize = 0;
 var jb_pool_at: usize = 0;
 var img_cap: usize = 0;
 var font_off: usize = 0;
-var font_cap: usize = 0;
+pub var font_cap: usize = 0;
 var inl_off: usize = 0;
 var inl_cap: usize = 0;
 var inl_used: u32 = 0;
 var sub_off: usize = 0;
 var sub_cap: usize = 0;
 var t1_off: usize = 0;
-var t1_cap: usize = 0;
-var t1_used: u32 = 0;
+pub var t1_cap: usize = 0;
+pub var t1_used: u32 = 0;
 var img_len: usize = 0;
 var img_w: u32 = 0;
 var img_h: u32 = 0;
@@ -104,10 +104,10 @@ fn areaOf(off: *usize, cap: usize) usize {
     return off.*;
 }
 fn imgArea() usize { return areaOf(&img_off, img_cap); }
-fn fontArea() usize { return areaOf(&font_off, font_cap); }
+pub fn fontArea() usize { return areaOf(&font_off, font_cap); }
 fn inlArea() usize { return areaOf(&inl_off, inl_cap); }
 fn subArea() usize { return areaOf(&sub_off, sub_cap); }
-fn t1Area() usize { return areaOf(&t1_off, t1_cap); }
+pub fn t1Area() usize { return areaOf(&t1_off, t1_cap); }
 
 /// 큰 그림 하나를 푸는 동안만 쓰는 여벌 자리.
 ///
@@ -122,10 +122,10 @@ fn t1Area() usize { return areaOf(&t1_off, t1_cap); }
 /// 메모리 끝에 있어 늘려도 앞의 것을 옮길 일이 없다.
 var zone_top: usize = 0;
 fn zoneBase() usize { return out_off + out_cap; }
-fn zoneTop() usize { return if (zone_top < zoneBase()) zoneBase() else zone_top; }
+pub fn zoneTop() usize { return if (zone_top < zoneBase()) zoneBase() else zone_top; }
 fn zoneReset() void { zone_top = zoneBase(); }
 /// 자리를 떼어 준다. 못 늘리면 null.
-fn zoneAlloc(bytes: usize) ?usize {
+pub fn zoneAlloc(bytes: usize) ?usize {
     if (out_off == 0) return null;
     const at = (zoneTop() + 7) & ~@as(usize, 7);
     const need = at + bytes;
@@ -138,7 +138,7 @@ fn zoneAlloc(bytes: usize) ?usize {
     return at;
 }
 /// 넉넉히 잡아 둔 것을 실제로 쓴 만큼으로 줄인다.
-fn zoneShrink(to: usize) void { if (to >= zoneBase()) zone_top = to; }
+pub fn zoneShrink(to: usize) void { if (to >= zoneBase()) zone_top = to; }
 
 /// 글꼴 표 하나의 짝 배열을 읽는다. 아직 안 잡았으면 빈 것을 준다.
 fn u16buf(at: usize, cap: u32) []u16 {
@@ -154,7 +154,7 @@ fn u16buf(at: usize, cap: u32) []u16 {
 /// 제 몫으로 잡아 두고, 더 큰 것이 필요할 때만 늘린다.
 var big_at: usize = 0;
 var big_cap: u32 = 0;
-fn bigScratch(want: usize) ?[]u8 {
+pub fn bigScratch(want: usize) ?[]u8 {
     if (out_off == 0 or want == 0 or want > 0xF000_0000) return null;
     if (!growTableTo(&big_at, &big_cap, @intCast(want), 1, 1 << 16, 1 << 30)) return null;
     return @as([*]u8, @ptrFromInt(big_at))[0..want];
@@ -168,7 +168,7 @@ export fn maxSecond() usize { return b2_cap; }
 fn expBuf() [*]u8 { return @ptrFromInt(exp_off); }
 
 /// 원본과 펼친 객체를 한 덩어리로 본다. findObj 가 둘 다 훑도록.
-fn searchSlice() []u8 {
+pub fn searchSlice() []u8 {
     return @as([*]u8, @ptrFromInt(heapBase()))[0 .. in_len + exp_len];
 }
 
@@ -184,16 +184,16 @@ fn u32sAt(at: usize, n: u32) []u32 {
     if (at == 0 or n == 0) return &[_]u32{};
     return @as([*]u32, @ptrFromInt(at))[0..n];
 }
-fn page_objs() []u32 { return u32sAt(pg_at, pg_cap); }
+pub fn page_objs() []u32 { return u32sAt(pg_at, pg_cap); }
 /// Pages 트리 루트 객체 번호
-var pages_obj: u32 = 0;
+pub var pages_obj: u32 = 0;
 /// Catalog 객체 번호 — 만들 때 /AcroForm 을 손대는 데 쓴다
 var doc_root: u32 = 0;
 /// 사용자가 고른 순서
 var pick_at: usize = 0;
 var pick_cap: u32 = 0;
-fn pick() []u32 { return u32sAt(pick_at, pick_cap); }
-var pick_n: usize = 0;
+pub fn pick() []u32 { return u32sAt(pick_at, pick_cap); }
+pub var pick_n: usize = 0;
 var rotate: i32 = 0;
 /// 워터마크 문구 (라틴 문자만 — 표준 글꼴을 쓰므로 한글은 넣을 수 없다)
 var wm: [128]u8 = undefined;
@@ -250,7 +250,7 @@ export fn pageCount() u32 { return page_count; }
 /// 쪽이 너무 많아 뒤를 잘랐는가
 export fn pagesTruncated() u32 { return if (pages_cut) 1 else 0; }
 
-fn isSpace(c: u8) bool {
+pub fn isSpace(c: u8) bool {
     return c == ' ' or c == '\n' or c == '\r' or c == '\t' or c == 0 or c == 12;
 }
 
@@ -344,7 +344,7 @@ fn trailerKey(b: []const u8, key: []const u8) ?usize {
 ///
 /// /Info 는 여기 쓰지 않는다 — 규격이 trailer 에 적으라고 하고, 놓쳐도
 /// 문서 정보가 비는 정도라 훑는 값을 치를 만하지 않다.
-fn trailerKeyOrScan(b: []const u8, key: []const u8) ?usize {
+pub fn trailerKeyOrScan(b: []const u8, key: []const u8) ?usize {
     if (trailerKey(b, key)) |at| return at;
     if (b.len == 0) return null;
     return rfind(b, key, b.len - 1);
@@ -482,7 +482,7 @@ const RARITY: [256]u8 = .{
 /// 그러니 걸림돌이 드물수록 값이 난다. 예전에는 첫 글자로 못박혀 있었는데,
 /// 가장 많이 찾는 말이 " obj" 라 걸림돌이 공백이었다. 여덟 바이트 묶음의
 /// 82% 에 공백이 들어 사실상 한 칸씩 기어갔다.
-fn find(h: []const u8, n: []const u8, from: usize) ?usize {
+pub fn find(h: []const u8, n: []const u8, from: usize) ?usize {
     if (n.len == 0 or n.len > h.len) return null;
     const last = h.len - n.len;
     if (from > last) return null;
@@ -526,14 +526,14 @@ fn find(h: []const u8, n: []const u8, from: usize) ?usize {
     }
     return null;
 }
-fn std_mem_eq(a: []const u8, b: []const u8) bool {
+pub fn std_mem_eq(a: []const u8, b: []const u8) bool {
     if (a.len != b.len) return false;
     var i: usize = 0;
     while (i < a.len) : (i += 1) if (a[i] != b[i]) return false;
     return true;
 }
 
-fn readUint(b: []const u8, p: *usize) u32 {
+pub fn readUint(b: []const u8, p: *usize) u32 {
     while (p.* < b.len and isSpace(b[p.*])) p.* += 1;
     var v: u32 = 0;
     while (p.* < b.len and b[p.*] >= '0' and b[p.*] <= '9') : (p.* += 1)
@@ -551,7 +551,7 @@ fn readUint(b: []const u8, p: *usize) u32 {
 //
 // 순위가 하나 더 있다. 객체 스트림을 풀어 둔 자리는 원본 뒤에 붙지만 새 판이
 // 아니라 원본의 사본이다. 그래서 원본 구간에 평문으로 있는 것을 먼저 본다.
-var max_obj: u32 = 0;
+pub var max_obj: u32 = 0;
 
 /// 색인은 문서에 맞춰 늘어난다.
 ///
@@ -709,7 +709,7 @@ fn addObjIndex(b: []const u8, from: usize) void {
     obj_idx_len = b.len;
 }
 
-fn findObj(b: []const u8, num: u32) ?usize {
+pub fn findObj(b: []const u8, num: u32) ?usize {
     // 본 버퍼는 색인으로 바로 찾는다. 병합용 두 번째 버퍼는 색인이 없다.
     if (obj_idx_len != 0 and b.len == obj_idx_len and
         b.ptr == @as([*]const u8, @ptrFromInt(heapBase())) and num < obj_cap)
@@ -737,7 +737,7 @@ fn findObj(b: []const u8, num: u32) ?usize {
 ///
 /// "stream" 을 그냥 앞에서부터 찾으면 그 객체에 스트림이 없을 때 다음 객체의
 /// 것을 집어, 남의 /ShadingType·/PatternType 을 제 것으로 읽는다.
-fn objDictEnd(b: []const u8, ob: usize) usize {
+pub fn objDictEnd(b: []const u8, ob: usize) usize {
     const e1 = find(b, "endobj", ob) orelse b.len;
     const e2 = find(b, "stream", ob) orelse b.len;
     return @min(e1, e2);
@@ -827,7 +827,7 @@ fn inputSlice2(len: usize) []u8 {
 ///
 /// `/Length 35 0 R` 처럼 딴 객체를 가리키는 꼴이 흔하다. 앞의 숫자만 읽으면
 /// 35 바이트만 떼어 와 압축이 통째로 안 풀린다 — 쪽이 빈 채로 나온다.
-fn lengthOf(b: []const u8, from: usize, to: usize) ?u32 {
+pub fn lengthOf(b: []const u8, from: usize, to: usize) ?u32 {
     var at_from: usize = 0;
     while (find(b[from..to], "/Length", at_from)) |at| {
         var p = from + at + 7;
@@ -884,7 +884,7 @@ fn fixStreamLen(b: []const u8, data: usize, length: u32) u32 {
     return @intCast(q2 - data);
 }
 
-fn intAfter(b: []const u8, from: usize, to: usize, key: []const u8) ?u32 {
+pub fn intAfter(b: []const u8, from: usize, to: usize, key: []const u8) ?u32 {
     // 이름은 그 자리에서 끝나야 한다. "/Length1 26340 /Length 4017" 처럼
     // 더 긴 이름이 앞에 오면 "/Length" 가 먼저 걸려 1 을 길이로 읽어 버린다.
     // 글꼴 스트림이 다 그 꼴이라 안 풀리던 원인이었다.
@@ -1194,7 +1194,7 @@ fn anyPageRotate() bool {
     return false;
 }
 
-fn outBuf() [*]u8 { return @ptrFromInt(out_off); }
+pub fn outBuf() [*]u8 { return @ptrFromInt(out_off); }
 
 /// 출력 자리가 남았나. 넘겨 쓰면 wasm 이 통째로 죽는다 — 입력 칸을 천 개
 /// 채우면 실제로 그랬다.
@@ -1206,16 +1206,16 @@ fn outCopy(pos: *usize, src: []const u8) bool {
     return true;
 }
 
-fn outRoom(pos: usize, need: usize) bool {
+pub fn outRoom(pos: usize, need: usize) bool {
     return pos + need + 64 <= out_cap;
 }
 
-fn appendStr(pos: *usize, s: []const u8) void {
+pub fn appendStr(pos: *usize, s: []const u8) void {
     if (!outRoom(pos.*, s.len)) return;
     @memcpy(outBuf()[pos.*..][0..s.len], s);
     pos.* += s.len;
 }
-fn appendNum(pos: *usize, v: u32) void {
+pub fn appendNum(pos: *usize, v: u32) void {
     if (!outRoom(pos.*, 12)) return;
     var tmp: [12]u8 = undefined;
     var n: usize = 0;
@@ -1480,7 +1480,7 @@ fn buildLabelStream(page: u32) usize {
 }
 
 /// 딕셔너리 열쇠가 정확히 이것인가 (뒤에 구분자가 와야 한다).
-fn keyIs(b: []const u8, p: usize, end: usize, key: []const u8) bool {
+pub fn keyIs(b: []const u8, p: usize, end: usize, key: []const u8) bool {
     if (p + key.len > end) return false;
     if (!std_mem_eq(b[p..][0..key.len], key)) return false;
     const c = b[p + key.len];
@@ -1490,7 +1490,7 @@ fn keyIs(b: []const u8, p: usize, end: usize, key: []const u8) bool {
 }
 
 /// 값 하나를 건너뛴다 — 이름·수·문자열·배열·딕셔너리·참조를 다 받는다.
-fn skipVal(b: []const u8, from: usize, end: usize) usize {
+pub fn skipVal(b: []const u8, from: usize, end: usize) usize {
     var p = from;
     while (p < end and isSpace(b[p])) p += 1;
     if (p >= end) return end;
@@ -1541,7 +1541,7 @@ fn skipVal(b: []const u8, from: usize, end: usize) usize {
 /// 시절의 숫자인데, 쪽 상한을 없애면서 이 둘만 남았다 — 4100 쪽짜리를
 /// 돌려 내면 표 밖으로 넘겨 써서 상호참조표에 엉뚱한 번호가 박혔다
 /// (6000 쪽이면 3806 개). 이제 담을 만큼 잡는다.
-fn xrefTables(want: usize) ?struct { offs: []usize, nums: []u32 } {
+pub fn xrefTables(want: usize) ?struct { offs: []usize, nums: []u32 } {
     const cap = @max(@as(usize, 64), @min(want, 1 << 20));
     const off_at = zoneAlloc(cap * @sizeOf(usize)) orelse return null;
     const num_at = zoneAlloc(cap * 4) orelse return null;
@@ -1571,7 +1571,7 @@ fn writeStream(pos: *usize, offs: []usize, nums: []u32, n: *usize,
 ///
 /// 우리는 스트림을 이미 풀어 두고 원본 바이트를 그대로 옮기므로, 트레일러에
 /// /Encrypt 가 남아 있으면 읽는 쪽이 한 번 더 풀려다 내용을 망친다.
-fn stripEncryptOut(len: usize) void {
+pub fn stripEncryptOut(len: usize) void {
     if (!enc_on) return;
     const o = outBuf();
     var i: usize = 0;
@@ -2983,7 +2983,7 @@ fn opsBuf() []f32 {
 fn opsRoom(want: u32) bool { return growTable(&ops_at, &ops_cap, want, 4, 65536); }
 /// 그물 셰이딩이 명령 자리를 다 먹으면 그 뒤 그림이 통째로 사라진다.
 /// 망가진 파일은 삼각형을 수만 개 뱉으므로 더 못 늘릴 때만 그만둔다.
-fn opsRoomLow() bool { return !opsRoom(ops_n + 4096); }
+pub fn opsRoomLow() bool { return !opsRoom(ops_n + 4096); }
 /// 숨긴 레이어를 지나는 동안 명령을 내지 않는다
 var emit_mute: bool = false;
 // ===== 글자 묶음 =====
@@ -3038,7 +3038,7 @@ fn pathReset() void {
     path_y1 = -1e30;
 }
 
-fn emitOp(code: f32, args: []const f32) void {
+pub fn emitOp(code: f32, args: []const f32) void {
     if (emit_mute) return;
     const need: u32 = ops_n + 2 + @as(u32, @intCast(args.len));
     if (!opsRoom(need)) return;
@@ -3101,7 +3101,7 @@ var rtext_n: u32 = 0;
 var dtext_n: u32 = 0;
 
 /// 폰트 하나의 코드→유니코드 표 (희소)
-const FontMap = struct {
+pub const FontMap = struct {
     name: [24]u8,
     name_len: u8,
     two_byte: bool,
@@ -3154,7 +3154,7 @@ const FontMap = struct {
     t3: [256]u32,
     /// Type1 — 글리프가 암호화된 외곽선 프로그램으로 들어 있다
     t1: bool,
-    /// 글리프 프로그램 자리 (t1_pool 의 첫 칸). 코드 256 개가 이어진다.
+    /// 글리프 프로그램 자리 (pdft1.t1_pool 의 첫 칸). 코드 256 개가 이어진다.
     t1_cs: u16,
     /// 서브루틴 자리와 개수
     t1_sub: u16,
@@ -3171,15 +3171,15 @@ const FontMap = struct {
 /// 글꼴을 많이 쓰는 쪽에서 33번째부터 글자가 다른 글꼴로 찍혔다.
 var fonts_at: usize = 0;
 var fonts_cap: u32 = 0;
-fn fontsBuf() []FontMap {
+pub fn fontsBuf() []FontMap {
     if (fonts_at == 0 or fonts_cap == 0) return &[_]FontMap{};
     return @as([*]FontMap, @ptrFromInt(fonts_at))[0..fonts_cap];
 }
 fn fontsRoom(want: u32) bool { return growTable(&fonts_at, &fonts_cap, want, @sizeOf(FontMap), 8); }
-var font_n: u8 = 0;
+pub var font_n: u8 = 0;
 var cur_font: i32 = -1;
 /// 글꼴 영역에서 이번 쪽이 쓴 만큼
-var font_used: u32 = 0;
+pub var font_used: u32 = 0;
 
 var page_x0: f32 = 0;
 var page_y0: f32 = 0;
@@ -3931,7 +3931,7 @@ export fn jpegToRgb(i: u32) i32 {
 ///
 /// 여기 쓴 이차식은 pdf.js 것이다(Apache-2.0, THIRD-PARTY-NOTICES.md 참고).
 /// 박힌 ICC 프로파일이 있으면 그쪽이 먼저다 — 이건 프로파일이 없을 때다.
-fn cmykRgb(c: f32, m: f32, y: f32, k: f32, out: *[3]f32) void {
+pub fn cmykRgb(c: f32, m: f32, y: f32, k: f32, out: *[3]f32) void {
     const r = 255 +
         c * (-4.387332384609988 * c + 54.48615194189176 * m + 18.82290502165302 * y +
             212.25662451639585 * k - 285.2331026137004) +
@@ -4137,27 +4137,27 @@ export fn pageRotate() i32 { return page_rotate; }
 export fn pageWidth() f32 { return page_w; }
 export fn pageHeight() f32 { return page_h; }
 
-fn isDigit(c: u8) bool { return c >= '0' and c <= '9'; }
-fn hexVal(c: u8) ?u8 {
+pub fn isDigit(c: u8) bool { return c >= '0' and c <= '9'; }
+pub fn hexVal(c: u8) ?u8 {
     if (c >= '0' and c <= '9') return c - '0';
     if (c >= 'a' and c <= 'f') return c - 'a' + 10;
     if (c >= 'A' and c <= 'F') return c - 'A' + 10;
     return null;
 }
 
-fn txEq(a: []const u8, b: []const u8) bool {
+pub fn txEq(a: []const u8, b: []const u8) bool {
     if (a.len != b.len) return false;
     for (a, 0..) |c, i| if (c != b[i]) return false;
     return true;
 }
-fn findIn(h: []const u8, n: []const u8, from: usize) ?usize {
+pub fn findIn(h: []const u8, n: []const u8, from: usize) ?usize {
     if (n.len == 0 or n.len > h.len) return null;
     var i = from;
     while (i + n.len <= h.len) : (i += 1) if (txEq(h[i .. i + n.len], n)) return i;
     return null;
 }
 
-fn readFloat(b: []const u8, p: *usize) f32 {
+pub fn readFloat(b: []const u8, p: *usize) f32 {
     while (p.* < b.len and isSpace(b[p.*])) p.* += 1;
     var neg = false;
     if (p.* < b.len and (b[p.*] == '-' or b[p.*] == '+')) {
@@ -4457,12 +4457,12 @@ fn emit(x: f32, y: f32, size: f32, start: u32) void {
 
 /// 콘텐츠 스트림을 훑어 글자와 위치를 모은다.
 /// 2×3 아핀 행렬. PDF 의 [a b c d e f] 순서를 그대로 쓴다.
-const Mat = struct {
+pub const Mat = struct {
     a: f32 = 1, b: f32 = 0, c: f32 = 0, d: f32 = 1, e: f32 = 0, f: f32 = 0,
 };
 
 /// m 을 n 에 이어 붙인다 (m 먼저, 그 다음 n).
-fn matMul(m: Mat, n: Mat) Mat {
+pub fn matMul(m: Mat, n: Mat) Mat {
     return .{
         .a = m.a * n.a + m.b * n.c,
         .b = m.a * n.b + m.b * n.d,
@@ -4587,7 +4587,7 @@ fn inlineImage(b: []const u8, p: *usize) void {
 }
 
 /// 문서 전체 (폼·글리프 그림을 꺼내려면 필요하다)
-var doc: []const u8 = &[_]u8{};
+pub var doc: []const u8 = &[_]u8{};
 
 /// 겹쳐 부르는 스트림을 담을 자리. 깊이마다 따로 둔다 — 같은 자리를 쓰면
 /// 바깥에서 훑던 내용이 안쪽에서 덮인다.
@@ -4917,7 +4917,7 @@ fn runOps(b: []const u8, depth: u32) void {
                     const ey2 = m.f + m.d * rise;
                     // Type1 은 글리프가 외곽선 프로그램이다. 그 자리에 그린다.
                     if (ff) |g| {
-                        if (g.t1 and code < 256 and t1_pool[g.t1_cs + code].len > 0) {
+                        if (g.t1 and code < 256 and pdft1.t1_pool[g.t1_cs + code].len > 0) {
                             runFlush();
                             emitOp(14, &[_]f32{});
                             emitOp(16, &[_]f32{ m.a, m.b, m.c, m.d, ex2, ey2 });
@@ -7298,7 +7298,7 @@ fn streamOf(b: []const u8, num: u32) ?[]const u8 {
 }
 
 /// 객체 몸통 자리를 알 때 쓰는 판. 번호를 모르는 자리에서도 스트림을 편다.
-fn streamFrom(b: []const u8, body: usize) ?[]const u8 {
+pub fn streamFrom(b: []const u8, body: usize) ?[]const u8 {
     const sp = find(b, "stream", body) orelse return null;
     // 길이를 못 읽어도 포기하지 않는다 — endstream 이 어디 있는지는 보인다
     const raw_len = lengthOf(b, body, sp) orelse 0;
@@ -7343,28 +7343,28 @@ fn streamFrom(b: []const u8, body: usize) ?[]const u8 {
 /// 유니코드 → 글리프 번호. 0 은 없음으로 본다.
 var uni2gid: [65536]u16 = undefined;
 
-fn be16(b: []const u8, o: usize) u16 {
+pub fn be16(b: []const u8, o: usize) u16 {
     if (o + 2 > b.len) return 0;
     return (@as(u16, b[o]) << 8) | b[o + 1];
 }
-fn be32(b: []const u8, o: usize) u32 {
+pub fn be32(b: []const u8, o: usize) u32 {
     if (o + 4 > b.len) return 0;
     return (@as(u32, b[o]) << 24) | (@as(u32, b[o + 1]) << 16) |
         (@as(u32, b[o + 2]) << 8) | b[o + 3];
 }
-fn wr16(d: []u8, o: usize, v: u16) void {
+pub fn wr16(d: []u8, o: usize, v: u16) void {
     if (o + 2 > d.len) return;
     d[o] = @intCast(v >> 8);
     d[o + 1] = @truncate(v);
 }
-fn wr32(d: []u8, o: usize, v: u32) void {
+pub fn wr32(d: []u8, o: usize, v: u32) void {
     if (o + 4 > d.len) return;
     d[o] = @truncate(v >> 24);
     d[o + 1] = @truncate(v >> 16);
     d[o + 2] = @truncate(v >> 8);
     d[o + 3] = @truncate(v);
 }
-fn sumTable(d: []const u8, off: usize, len: usize) u32 {
+pub fn sumTable(d: []const u8, off: usize, len: usize) u32 {
     var sum: u32 = 0;
     var i: usize = 0;
     while (i + 4 <= len) : (i += 4) sum +%= be32(d, off + i);
@@ -7576,7 +7576,7 @@ fn buildPostTable(dst: []u8) u32 {
 
 /// 글꼴 파일의 cmap 을 f 의 코드표로 갈아 끼워 dst 에 새로 적는다.
 /// 성공하면 새 파일 길이, 실패하면 0.
-fn patchFont(src: []const u8, f: *FontMap, dst: []u8) u32 {
+pub fn patchFont(src: []const u8, f: *FontMap, dst: []u8) u32 {
     if (src.len < 12) return 0;
     const tag = be32(src, 0);
     // 0x00010000(트루타입), 'true', 'OTTO' 만 받는다
@@ -7728,7 +7728,7 @@ fn patchFont(src: []const u8, f: *FontMap, dst: []u8) u32 {
 /// Identity-H 는 문자 코드가 곧 글리프 번호라, 유니코드를 거치지 않고
 /// 사용자 영역(U+E000~)에 번호를 그대로 붙인다. 그렇지 않으면 ToUnicode 를
 /// 뒤집어 "유니코드 → 글리프" 표를 만든다.
-fn buildFontCmap(f: *FontMap, nglyphs: u16, dst: []u8) u32 {
+pub fn buildFontCmap(f: *FontMap, nglyphs: u16, dst: []u8) u32 {
     f.pua = false;
     if (f.identity and nglyphs > 0 and nglyphs <= 6400) {
         const n = buildPuaCmap(dst, nglyphs);
@@ -7765,7 +7765,7 @@ fn buildFontCmap(f: *FontMap, nglyphs: u16, dst: []u8) u32 {
 // 표준 보안 처리기. 빈 사용자 암호로 잠긴 파일이 대부분이라 그것만 푼다.
 // 판 2~4 는 RC4·AES-128, 판 5~6 은 AES-256 이다.
 
-const crypt = @import("pdfcrypt.zig");
+pub const crypt = @import("pdfcrypt.zig");
 const std14 = @import("pdfstd14.zig");
 const ccitt = @import("pdfccitt.zig");
 const jbig2 = @import("pdfjbig2.zig");
@@ -7828,7 +7828,7 @@ fn readPdfString(b: []const u8, s2: usize, e: usize, key: []const u8, out: []u8)
 }
 
 /// 판 6 의 해시 2.B
-fn hash2B(pwd: []const u8, salt: []const u8, udata: []const u8, out: *[32]u8) void {
+pub fn hash2B(pwd: []const u8, salt: []const u8, udata: []const u8, out: *[32]u8) void {
     var k: [64]u8 = undefined;
     var klen: usize = 32;
     var k32: [32]u8 = undefined;
@@ -10173,7 +10173,7 @@ fn collectOutline(b: []const u8, root: u32) void {
 // 캔버스의 그라데이션에 그대로 넘긴다. 형식 2(지수)·3(이어붙임)·0(표본)을
 // 본다.
 
-const Shade = struct {
+pub const Shade = struct {
     name: [24]u8,
     name_len: u8,
     /// 1 함수 · 2 축 · 3 방사 · 4·5 삼각 그물 · 6·7 이음 조각
@@ -10201,12 +10201,12 @@ const Shade = struct {
 /// 이름 붙은 그늘. 필요한 만큼 늘어난다(세는 상한 없음).
 var shades_at: usize = 0;
 var shades_cap: u32 = 0;
-fn shadesBuf() []Shade {
+pub fn shadesBuf() []Shade {
     if (shades_at == 0 or shades_cap == 0) return &[_]Shade{};
     return @as([*]Shade, @ptrFromInt(shades_at))[0..shades_cap];
 }
-fn shadesRoom(want: u32) bool { return growTable(&shades_at, &shades_cap, want, @sizeOf(Shade), 16); }
-var shade_n: u32 = 0;
+pub fn shadesRoom(want: u32) bool { return growTable(&shades_at, &shades_cap, want, @sizeOf(Shade), 16); }
+pub var shade_n: u32 = 0;
 
 /// 타일 무늬는 아직 깔지 못한다. 대표 색만 뽑아 단색으로 칠한다 —
 /// 검정으로 덮는 것보다 훨씬 원본에 가깝다.
@@ -10344,7 +10344,7 @@ fn findShade(name: []const u8) i32 {
 }
 
 /// 딕셔너리의 숫자 배열을 읽는다. 읽은 개수를 준다.
-fn readArr(b: []const u8, ds: usize, de: usize, key: []const u8, dst: []f32) u32 {
+pub fn readArr(b: []const u8, ds: usize, de: usize, key: []const u8, dst: []f32) u32 {
     const a = find(b[ds..de], key, 0) orelse return 0;
     var p = ds + a + key.len;
     while (p < de and isSpace(b[p])) p += 1;
@@ -10382,7 +10382,7 @@ fn fnReset() void {
     while (i < FN_SLOTS) : (i += 1) { fn_key[i] = 0; fn_ln[i] = 0; }
 }
 
-fn sampleData(b: []const u8, fs: usize) ?[]const u8 {
+pub fn sampleData(b: []const u8, fs: usize) ?[]const u8 {
     var i: u32 = 0;
     while (i < FN_SLOTS) : (i += 1) {
         if (fn_key[i] == fs and fn_ln[i] > 0) return fn_pool[fn_at[i]..][0..fn_ln[i]];
@@ -10401,7 +10401,7 @@ fn sampleData(b: []const u8, fs: usize) ?[]const u8 {
 }
 
 /// 자료에서 bit 자리부터 n 비트를 읽는다 (큰 자리가 앞).
-fn bitsAt(d: []const u8, bit: u64, n: u32) u32 {
+pub fn bitsAt(d: []const u8, bit: u64, n: u32) u32 {
     var v: u32 = 0;
     var k: u32 = 0;
     while (k < n) : (k += 1) {
@@ -10414,2063 +10414,39 @@ fn bitsAt(d: []const u8, bit: u64, n: u32) u32 {
     return v;
 }
 
-fn lerp(x: f32, a0: f32, a1: f32, b0: f32, b1: f32) f32 {
+pub fn lerp(x: f32, a0: f32, a1: f32, b0: f32, b1: f32) f32 {
     if (a1 == a0) return b0;
     return b0 + (x - a0) * (b1 - b0) / (a1 - a0);
 }
 
-// ===== 계산기 함수 (/FunctionType 4) =====
+// ===== 함수·셰이딩 읽기 (c/pdffn.zig) =====
 //
-// 포스트스크립트 토막이 통째로 들어 있다. Separation·DeviceN 색이 잉크
-// 농도를 실제 색으로 옮길 때, 셰이딩이 색을 계산할 때 쓴다. 읽지 않으면
-// 그 색이 통째로 틀린다.
+// 부르는 자리를 안 건드리도록 이름만 이어 둔다.
+const pdffn = @import("pdffn.zig");
+pub const evalFnN = pdffn.evalFnN;
+const readShade = pdffn.readShade;
+pub const rgbFrom = pdffn.rgbFrom;
+pub const shadeFn = pdffn.shadeFn;
 
-fn psTok(d: []const u8, p: *usize, end: usize) []const u8 {
-    while (p.* < end and (isSpace(d[p.*]) or d[p.*] == '%')) {
-        if (d[p.*] == '%') {
-            while (p.* < end and d[p.*] != '\n') p.* += 1;
-        } else p.* += 1;
-    }
-    if (p.* >= end) return &[_]u8{};
-    const s0 = p.*;
-    if (d[p.*] == '{' or d[p.*] == '}') {
-        p.* += 1;
-        return d[s0..p.*];
-    }
-    while (p.* < end and !isSpace(d[p.*]) and d[p.*] != '{' and d[p.*] != '}') p.* += 1;
-    return d[s0..p.*];
-}
-
-/// 짝이 되는 닫는 괄호 자리
-fn psMatch(d: []const u8, from: usize, end: usize) usize {
-    var depth: u32 = 1;
-    var p = from;
-    while (p < end) : (p += 1) {
-        if (d[p] == '{') depth += 1
-        else if (d[p] == '}') { depth -= 1; if (depth == 0) return p; }
-    }
-    return end;
-}
-
-const PS = struct {
-    st: [128]f32 = undefined,
-    sp: usize = 0,
-    fn push(s: *PS, v: f32) void {
-        if (s.sp < s.st.len) { s.st[s.sp] = v; s.sp += 1; }
-    }
-    fn pop(s: *PS) f32 {
-        if (s.sp == 0) return 0;
-        s.sp -= 1;
-        return s.st[s.sp];
-    }
-};
-
-fn psExec(d: []const u8, from: usize, to: usize, s: *PS, depth: u32) void {
-    if (depth > 32) return;
-    var p = from;
-    // if·ifelse 는 앞에 놓인 { } 토막을 받는다
-    var pb: [4][2]usize = undefined;
-    var pn: usize = 0;
-    var guard: u32 = 0;
-    while (p < to and guard < 100000) {
-        guard += 1;
-        const t = psTok(d, &p, to);
-        if (t.len == 0) break;
-        if (t[0] == '{') {
-            const e = psMatch(d, p, to);
-            if (pn < 4) { pb[pn] = .{ p, e }; pn += 1; }
-            p = e + 1;
-            continue;
-        }
-        if (t[0] == '}') continue;
-        if (t[0] == '-' or t[0] == '.' or (t[0] >= '0' and t[0] <= '9')) {
-            var q: usize = 0;
-            s.push(readFloat(t, &q));
-            continue;
-        }
-        const eq = struct {
-            fn f(a: []const u8, w: []const u8) bool {
-                if (a.len != w.len) return false;
-                for (a, 0..) |ch, i| if (ch != w[i]) return false;
-                return true;
-            }
-        }.f;
-        if (eq(t, "add")) { const bv = s.pop(); s.push(s.pop() + bv); }
-        else if (eq(t, "sub")) { const bv = s.pop(); s.push(s.pop() - bv); }
-        else if (eq(t, "mul")) { const bv = s.pop(); s.push(s.pop() * bv); }
-        else if (eq(t, "div")) { const bv = s.pop(); s.push(if (bv == 0) 0 else s.pop() / bv); }
-        else if (eq(t, "idiv")) {
-            const bv = s.pop();
-            const av = s.pop();
-            s.push(if (bv == 0) 0 else @trunc(av / bv));
-        }
-        else if (eq(t, "mod")) {
-            const bv = s.pop();
-            const av = s.pop();
-            s.push(if (bv == 0) 0 else av - bv * @trunc(av / bv));
-        }
-        else if (eq(t, "neg")) s.push(-s.pop())
-        else if (eq(t, "abs")) s.push(@abs(s.pop()))
-        else if (eq(t, "ceiling")) s.push(@ceil(s.pop()))
-        else if (eq(t, "floor")) s.push(@floor(s.pop()))
-        else if (eq(t, "round")) s.push(@round(s.pop()))
-        else if (eq(t, "truncate")) s.push(@trunc(s.pop()))
-        else if (eq(t, "sqrt")) s.push(@sqrt(@max(0, s.pop())))
-        else if (eq(t, "sin")) s.push(@sin(s.pop() * 3.14159265 / 180))
-        else if (eq(t, "cos")) s.push(@cos(s.pop() * 3.14159265 / 180))
-        else if (eq(t, "atan")) {
-            const den = s.pop();
-            const num = s.pop();
-            var ang = atan2Deg(num, den);
-            if (ang < 0) ang += 360;
-            s.push(ang);
-        }
-        else if (eq(t, "exp")) {
-            const e2 = s.pop();
-            const bv = s.pop();
-            s.push(powf(bv, e2));
-        }
-        else if (eq(t, "ln")) s.push(lnf(@max(1e-20, s.pop())))
-        else if (eq(t, "log")) s.push(lnf(@max(1e-20, s.pop())) / 2.302585093)
-        else if (eq(t, "cvi")) s.push(@trunc(s.pop()))
-        else if (eq(t, "cvr")) {}
-        else if (eq(t, "dup")) { const v = s.pop(); s.push(v); s.push(v); }
-        else if (eq(t, "pop")) _ = s.pop()
-        else if (eq(t, "exch")) { const bv = s.pop(); const av = s.pop(); s.push(bv); s.push(av); }
-        else if (eq(t, "copy")) {
-            const nv: usize = @intFromFloat(@max(0, @min(32, s.pop())));
-            if (nv <= s.sp) {
-                var kx: usize = 0;
-                while (kx < nv) : (kx += 1) s.push(s.st[s.sp - nv]);
-            }
-        }
-        else if (eq(t, "index")) {
-            const nv: usize = @intFromFloat(@max(0, @min(127, s.pop())));
-            s.push(if (nv < s.sp) s.st[s.sp - 1 - nv] else 0);
-        }
-        else if (eq(t, "roll")) {
-            const j = s.pop();
-            const nv: usize = @intFromFloat(@max(0, @min(64, s.pop())));
-            if (nv > 0 and nv <= s.sp) {
-                var ji: i32 = @intFromFloat(j);
-                const ni: i32 = @intCast(nv);
-                ji = @mod(ji, ni);
-                if (ji < 0) ji += ni;
-                var tmp: [64]f32 = undefined;
-                var kx: usize = 0;
-                while (kx < nv) : (kx += 1) {
-                    const from2 = (kx + nv - @as(usize, @intCast(ji))) % nv;
-                    tmp[kx] = s.st[s.sp - nv + from2];
-                }
-                kx = 0;
-                while (kx < nv) : (kx += 1) s.st[s.sp - nv + kx] = tmp[kx];
-            }
-        }
-        else if (eq(t, "eq")) { const bv = s.pop(); s.push(if (s.pop() == bv) 1 else 0); }
-        else if (eq(t, "ne")) { const bv = s.pop(); s.push(if (s.pop() != bv) 1 else 0); }
-        else if (eq(t, "gt")) { const bv = s.pop(); s.push(if (s.pop() > bv) 1 else 0); }
-        else if (eq(t, "ge")) { const bv = s.pop(); s.push(if (s.pop() >= bv) 1 else 0); }
-        else if (eq(t, "lt")) { const bv = s.pop(); s.push(if (s.pop() < bv) 1 else 0); }
-        else if (eq(t, "le")) { const bv = s.pop(); s.push(if (s.pop() <= bv) 1 else 0); }
-        else if (eq(t, "and")) {
-            const bv: i32 = @intFromFloat(s.pop());
-            const av: i32 = @intFromFloat(s.pop());
-            s.push(@floatFromInt(av & bv));
-        }
-        else if (eq(t, "or")) {
-            const bv: i32 = @intFromFloat(s.pop());
-            const av: i32 = @intFromFloat(s.pop());
-            s.push(@floatFromInt(av | bv));
-        }
-        else if (eq(t, "xor")) {
-            const bv: i32 = @intFromFloat(s.pop());
-            const av: i32 = @intFromFloat(s.pop());
-            s.push(@floatFromInt(av ^ bv));
-        }
-        else if (eq(t, "not")) {
-            const av = s.pop();
-            s.push(if (av == 0) 1 else if (av == 1) 0 else @floatFromInt(~@as(i32, @intFromFloat(av))));
-        }
-        else if (eq(t, "bitshift")) {
-            const sh = s.pop();
-            const av: i32 = @intFromFloat(s.pop());
-            const k: i32 = @intFromFloat(sh);
-            const kk: u5 = @intCast(@min(31, @abs(k)));
-            s.push(@floatFromInt(if (k >= 0) av << kk else av >> kk));
-        }
-        else if (eq(t, "true")) s.push(1)
-        else if (eq(t, "false")) s.push(0)
-        else if (eq(t, "if")) {
-            const cond = s.pop();
-            if (pn >= 1) {
-                if (cond != 0) psExec(d, pb[pn - 1][0], pb[pn - 1][1], s, depth + 1);
-                pn -= 1;
-            }
-        }
-        else if (eq(t, "ifelse")) {
-            const cond = s.pop();
-            if (pn >= 2) {
-                const blk = if (cond != 0) pb[pn - 2] else pb[pn - 1];
-                psExec(d, blk[0], blk[1], s, depth + 1);
-                pn -= 2;
-            }
-        }
-    }
-}
-
-fn atan2Deg(y: f32, x: f32) f32 {
-    if (x == 0 and y == 0) return 0;
-    const pi: f32 = 3.14159265;
-    var r: f32 = 0;
-    if (x > 0) r = atanf(y / x)
-    else if (x < 0) r = atanf(y / x) + (if (y >= 0) pi else -pi)
-    else r = if (y > 0) pi / 2 else -pi / 2;
-    return r * 180 / pi;
-}
-fn atanf(v: f32) f32 {
-    // 급수 몇 개면 색을 정하기에 넉넉하다
-    const a = @abs(v);
-    if (a > 1) return (if (v > 0) @as(f32, 1.5707963) else @as(f32, -1.5707963)) - atanf(1 / v);
-    const x2 = v * v;
-    return v * (1 - x2 * (0.3333333 - x2 * (0.2 - x2 * (0.1428571 - x2 * 0.1111111))));
-}
-fn lnf(v: f32) f32 {
-    // v = m * 2^e 로 갈라 급수로 센다
-    var m = v;
-    var e: f32 = 0;
-    while (m > 2) { m /= 2; e += 1; }
-    while (m < 1) { m *= 2; e -= 1; }
-    const z = (m - 1) / (m + 1);
-    const z2 = z * z;
-    const l = 2 * z * (1 + z2 * (0.3333333 + z2 * (0.2 + z2 * 0.1428571)));
-    return l + e * 0.6931472;
-}
-fn powf(b: f32, e: f32) f32 {
-    if (b <= 0) return 0;
-    return expf(e * lnf(b));
-}
-fn expf(v: f32) f32 {
-    if (v > 60) return 1e26;
-    if (v < -60) return 0;
-    var n: i32 = @intFromFloat(@round(v / 0.6931472));
-    const r = v - @as(f32, @floatFromInt(n)) * 0.6931472;
-    var s2: f32 = 1 + r * (1 + r * (0.5 + r * (0.1666667 + r * (0.0416667 + r * 0.0083333))));
-    while (n > 0) : (n -= 1) s2 *= 2;
-    while (n < 0) : (n += 1) s2 *= 0.5;
-    return s2;
-}
-
-/// 함수를 t 에서 찍어 색을 낸다. 성분 수만큼 out 에 담는다.
-fn evalFn(b: []const u8, fs: usize, fe: usize, t: f32, out: *[4]f32) u32 {
-    return evalFnN(b, fs, fe, &[_]f32{t}, out);
-}
-
-/// 들어가는 값이 둘인 함수(셰이딩 1형)까지 받는 판.
-fn evalFnN(b: []const u8, fs: usize, fe: usize, in: []const f32, out: *[4]f32) u32 {
-    const t = in[0];
-    const ft = intAfter(b, fs, fe, "/FunctionType") orelse return 0;
-    if (ft == 2) {
-        var c0: [4]f32 = .{ 0, 0, 0, 0 };
-        var c1: [4]f32 = .{ 1, 1, 1, 1 };
-        var n0: u32 = 1;
-        var n1: u32 = 1;
-        if (find(b[fs..fe], "/C0", 0)) |a| {
-            var p = fs + a + 3;
-            while (p < fe and b[p] != '[') p += 1;
-            p += 1;
-            n0 = 0;
-            while (n0 < 4 and p < fe and b[p] != ']') : (n0 += 1) {
-                while (p < fe and isSpace(b[p])) p += 1;
-                if (p >= fe or b[p] == ']') break;
-                c0[n0] = readFloat(b, &p);
-            }
-        }
-        if (find(b[fs..fe], "/C1", 0)) |a| {
-            var p = fs + a + 3;
-            while (p < fe and b[p] != '[') p += 1;
-            p += 1;
-            n1 = 0;
-            while (n1 < 4 and p < fe and b[p] != ']') : (n1 += 1) {
-                while (p < fe and isSpace(b[p])) p += 1;
-                if (p >= fe or b[p] == ']') break;
-                c1[n1] = readFloat(b, &p);
-            }
-        }
-        const n = @max(@max(n0, n1), 1);
-        var i: u32 = 0;
-        while (i < n and i < 4) : (i += 1) out[i] = c0[i] + t * (c1[i] - c0[i]);
-        return n;
-    }
-    if (ft == 3) {
-        // 이어붙임 — 경계로 나눠 하위 함수에 넘긴다
-        var bounds: [8]f32 = undefined;
-        var nb: u32 = 0;
-        if (find(b[fs..fe], "/Bounds", 0)) |a| {
-            var p = fs + a + 7;
-            while (p < fe and b[p] != '[') p += 1;
-            p += 1;
-            while (nb < 8 and p < fe) {
-                while (p < fe and isSpace(b[p])) p += 1;
-                if (p >= fe or b[p] == ']') break;
-                bounds[nb] = readFloat(b, &p);
-                nb += 1;
-            }
-        }
-        var subs: [9]u32 = undefined;
-        var ns: u32 = 0;
-        if (find(b[fs..fe], "/Functions", 0)) |a| {
-            var p = fs + a + 10;
-            while (p < fe and b[p] != '[') p += 1;
-            p += 1;
-            while (ns < 9 and p < fe and b[p] != ']') {
-                while (p < fe and isSpace(b[p])) p += 1;
-                if (p >= fe or b[p] == ']') break;
-                if (!isDigit(b[p])) { p += 1; continue; }
-                subs[ns] = readUint(b, &p);
-                ns += 1;
-                while (p < fe and isSpace(b[p])) p += 1;
-                if (p < fe and isDigit(b[p])) _ = readUint(b, &p);
-                while (p < fe and isSpace(b[p])) p += 1;
-                if (p < fe and b[p] == 'R') p += 1;
-            }
-        }
-        if (ns == 0) return 0;
-        var k: u32 = 0;
-        while (k < nb and t >= bounds[k]) k += 1;
-        if (k >= ns) k = ns - 1;
-        const lo: f32 = if (k == 0) 0 else bounds[k - 1];
-        const hi: f32 = if (k >= nb) 1 else bounds[k];
-        const tt = if (hi > lo) (t - lo) / (hi - lo) else 0;
-        if (findObj(b, subs[k])) |sb2| {
-            const se2 = objDictEnd(b, sb2);
-            return evalFn(b, sb2, se2, tt, out);
-        }
-        return 0;
-    }
-    if (ft == 0) {
-        // 표본 함수. 격자 위의 값을 스트림에 늘어놓은 것이다.
-        //
-        // 예전에는 이걸 읽지 않고 t 를 그대로 회색으로 봤다. 그러면 색이
-        // 통째로 틀린다 — 파란 그라데이션이 회색 띠가 됐다.
-        var rng: [32]f32 = undefined;
-        const nr = readArr(b, fs, fe, "/Range", &rng);
-        if (nr < 2) return 0;
-        const nout = @min(nr / 2, 4);
-        var size: [2]f32 = .{ 0, 0 };
-        const nin = @min(readArr(b, fs, fe, "/Size", &size), 2);
-        if (nin == 0 or size[0] < 1) return 0;
-        const bps = intAfter(b, fs, fe, "/BitsPerSample") orelse 8;
-        if (bps == 0 or bps > 32) return 0;
-        var dom: [4]f32 = .{ 0, 1, 0, 1 };
-        _ = readArr(b, fs, fe, "/Domain", &dom);
-        var encp: [4]f32 = undefined;
-        const ne = readArr(b, fs, fe, "/Encode", &encp);
-        var dec: [32]f32 = undefined;
-        const nd = readArr(b, fs, fe, "/Decode", &dec);
-        const d = sampleData(b, fs) orelse return 0;
-
-        // 들어온 값을 격자 자리로 옮긴다.
-        //
-        // 규격이 정한 기본은 사이값을 잇는 것이다(/Order 1). 예전에는 첫 축만
-        // 이었고, 축이 둘이면 그것마저 껐다 — 축 넷을 그물처럼 잇는 대신 가장
-        // 가까운 칸을 집었다. 그래서 Size [4 4] 짜리 셰이딩이 네 단으로
-        // 뭉쳐 나왔다(pdf.js 는 매끄러운데 우리만 띠가 졌다).
-        var idx: [2]u32 = .{ 0, 0 };
-        var frac: [2]f32 = .{ 0, 0 };
-        var lim: [2]u32 = .{ 1, 1 };
-        var k: u32 = 0;
-        while (k < nin) : (k += 1) {
-            const sz = @max(1, size[k]);
-            const e0: f32 = if (ne >= (k + 1) * 2) encp[k * 2] else 0;
-            const e1: f32 = if (ne >= (k + 1) * 2) encp[k * 2 + 1] else sz - 1;
-            const x = if (k < in.len) in[k] else 0;
-            var e = lerp(x, dom[k * 2], dom[k * 2 + 1], e0, e1);
-            e = @max(0, @min(sz - 1, e));
-            idx[k] = @intFromFloat(e);
-            frac[k] = e - @as(f32, @floatFromInt(idx[k]));
-            lim[k] = @intFromFloat(sz);
-        }
-        const w0: u64 = lim[0];
-        // 네 귀퉁이. 격자 끝에서는 제자리를 다시 집어 밖으로 안 나간다.
-        const gx0: u64 = idx[0];
-        const gx1: u64 = if (idx[0] + 1 < lim[0]) idx[0] + 1 else idx[0];
-        const gy0: u64 = idx[1];
-        const gy1: u64 = if (nin >= 2 and idx[1] + 1 < lim[1]) idx[1] + 1 else idx[1];
-        const corner: [4]u64 = .{ gx0 + gy0 * w0, gx1 + gy0 * w0, gx0 + gy1 * w0, gx1 + gy1 * w0 };
-        const fx = frac[0];
-        const fy = if (nin >= 2) frac[1] else 0;
-        const maxv: f32 = @floatFromInt((@as(u64, 1) << @intCast(bps)) - 1);
-        var c: u32 = 0;
-        while (c < nout) : (c += 1) {
-            var v: [4]f32 = undefined;
-            var q: usize = 0;
-            while (q < 4) : (q += 1)
-                v[q] = @floatFromInt(bitsAt(d, (corner[q] * nout + c) * bps, bps));
-            const top = v[0] + (v[1] - v[0]) * fx;
-            const bot = v[2] + (v[3] - v[2]) * fx;
-            const raw = (top + (bot - top) * fy) / maxv;
-            const lo: f32 = if (nd >= (c + 1) * 2) dec[c * 2] else rng[c * 2];
-            const hi: f32 = if (nd >= (c + 1) * 2) dec[c * 2 + 1] else rng[c * 2 + 1];
-            out[c] = lo + raw * (hi - lo);
-        }
-        return nout;
-    }
-    if (ft == 4) {
-        // 계산기 — 스트림 안 포스트스크립트를 돌린다
-        var rng: [32]f32 = undefined;
-        const nr = readArr(b, fs, fe, "/Range", &rng);
-        if (nr < 2) return 0;
-        const nout = @min(nr / 2, 4);
-        const d = sampleData(b, fs) orelse return 0;
-        var p2: usize = 0;
-        while (p2 < d.len and d[p2] != '{') p2 += 1;
-        if (p2 >= d.len) return 0;
-        var ps = PS{};
-        for (in) |v| ps.push(v);
-        psExec(d, p2 + 1, psMatch(d, p2 + 1, d.len), &ps, 0);
-        var c: u32 = 0;
-        while (c < nout) : (c += 1) {
-            const idx = nout - 1 - c;
-            const v = ps.pop();
-            out[idx] = @max(rng[idx * 2], @min(rng[idx * 2 + 1], v));
-        }
-        return nout;
-    }
-    return 0;
-}
-
-fn rgbFrom(comps: u32, v: [4]f32, out: *[3]f32) void {
-    if (comps >= 4) {
-        cmykRgb(v[0], v[1], v[2], v[3], out);
-    } else if (comps == 3) {
-        out[0] = v[0];
-        out[1] = v[1];
-        out[2] = v[2];
-    } else {
-        out[0] = v[0];
-        out[1] = v[0];
-        out[2] = v[0];
-    }
-}
-
-/// 셰이딩 딕셔너리 하나를 읽는다.
-fn readShade(b: []const u8, ds: usize, de: usize, name: []const u8) void {
-    if (!shadesRoom(shade_n + 1)) return;
-    const st2 = intAfter(b, ds, de, "/ShadingType") orelse return;
-    if (st2 < 1 or st2 > 7) return;
-    const sh = &shadesBuf()[shade_n];
-    sh.ds = @intCast(ds);
-    sh.de = @intCast(de);
-    sh.fs = 0;
-    sh.fe = 0;
-    sh.fxn = 0;
-    sh.mat = .{ 1, 0, 0, 1, 0, 0 };
-    sh.dom = .{ 0, 1, 0, 1 };
-    sh.ncomp = 3;
-    const nl = @min(name.len, 24);
-    var k: usize = 0;
-    while (k < nl) : (k += 1) sh.name[k] = name[k];
-    sh.name_len = @intCast(nl);
-    sh.kind = @intCast(st2);
-    sh.ext0 = false;
-    sh.ext1 = false;
-    sh.stop_n = 0;
-    var i: u32 = 0;
-    while (i < 6) : (i += 1) sh.coords[i] = 0;
-    if (find(b[ds..de], "/Coords", 0)) |a| {
-        var p = ds + a + 7;
-        while (p < de and b[p] != '[') p += 1;
-        p += 1;
-        const want: u32 = if (st2 == 2) 4 else 6;
-        i = 0;
-        while (i < want and p < de) : (i += 1) sh.coords[i] = readFloat(b, &p);
-    }
-    if (find(b[ds..de], "/Extend", 0)) |a| {
-        var p = ds + a + 7;
-        while (p < de and b[p] != '[') p += 1;
-        p += 1;
-        while (p < de and isSpace(b[p])) p += 1;
-        sh.ext0 = p + 4 <= de and std_mem_eq(b[p .. p + 4], "true");
-        while (p < de and !isSpace(b[p])) p += 1;
-        while (p < de and isSpace(b[p])) p += 1;
-        sh.ext1 = p + 4 <= de and std_mem_eq(b[p .. p + 4], "true");
-    }
-    // 함수 자리를 찾아 둔다. 2·3형은 여기서 여덟 군데를 찍고,
-    // 그물은 그릴 때 꼭짓점마다 찍는다.
-    var fs: usize = 0;
-    var fe: usize = 0;
-    if (find(b[ds..de], "/Function", 0)) |a| {
-        var p = ds + a + 9;
-        while (p < de and isSpace(b[p])) p += 1;
-        const arr = p < de and b[p] == '[';
-        if (arr) p += 1;
-        var got: u32 = 0;
-        while (got < 4) {
-            while (p < de and isSpace(b[p])) p += 1;
-            if (p >= de or b[p] == ']') break;
-            var s2: usize = 0;
-            var e2: usize = 0;
-            if (b[p] == '<') {
-                s2 = p;
-                e2 = dictEnd(b, p, de);
-                p = e2;
-            } else if (isDigit(b[p])) {
-                const fnum = readUint(b, &p);
-                while (p < de and isSpace(b[p])) p += 1;
-                if (p < de and isDigit(b[p])) _ = readUint(b, &p);
-                while (p < de and isSpace(b[p])) p += 1;
-                if (p < de and b[p] == 'R') p += 1;
-                if (findObj(b, fnum)) |fb| { s2 = fb; e2 = objDictEnd(b, fb); }
-            } else break;
-            if (e2 > s2) {
-                sh.fx[got] = .{ @intCast(s2), @intCast(e2) };
-                got += 1;
-                if (got == 1) { fs = s2; fe = e2; }
-            }
-            if (!arr) break;
-        }
-        sh.fxn = @intCast(got);
-    }
-    sh.fs = @intCast(fs);
-    sh.fe = @intCast(fe);
-
-    if (st2 != 2 and st2 != 3) {
-        // 1형은 x·y 를 받는 함수 하나로 칠한다
-        if (st2 == 1) {
-            _ = readArr(b, ds, de, "/Domain", &sh.dom);
-            var m: [6]f32 = .{ 1, 0, 0, 1, 0, 0 };
-            if (readArr(b, ds, de, "/Matrix", &m) == 6) sh.mat = m;
-            if (fe <= fs) return;
-        } else if (fe <= fs) {
-            // 함수가 없으면 색을 꼭짓점이 직접 들고 있다.
-            // 성분 수는 색 공간이 정한다.
-            sh.ncomp = shadeComps(b, ds, de);
-        }
-        sh.stop_n = 0;
-        shade_n += 1;
-        return;
-    }
-
-    if (fe <= fs) return;
-    i = 0;
-    while (i < 8) : (i += 1) {
-        const t = @as(f32, @floatFromInt(i)) / 7;
-        var v: [4]f32 = .{ 0, 0, 0, 0 };
-        const nc = shadeFn(b, sh, t, &v);
-        var rgb3: [3]f32 = .{ 0, 0, 0 };
-        rgbFrom(nc, v, &rgb3);
-        sh.stops[i * 4] = t;
-        sh.stops[i * 4 + 1] = rgb3[0];
-        sh.stops[i * 4 + 2] = rgb3[1];
-        sh.stops[i * 4 + 3] = rgb3[2];
-    }
-    sh.stop_n = 8;
-    shade_n += 1;
-}
-
-/// 셰이딩의 함수를 t 에서 찍는다.
-///
-/// 함수가 여럿 오면 성분마다 하나씩이다 — 각각 값을 하나만 낸다.
-fn shadeFn(b: []const u8, sh: *const Shade, t: f32, out: *[4]f32) u32 {
-    if (sh.fxn > 1) {
-        var n: u32 = 0;
-        var i: u32 = 0;
-        while (i < sh.fxn and i < 4) : (i += 1) {
-            var v: [4]f32 = .{ 0, 0, 0, 0 };
-            if (evalFn(b, sh.fx[i][0], sh.fx[i][1], t, &v) == 0) return 0;
-            out[i] = v[0];
-            n += 1;
-        }
-        return n;
-    }
-    if (sh.fe <= sh.fs) return 0;
-    return evalFn(b, sh.fs, sh.fe, t, out);
-}
-
-/// 색 공간의 성분 수. 그물 셰이딩이 꼭짓점 색을 몇 개씩 들고 있는지 정한다.
-fn shadeComps(b: []const u8, ds: usize, de: usize) u8 {
-    const a = find(b[ds..de], "/ColorSpace", 0) orelse return 3;
-    var p = ds + a + 11;
-    while (p < de and isSpace(b[p])) p += 1;
-    var s2 = p;
-    var e2 = de;
-    if (p < de and isDigit(b[p])) {
-        const n = readUint(b, &p);
-        if (findObj(b, n)) |ob| { s2 = ob; e2 = objDictEnd(b, ob); }
-    }
-    const w = b[s2..@min(e2, s2 + 64)];
-    if (findIn(w, "DeviceCMYK", 0) != null) return 4;
-    if (findIn(w, "DeviceGray", 0) != null or findIn(w, "CalGray", 0) != null) return 1;
-    if (findIn(w, "DeviceRGB", 0) != null or findIn(w, "CalRGB", 0) != null or
-        findIn(w, "Lab", 0) != null) return 3;
-    if (findIn(w, "ICCBased", 0) != null) {
-        // /N 이 성분 수다
-        var q = s2;
-        while (q < e2 and isDigit(b[q]) == false and b[q] != '/') q += 1;
-        if (intAfter(b, s2, @min(e2, s2 + 256), "/N")) |n2| return @intCast(@max(1, @min(4, n2)));
-        return 3;
-    }
-    return 3;
-}
-
-// ===== 그물 셰이딩 =====
+// ===== 그물 셰이딩(4~7형) — 꼭짓점 삼각형·좌표 격자 (c/pdfmesh.zig) =====
 //
-// 4~7형은 색이 면 위에서 이어져 흐른다. 캔버스에는 그런 칠이 없다 —
-// 선형·방사형 그라데이션뿐이다. 그래서 잘게 쪼개 단색으로 메운다.
-// 충분히 잘게 쪼개면 눈으로는 이어져 보인다. PDF.js 도 결국 같은 일을
-// 픽셀 단위로 한다.
+// 부르는 자리를 안 건드리도록 이름만 이어 둔다.
+const pdfmesh = @import("pdfmesh.zig");
+const emitShade = pdfmesh.emitShade;
 
-/// 그물 스트림에서 비트를 꺼내는 읽개.
-const MeshR = struct {
-    d: []const u8,
-    bit: u64 = 0,
-
-    fn get(self: *MeshR, n: u32) u32 {
-        const v = bitsAt(self.d, self.bit, n);
-        self.bit += n;
-        return v;
-    }
-    /// 꼭짓점·조각 하나는 바이트 경계에서 시작한다
-    fn byteAlign(self: *MeshR) void {
-        self.bit = (self.bit + 7) & ~@as(u64, 7);
-    }
-    fn left(self: *const MeshR) u64 {
-        const tot = @as(u64, self.d.len) * 8;
-        return if (self.bit >= tot) 0 else tot - self.bit;
-    }
-};
-
-/// 비트로 담긴 값을 Decode 범위로 편다.
-fn meshVal(raw: u32, bits: u32, lo: f32, hi: f32) f32 {
-    const maxv: f32 = @floatFromInt((@as(u64, 1) << @intCast(bits)) - 1);
-    if (maxv <= 0) return lo;
-    return lo + (@as(f32, @floatFromInt(raw)) / maxv) * (hi - lo);
-}
-
-/// 꼭짓점 색 하나를 읽는다.
-fn meshColor(sh: *const Shade, r: *MeshR, bpc: u32, dec: []const f32, nd: u32) [3]f32 {
-    var out: [3]f32 = .{ 0, 0, 0 };
-    if (sh.fe > sh.fs) {
-        // 함수를 쓰면 값 하나가 곧 매개변수다
-        const lo: f32 = if (nd >= 6) dec[4] else 0;
-        const hi: f32 = if (nd >= 6) dec[5] else 1;
-        const t = meshVal(r.get(bpc), bpc, lo, hi);
-        var v: [4]f32 = .{ 0, 0, 0, 0 };
-        const nc = shadeFn(doc, sh, t, &v);
-        rgbFrom(nc, v, &out);
-        return out;
-    }
-    var v: [4]f32 = .{ 0, 0, 0, 0 };
-    var c: u32 = 0;
-    while (c < sh.ncomp and c < 4) : (c += 1) {
-        const lo: f32 = if (nd >= 4 + (c + 1) * 2) dec[4 + c * 2] else 0;
-        const hi: f32 = if (nd >= 4 + (c + 1) * 2) dec[5 + c * 2] else 1;
-        v[c] = meshVal(r.get(bpc), bpc, lo, hi);
-    }
-    rgbFrom(sh.ncomp, v, &out);
-    return out;
-}
-
-/// 삼각형 하나를 색이 고르게 보일 만큼 쪼개 칠한다.
-fn meshTri(p: [3][2]f32, c: [3][3]f32, depth: u32) void {
-    if (opsRoomLow()) return;
-    var diff: f32 = 0;
-    var k: u32 = 0;
-    while (k < 3) : (k += 1) {
-        diff = @max(diff, @abs(c[0][k] - c[1][k]));
-        diff = @max(diff, @abs(c[1][k] - c[2][k]));
-        diff = @max(diff, @abs(c[0][k] - c[2][k]));
-    }
-    if (depth < 4 and diff > 0.05) {
-        // 변의 가운데를 잡아 넷으로 나눈다
-        const m01: [2]f32 = .{ (p[0][0] + p[1][0]) / 2, (p[0][1] + p[1][1]) / 2 };
-        const m12: [2]f32 = .{ (p[1][0] + p[2][0]) / 2, (p[1][1] + p[2][1]) / 2 };
-        const m20: [2]f32 = .{ (p[2][0] + p[0][0]) / 2, (p[2][1] + p[0][1]) / 2 };
-        var k01: [3]f32 = undefined;
-        var k12: [3]f32 = undefined;
-        var k20: [3]f32 = undefined;
-        k = 0;
-        while (k < 3) : (k += 1) {
-            k01[k] = (c[0][k] + c[1][k]) / 2;
-            k12[k] = (c[1][k] + c[2][k]) / 2;
-            k20[k] = (c[2][k] + c[0][k]) / 2;
-        }
-        meshTri(.{ p[0], m01, m20 }, .{ c[0], k01, k20 }, depth + 1);
-        meshTri(.{ m01, p[1], m12 }, .{ k01, c[1], k12 }, depth + 1);
-        meshTri(.{ m20, m12, p[2] }, .{ k20, k12, c[2] }, depth + 1);
-        meshTri(.{ m01, m12, m20 }, .{ k01, k12, k20 }, depth + 1);
-        return;
-    }
-    // 가운데 색으로 메운다. 이음매가 비지 않게 아주 살짝 넓힌다.
-    var avg: [3]f32 = .{ 0, 0, 0 };
-    k = 0;
-    while (k < 3) : (k += 1) avg[k] = (c[0][k] + c[1][k] + c[2][k]) / 3;
-    const cx = (p[0][0] + p[1][0] + p[2][0]) / 3;
-    const cy = (p[0][1] + p[1][1] + p[2][1]) / 3;
-    const g: f32 = 1.04;
-    emitOp(11, &[_]f32{ avg[0], avg[1], avg[2] });
-    emitOp(1, &[_]f32{ cx + (p[0][0] - cx) * g, cy + (p[0][1] - cy) * g });
-    emitOp(2, &[_]f32{ cx + (p[1][0] - cx) * g, cy + (p[1][1] - cy) * g });
-    emitOp(2, &[_]f32{ cx + (p[2][0] - cx) * g, cy + (p[2][1] - cy) * g });
-    emitOp(4, &[_]f32{});
-    emitOp(6, &[_]f32{0});
-}
-
-/// 4·5형 — 삼각형 그물
-fn paintTriMesh(sh: *const Shade) void {
-    const b = doc;
-    const ds = sh.ds;
-    const de = sh.de;
-    const bpco = intAfter(b, ds, de, "/BitsPerCoordinate") orelse return;
-    const bpc = intAfter(b, ds, de, "/BitsPerComponent") orelse return;
-    if (bpco == 0 or bpco > 32 or bpc == 0 or bpc > 16) return;
-    const bpf = intAfter(b, ds, de, "/BitsPerFlag") orelse 8;
-    var dec: [16]f32 = undefined;
-    const nd = readArr(b, ds, de, "/Decode", &dec);
-    if (nd < 4) return;
-    const data = streamFrom(b, ds) orelse return;
-    var r = MeshR{ .d = data };
-
-    const rowlen = intAfter(b, ds, de, "/VerticesPerRow") orelse 0;
-    const lattice = sh.kind == 5 and rowlen >= 2 and rowlen <= 4096;
-
-    const readPt = struct {
-        fn f(rr: *MeshR, bc: u32, d2: []const f32) [2]f32 {
-            const x = meshVal(rr.get(bc), bc, d2[0], d2[1]);
-            const y = meshVal(rr.get(bc), bc, d2[2], d2[3]);
-            return .{ x, y };
-        }
-    }.f;
-
-    var made: u32 = 0;
-    if (lattice) {
-        // 격자 — 줄마다 꼭짓점이 rowlen 개, 이웃한 두 줄로 삼각형을 만든다
-        var prev_p: [4096][2]f32 = undefined;
-        var prev_c: [4096][3]f32 = undefined;
-        var cur_p: [4096][2]f32 = undefined;
-        var cur_c: [4096][3]f32 = undefined;
-        var row: u32 = 0;
-        while (r.left() >= (bpco * 2 + bpc) and made < 8000 and !opsRoomLow()) : (row += 1) {
-            var i: u32 = 0;
-            while (i < rowlen and r.left() >= bpco * 2) : (i += 1) {
-                cur_p[i] = readPt(&r, bpco, &dec);
-                cur_c[i] = meshColor(sh, &r, bpc, &dec, nd);
-            }
-            if (i < rowlen) break;
-            if (row > 0) {
-                var j: u32 = 0;
-                while (j + 1 < rowlen and made < 8000 and !opsRoomLow()) : (j += 1) {
-                    meshTri(.{ prev_p[j], prev_p[j + 1], cur_p[j] },
-                        .{ prev_c[j], prev_c[j + 1], cur_c[j] }, 0);
-                    meshTri(.{ prev_p[j + 1], cur_p[j + 1], cur_p[j] },
-                        .{ prev_c[j + 1], cur_c[j + 1], cur_c[j] }, 0);
-                    made += 2;
-                }
-            }
-            var k: u32 = 0;
-            while (k < rowlen) : (k += 1) { prev_p[k] = cur_p[k]; prev_c[k] = cur_c[k]; }
-        }
-        return;
-    }
-
-    // 자유 그물 — 꼭짓점마다 깃발이 앞선다
-    var vp: [3][2]f32 = undefined;
-    var vc: [3][3]f32 = undefined;
-    var have: u32 = 0;
-    while (r.left() >= bpf + bpco * 2 and made < 8000 and !opsRoomLow()) {
-        const flag = r.get(bpf);
-        const pt = readPt(&r, bpco, &dec);
-        const col = meshColor(sh, &r, bpc, &dec, nd);
-        r.byteAlign();
-        if (flag == 0 or have < 2) {
-            if (flag == 0 and have >= 3) have = 0;
-            if (have >= 3) have = 0;
-            vp[have] = pt;
-            vc[have] = col;
-            have += 1;
-            if (have == 3) { meshTri(vp, vc, 0); made += 1; }
-            continue;
-        }
-        if (flag == 1) { vp[0] = vp[1]; vc[0] = vc[1]; }
-        vp[1] = vp[2];
-        vc[1] = vc[2];
-        vp[2] = pt;
-        vc[2] = col;
-        meshTri(vp, vc, 0);
-        made += 1;
-    }
-}
-
-/// 세제곱 베지에 밑값
-fn bez(t: f32) [4]f32 {
-    const u = 1 - t;
-    return .{ u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t };
-}
-
-/// 6·7형 — 이음 조각(Coons·텐서). 조각 하나를 격자로 훑어 칠한다.
-fn paintPatchMesh(sh: *const Shade) void {
-    const b = doc;
-    const ds = sh.ds;
-    const de = sh.de;
-    const bpco = intAfter(b, ds, de, "/BitsPerCoordinate") orelse return;
-    const bpc = intAfter(b, ds, de, "/BitsPerComponent") orelse return;
-    if (bpco == 0 or bpco > 32 or bpc == 0 or bpc > 16) return;
-    const bpf = intAfter(b, ds, de, "/BitsPerFlag") orelse 8;
-    var dec: [16]f32 = undefined;
-    const nd = readArr(b, ds, de, "/Decode", &dec);
-    if (nd < 4) return;
-    const data = streamFrom(b, ds) orelse return;
-    var r = MeshR{ .d = data };
-    const tensor = sh.kind == 7;
-    const npt: u32 = if (tensor) 16 else 12;
-
-    // 테두리 점 12 개를 4×4 격자에 놓는 자리 (규격 표 그대로)
-    const RC = [12][2]u8{
-        .{ 0, 0 }, .{ 0, 1 }, .{ 0, 2 }, .{ 0, 3 },
-        .{ 1, 3 }, .{ 2, 3 }, .{ 3, 3 }, .{ 3, 2 },
-        .{ 3, 1 }, .{ 3, 0 }, .{ 2, 0 }, .{ 1, 0 },
-    };
-    const IC = [4][2]u8{ .{ 1, 1 }, .{ 1, 2 }, .{ 2, 2 }, .{ 2, 1 } };
-
-    var P: [4][4][2]f32 = undefined;
-    var C: [4][3]f32 = undefined;
-    var first = true;
-    var made: u32 = 0;
-
-    while (r.left() >= bpf and made < 512 and !opsRoomLow()) {
-        const flag = r.get(bpf);
-        const nnew: u32 = if (flag == 0 or first) npt else npt - 4;
-        const ncol: u32 = if (flag == 0 or first) 4 else 2;
-        if (r.left() < nnew * bpco * 2) break;
-
-        var pts: [16][2]f32 = undefined;
-        var i: u32 = 0;
-        while (i < nnew) : (i += 1) {
-            pts[i][0] = meshVal(r.get(bpco), bpco, dec[0], dec[1]);
-            pts[i][1] = meshVal(r.get(bpco), bpco, dec[2], dec[3]);
-        }
-        var cols: [4][3]f32 = undefined;
-        i = 0;
-        while (i < ncol) : (i += 1) cols[i] = meshColor(sh, &r, bpc, &dec, nd);
-        r.byteAlign();
-
-        var NP: [4][4][2]f32 = undefined;
-        var NC: [4][3]f32 = undefined;
-        if (flag == 0 or first) {
-            i = 0;
-            while (i < 12) : (i += 1) NP[RC[i][0]][RC[i][1]] = pts[i];
-            if (tensor) {
-                i = 0;
-                while (i < 4) : (i += 1) NP[IC[i][0]][IC[i][1]] = pts[12 + i];
-            }
-            i = 0;
-            while (i < 4) : (i += 1) NC[i] = cols[i];
-        } else {
-            // 앞 조각의 한 변을 그대로 물려받는다
-            const E = switch (flag) {
-                1 => [4][2]u8{ .{ 0, 3 }, .{ 1, 3 }, .{ 2, 3 }, .{ 3, 3 } },
-                2 => [4][2]u8{ .{ 3, 3 }, .{ 3, 2 }, .{ 3, 1 }, .{ 3, 0 } },
-                else => [4][2]u8{ .{ 3, 0 }, .{ 2, 0 }, .{ 1, 0 }, .{ 0, 0 } },
-            };
-            const EC: [2]u8 = switch (flag) {
-                1 => .{ 1, 2 },
-                2 => .{ 2, 3 },
-                else => .{ 3, 0 },
-            };
-            i = 0;
-            while (i < 4) : (i += 1) NP[RC[i][0]][RC[i][1]] = P[E[i][0]][E[i][1]];
-            i = 0;
-            while (i < 8) : (i += 1) NP[RC[4 + i][0]][RC[4 + i][1]] = pts[i];
-            if (tensor) {
-                i = 0;
-                while (i < 4) : (i += 1) NP[IC[i][0]][IC[i][1]] = pts[8 + i];
-            }
-            NC[0] = C[EC[0]];
-            NC[1] = C[EC[1]];
-            NC[2] = cols[0];
-            NC[3] = cols[1];
-        }
-        if (!tensor) {
-            // Coons 조각은 안쪽 점 넷을 테두리에서 계산한다.
-            // 표는 모서리 하나마다 [c00 c01 c10 d03 d30 d31 d13 d33] 자리다.
-            const CO = [4][8][2]u8{
-                .{ .{ 0, 0 }, .{ 0, 1 }, .{ 1, 0 }, .{ 0, 3 }, .{ 3, 0 }, .{ 3, 1 }, .{ 1, 3 }, .{ 3, 3 } },
-                .{ .{ 0, 3 }, .{ 0, 2 }, .{ 1, 3 }, .{ 0, 0 }, .{ 3, 3 }, .{ 3, 2 }, .{ 1, 0 }, .{ 3, 0 } },
-                .{ .{ 3, 3 }, .{ 3, 2 }, .{ 2, 3 }, .{ 3, 0 }, .{ 0, 3 }, .{ 0, 2 }, .{ 2, 0 }, .{ 0, 0 } },
-                .{ .{ 3, 0 }, .{ 3, 1 }, .{ 2, 0 }, .{ 3, 3 }, .{ 0, 0 }, .{ 0, 1 }, .{ 2, 3 }, .{ 0, 3 } },
-            };
-            var e: u32 = 0;
-            while (e < 4) : (e += 1) {
-                const t2 = CO[e];
-                var k2: u32 = 0;
-                while (k2 < 2) : (k2 += 1) {
-                    const g = &NP;
-                    const v = -4 * g[t2[0][0]][t2[0][1]][k2] +
-                        6 * (g[t2[1][0]][t2[1][1]][k2] + g[t2[2][0]][t2[2][1]][k2]) -
-                        2 * (g[t2[3][0]][t2[3][1]][k2] + g[t2[4][0]][t2[4][1]][k2]) +
-                        3 * (g[t2[5][0]][t2[5][1]][k2] + g[t2[6][0]][t2[6][1]][k2]) -
-                        g[t2[7][0]][t2[7][1]][k2];
-                    NP[IC[e][0]][IC[e][1]][k2] = v / 9;
-                }
-            }
-        }
-
-        // 조각을 N×N 으로 훑어 네모마다 단색으로 메운다
-        const N: u32 = 10;
-        var a: u32 = 0;
-        while (a < N and !opsRoomLow()) : (a += 1) {
-            var bq: u32 = 0;
-            while (bq < N) : (bq += 1) {
-                const ua = @as(f32, @floatFromInt(a)) / @as(f32, @floatFromInt(N));
-                const ub = @as(f32, @floatFromInt(a + 1)) / @as(f32, @floatFromInt(N));
-                const va = @as(f32, @floatFromInt(bq)) / @as(f32, @floatFromInt(N));
-                const vb = @as(f32, @floatFromInt(bq + 1)) / @as(f32, @floatFromInt(N));
-                const at = struct {
-                    fn f(pp: *const [4][4][2]f32, u: f32, v: f32) [2]f32 {
-                        const bu = bez(u);
-                        const bv = bez(v);
-                        var x: f32 = 0;
-                        var y: f32 = 0;
-                        var ii: u32 = 0;
-                        while (ii < 4) : (ii += 1) {
-                            var jj: u32 = 0;
-                            while (jj < 4) : (jj += 1) {
-                                const w = bu[ii] * bv[jj];
-                                x += w * pp[ii][jj][0];
-                                y += w * pp[ii][jj][1];
-                            }
-                        }
-                        return .{ x, y };
-                    }
-                }.f;
-                // 모서리 색을 두 방향으로 섞는다
-                const mix = struct {
-                    fn f(cc: *const [4][3]f32, u: f32, v: f32) [3]f32 {
-                        var o: [3]f32 = undefined;
-                        var k: u32 = 0;
-                        while (k < 3) : (k += 1) {
-                            const top = cc[0][k] + (cc[1][k] - cc[0][k]) * v;
-                            const bot = cc[3][k] + (cc[2][k] - cc[3][k]) * v;
-                            o[k] = top + (bot - top) * u;
-                        }
-                        return o;
-                    }
-                }.f;
-                const p00 = at(&NP, ua, va);
-                const p01 = at(&NP, ua, vb);
-                const p11 = at(&NP, ub, vb);
-                const p10 = at(&NP, ub, va);
-                const cm = mix(&NC, (ua + ub) / 2, (va + vb) / 2);
-                const gx = (p00[0] + p01[0] + p11[0] + p10[0]) / 4;
-                const gy = (p00[1] + p01[1] + p11[1] + p10[1]) / 4;
-                const g: f32 = 1.06;
-                emitOp(11, &[_]f32{ cm[0], cm[1], cm[2] });
-                emitOp(1, &[_]f32{ gx + (p00[0] - gx) * g, gy + (p00[1] - gy) * g });
-                emitOp(2, &[_]f32{ gx + (p01[0] - gx) * g, gy + (p01[1] - gy) * g });
-                emitOp(2, &[_]f32{ gx + (p11[0] - gx) * g, gy + (p11[1] - gy) * g });
-                emitOp(2, &[_]f32{ gx + (p10[0] - gx) * g, gy + (p10[1] - gy) * g });
-                emitOp(4, &[_]f32{});
-                emitOp(6, &[_]f32{0});
-            }
-        }
-        P = NP;
-        C = NC;
-        first = false;
-        made += 1;
-    }
-}
-
-/// 1형 — x·y 를 받는 함수. 정의역을 격자로 훑어 칠한다.
-fn paintFnShade(sh: *const Shade) void {
-    if (sh.fe <= sh.fs) return;
-    const b = doc;
-    emitOp(14, &[_]f32{});
-    emitOp(16, &[_]f32{ sh.mat[0], sh.mat[1], sh.mat[2], sh.mat[3], sh.mat[4], sh.mat[5] });
-    const N: u32 = 24;
-    const fx = @as(f32, @floatFromInt(N));
-    var i: u32 = 0;
-    while (i < N) : (i += 1) {
-        var j: u32 = 0;
-        while (j < N) : (j += 1) {
-            const x0 = sh.dom[0] + (sh.dom[1] - sh.dom[0]) * @as(f32, @floatFromInt(i)) / fx;
-            const x1 = sh.dom[0] + (sh.dom[1] - sh.dom[0]) * @as(f32, @floatFromInt(i + 1)) / fx;
-            const y0 = sh.dom[2] + (sh.dom[3] - sh.dom[2]) * @as(f32, @floatFromInt(j)) / fx;
-            const y1 = sh.dom[2] + (sh.dom[3] - sh.dom[2]) * @as(f32, @floatFromInt(j + 1)) / fx;
-            var v: [4]f32 = .{ 0, 0, 0, 0 };
-            const nc = evalFnN(b, sh.fs, sh.fe, &[_]f32{ (x0 + x1) / 2, (y0 + y1) / 2 }, &v);
-            if (nc == 0) continue;
-            var rgb3: [3]f32 = .{ 0, 0, 0 };
-            rgbFrom(nc, v, &rgb3);
-            emitOp(11, &[_]f32{ rgb3[0], rgb3[1], rgb3[2] });
-            emitOp(5, &[_]f32{ x0, y0, (x1 - x0) * 1.02, (y1 - y0) * 1.02 });
-            emitOp(6, &[_]f32{0});
-        }
-    }
-    emitOp(15, &[_]f32{});
-}
-
-/// 그물의 대표 색 — 무늬를 칠하기 색으로 쓸 때 쓴다.
-fn shadeAvg(sh: *const Shade, out: *[3]f32) bool {
-    if (sh.fe > sh.fs) {
-        var acc: [3]f32 = .{ 0, 0, 0 };
-        var i: u32 = 0;
-        while (i < 5) : (i += 1) {
-            var v: [4]f32 = .{ 0, 0, 0, 0 };
-            const nc = shadeFn(doc, sh, @as(f32, @floatFromInt(i)) / 4, &v);
-            if (nc == 0) return false;
-            var c3: [3]f32 = .{ 0, 0, 0 };
-            rgbFrom(nc, v, &c3);
-            acc[0] += c3[0] / 5;
-            acc[1] += c3[1] / 5;
-            acc[2] += c3[2] / 5;
-        }
-        out.* = acc;
-        return true;
-    }
-    return false;
-}
-
-/// 셰이딩을 그리기 명령으로 낸다. code 27 = 영역 칠하기, 28 = 채우기 색으로 삼기
-fn emitShade(sh: *const Shade, code: f32) void {
-    if (sh.kind == 1 or sh.kind >= 4) {
-        // 캔버스 그라데이션으로는 못 그린다. 잘게 쪼개 메운다.
-        if (code == 28) {
-            // 칠하기 색 자리에는 대표 색만 놓는다
-            var c3: [3]f32 = .{ 0.5, 0.5, 0.5 };
-            _ = shadeAvg(sh, &c3);
-            emitOp(11, &[_]f32{ c3[0], c3[1], c3[2] });
-            return;
-        }
-        if (sh.kind == 1) paintFnShade(sh)
-        else if (sh.kind == 4 or sh.kind == 5) paintTriMesh(sh)
-        else paintPatchMesh(sh);
-        return;
-    }
-    emitShadeGrad(sh, code);
-}
-
-fn emitShadeGrad(sh: *const Shade, code: f32) void {
-    // 10 + 마디 8개 × 4 = 42 칸이 필요하다. 40 으로 두었더니 마지막 마디의
-    // 뒤 두 칸이 배열 밖이었고(ReleaseSmall 이라 경계 검사도 없다), 자르는
-    // 길이도 arg[0..42] 라 스택 8바이트를 그대로 실어 보냈다.
-    var arg: [10 + 8 * 4]f32 = undefined;
-    arg[0] = @floatFromInt(sh.kind);
-    var i: u32 = 0;
-    while (i < 6) : (i += 1) arg[1 + i] = sh.coords[i];
-    arg[7] = if (sh.ext0) 1 else 0;
-    arg[8] = if (sh.ext1) 1 else 0;
-    arg[9] = @floatFromInt(sh.stop_n);
-    var k: u32 = 0;
-    while (k < sh.stop_n and k < 8) : (k += 1) {
-        arg[10 + k * 4] = sh.stops[k * 4];
-        arg[11 + k * 4] = sh.stops[k * 4 + 1];
-        arg[12 + k * 4] = sh.stops[k * 4 + 2];
-        arg[13 + k * 4] = sh.stops[k * 4 + 3];
-    }
-    emitOp(code, arg[0 .. 10 + @as(usize, sh.stop_n) * 4]);
-}
-
-// ===== Type1 글꼴 =====
+// ===== Type1 글꼴 — 외곽선 프로그램(charstring)을 푼다 (c/pdftype1.zig) =====
 //
-// FontFile 은 옛 Type1 프로그램이다. 앞은 평문 포스트스크립트, 뒤는 eexec 로
-// 암호화된 부분이고 그 안에 글리프마다 다시 암호화된 charstring 이 들어 있다.
-// CFF 로 바꾸는 길도 있지만(PDF.js 가 그렇게 한다), 우리는 Type3 처럼
-// 외곽선을 바로 해석해 그린다 — 그리기 명령을 이미 갖고 있어 훨씬 짧다.
+// 부르는 자리를 안 건드리도록 이름만 이어 둔다.
+const pdft1 = @import("pdftype1.zig");
+const attachType1 = pdft1.attachType1;
+const drawType1 = pdft1.drawType1;
 
-const T1Range = struct { off: u32, len: u32 };
-var t1_pool: [8192]T1Range = undefined;
-var t1_pool_n: u32 = 0;
-
-/// 코드 → 글리프 이름 (지금 읽고 있는 글꼴 하나에만 쓰는 임시 자리)
-var enc_off: [256]u16 = undefined;
-var enc_len: [256]u8 = undefined;
-var enc_buf: [8192]u8 = undefined;
-var enc_buf_n: u16 = 0;
-
-fn encSet(code: u32, name: []const u8) void {
-    if (code > 255 or name.len == 0 or name.len > 63) return;
-    if (@as(usize, enc_buf_n) + name.len > enc_buf.len) return;
-    @memcpy(enc_buf[enc_buf_n..][0..name.len], name);
-    enc_off[code] = enc_buf_n;
-    enc_len[code] = @intCast(name.len);
-    enc_buf_n += @intCast(name.len);
-}
-fn encGet(code: u32) []const u8 {
-    if (code > 255 or enc_len[code] == 0) return &[_]u8{};
-    return enc_buf[enc_off[code]..][0..enc_len[code]];
-}
-
-/// 표준 인코딩의 이름들. 글자·숫자는 규칙적이라 기호만 적어 둔다.
-const STD_PUNCT = "space exclam quotedbl numbersign dollar percent ampersand quoteright " ++
-    "parenleft parenright asterisk plus comma hyphen period slash";
-const STD_PUNCT2 = "colon semicolon less equal greater question at";
-const STD_PUNCT3 = "bracketleft backslash bracketright asciicircum underscore quoteleft";
-const STD_PUNCT4 = "braceleft bar braceright asciitilde";
-const STD_DIGIT = "zero one two three four five six seven eight nine";
-
-fn nthWord(s: []const u8, n: u32) []const u8 {
-    var i: usize = 0;
-    var k: u32 = 0;
-    while (i < s.len) {
-        while (i < s.len and s[i] == ' ') i += 1;
-        const st = i;
-        while (i < s.len and s[i] != ' ') i += 1;
-        if (k == n) return s[st..i];
-        k += 1;
-    }
-    return &[_]u8{};
-}
-
-/// 표준 인코딩을 채운다 (아스키 구간만 — 실제로 쓰이는 곳이다)
-/// 표준 인코딩에서 코드 하나의 이름
-fn stdName(c: u32, buf: *[1]u8) []const u8 {
-    if (c >= 32 and c <= 47) return nthWord(STD_PUNCT, c - 32);
-    if (c >= 48 and c <= 57) return nthWord(STD_DIGIT, c - 48);
-    if (c >= 58 and c <= 64) return nthWord(STD_PUNCT2, c - 58);
-    if ((c >= 65 and c <= 90) or (c >= 97 and c <= 122)) { buf[0] = @intCast(c); return buf[0..1]; }
-    if (c >= 91 and c <= 96) return nthWord(STD_PUNCT3, c - 91);
-    if (c >= 123 and c <= 126) return nthWord(STD_PUNCT4, c - 123);
-    return &[_]u8{};
-}
-
-fn fillStandardEncoding() void {
-    var c: u32 = 32;
-    while (c <= 47) : (c += 1) encSet(c, nthWord(STD_PUNCT, c - 32));
-    c = 48;
-    while (c <= 57) : (c += 1) encSet(c, nthWord(STD_DIGIT, c - 48));
-    c = 58;
-    while (c <= 64) : (c += 1) encSet(c, nthWord(STD_PUNCT2, c - 58));
-    var buf: [1]u8 = undefined;
-    c = 65;
-    while (c <= 90) : (c += 1) { buf[0] = @intCast(c); encSet(c, buf[0..1]); }
-    c = 91;
-    while (c <= 96) : (c += 1) encSet(c, nthWord(STD_PUNCT3, c - 91));
-    c = 97;
-    while (c <= 122) : (c += 1) { buf[0] = @intCast(c); encSet(c, buf[0..1]); }
-    c = 123;
-    while (c <= 126) : (c += 1) encSet(c, nthWord(STD_PUNCT4, c - 123));
-}
-
-/// eexec 및 charstring 풀기. 앞의 skip 바이트는 버린다.
-fn t1Decrypt(src: []const u8, dst: []u8, r0: u16, skip: usize) u32 {
-    var r: u16 = r0;
-    var n: u32 = 0;
-    for (src, 0..) |c, i| {
-        const plain: u8 = c ^ @as(u8, @truncate(r >> 8));
-        r = (@as(u16, c) +% r) *% 52845 +% 22719;
-        if (i >= skip) {
-            if (n >= dst.len) break;
-            dst[n] = plain;
-            n += 1;
-        }
-    }
-    return n;
-}
-
-fn isHexRun(b: []const u8) bool {
-    var seen: u32 = 0;
-    var i: usize = 0;
-    while (i < b.len and seen < 4) : (i += 1) {
-        if (isSpace(b[i])) continue;
-        if (hexVal(b[i]) == null) return false;
-        seen += 1;
-    }
-    return seen == 4;
-}
-
-/// "이름 길이 RD <이진>" 을 읽는다. 이진의 시작과 길이를 준다.
-fn t1Entry(d: []const u8, p: *usize) ?struct { name: []const u8, off: usize, len: usize } {
-    var i = p.*;
-    while (i < d.len and d[i] != '/') i += 1;
-    if (i >= d.len) { p.* = d.len; return null; }
-    const ns = i + 1;
-    var nq = ns;
-    while (nq < d.len and !isSpace(d[nq]) and d[nq] != '(' and d[nq] != '/') nq += 1;
-    // 무엇이 되든 이름 뒤로는 넘어간다 — 안 그러면 제자리를 맴돈다
-    p.* = @max(nq, ns);
-    i = nq;
-    while (i < d.len and isSpace(d[i])) i += 1;
-    if (i >= d.len or !isDigit(d[i])) return null;
-    const len = readUint(d, &i);
-    while (i < d.len and isSpace(d[i])) i += 1;
-    // RD 나 -| 같은 토큰 하나
-    while (i < d.len and !isSpace(d[i])) i += 1;
-    i += 1; // 공백 하나
-    if (len == 0 or i + len > d.len) return null;
-    p.* = i + len;
-    return .{ .name = d[ns..nq], .off = i, .len = len };
-}
-
-/// Type1 프로그램을 읽어 글리프 프로그램을 풀어 둔다.
-fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) void {
-    if (font_n == 0 or t1Area() == 0) return;
-    const f = &fontsBuf()[font_n - 1];
-    if (data.len < 64) return;
-
-    // 평문 구간에서 eexec 자리를 찾는다
-    const ee = findIn(data, "eexec", 0) orelse return;
-    var es = ee + 5;
-    while (es < data.len and (data[es] == '\r' or data[es] == '\n' or data[es] == ' ' or data[es] == '\t')) es += 1;
-    if (es >= data.len) return;
-
-    const room = t1_cap - t1_used;
-    if (room < 65536) return;
-    const area = @as([*]u8, @ptrFromInt(t1Area() + t1_used))[0..room];
-
-    // 16진으로 적힌 것도 있다
-    var enc_src = data[es..];
-    var hexbuf_len: u32 = 0;
-    if (isHexRun(enc_src)) {
-        var w: u32 = 0;
-        var hi: ?u8 = null;
-        for (enc_src) |c| {
-            const v = hexVal(c) orelse continue;
-            if (hi) |h| {
-                if (w >= area.len / 2) break;
-                area[w] = (h << 4) | v;
-                w += 1;
-                hi = null;
-            } else hi = v;
-        }
-        hexbuf_len = w;
-        enc_src = area[0..w];
-    }
-    const dec_at = if (hexbuf_len > 0) hexbuf_len else 0;
-    const dec = area[dec_at..];
-    const dn = t1Decrypt(enc_src, dec, 55665, 4);
-    if (dn < 32) return;
-    const priv = dec[0..dn];
-
-    var leniv: usize = 4;
-    if (findIn(priv, "/lenIV", 0)) |li| {
-        var q = li + 6;
-        while (q < priv.len and isSpace(priv[q])) q += 1;
-        if (q < priv.len and isDigit(priv[q])) leniv = readUint(priv, &q);
-        if (leniv > 16) leniv = 4;
-    }
-
-    // 코드 → 이름: PDF 의 Differences 가 가장 세고, 없으면 프로그램의 Encoding,
-    // 그것도 없으면 표준 인코딩.
-    @memset(&enc_len, 0);
-    enc_buf_n = 0;
-    if (findIn(data[0..es], "StandardEncoding", 0) != null) fillStandardEncoding();
-    {
-        // dup <코드> /<이름> put
-        var q: usize = 0;
-        while (findIn(data[0..es], "dup ", q)) |at| {
-            var r = at + 4;
-            while (r < es and isSpace(data[r])) r += 1;
-            if (r < es and isDigit(data[r])) {
-                const code = readUint(data, &r);
-                while (r < es and isSpace(data[r])) r += 1;
-                if (r < es and data[r] == '/') {
-                    const ns = r + 1;
-                    var nq = ns;
-                    while (nq < es and !isSpace(data[nq]) and data[nq] != '/') nq += 1;
-                    encSet(code, data[ns..nq]);
-                }
-            }
-            q = at + 4;
-        }
-    }
-    // PDF 쪽 Differences 가 있으면 덮어쓴다
-    {
-        var es2 = fbody;
-        var ee2 = fend;
-        if (find(b[fbody..fend], "/Encoding", 0)) |ea| {
-            var q = fbody + ea + 9;
-            while (q < fend and isSpace(b[q])) q += 1;
-            if (q < fend and b[q] == '<') { es2 = q; ee2 = dictEnd(b, q, fend); }
-            else if (q < fend and isDigit(b[q])) {
-                const n2 = readUint(b, &q);
-                if (findObj(b, n2)) |eb| { es2 = eb; ee2 = find(b, "endobj", eb) orelse b.len; }
-            }
-        }
-        if (find(b[es2..ee2], "/Differences", 0)) |da| {
-            var q = es2 + da + 12;
-            while (q < ee2 and b[q] != '[') q += 1;
-            q += 1;
-            var code: u32 = 0;
-            while (q < ee2 and b[q] != ']') {
-                while (q < ee2 and isSpace(b[q])) q += 1;
-                if (q >= ee2 or b[q] == ']') break;
-                if (isDigit(b[q])) { code = readUint(b, &q); continue; }
-                if (b[q] != '/') { q += 1; continue; }
-                const ns = q + 1;
-                var nq = ns;
-                while (nq < ee2 and !isSpace(b[nq]) and b[nq] != '/' and b[nq] != ']') nq += 1;
-                encSet(code, b[ns..nq]);
-                code += 1;
-                q = nq;
-            }
-        }
-    }
-
-    // 글리프 프로그램을 풀 자리
-    var w_at: u32 = dec_at + dn;
-    if (w_at + 4096 > area.len) return;
-    if (t1_pool_n + 256 + 512 > t1_pool.len) return;
-    f.t1_cs = @intCast(t1_pool_n);
-    var i: u32 = 0;
-    while (i < 256) : (i += 1) { t1_pool[t1_pool_n + i] = .{ .off = 0, .len = 0 }; }
-    t1_pool_n += 256;
-    f.t1_sub = @intCast(t1_pool_n);
-    f.t1_sub_n = 0;
-    @memset(&f.t1_std, 0);
-
-    const stash = struct {
-        fn go(ar: []u8, wp: *u32, src: []const u8, iv: usize) T1Range {
-            const cap = ar.len - wp.*;
-            if (cap < src.len + 8) return .{ .off = 0, .len = 0 };
-            const n = t1Decrypt(src, ar[wp.*..], 4330, iv);
-            const r = T1Range{ .off = wp.*, .len = n };
-            wp.* += n;
-            return r;
-        }
-    }.go;
-
-    // Subrs
-    if (findIn(priv, "/Subrs", 0)) |sa| {
-        var q = sa + 6;
-        while (q < priv.len and isSpace(priv[q])) q += 1;
-        const cnt = if (q < priv.len and isDigit(priv[q])) readUint(priv, &q) else 0;
-        var k: u32 = 0;
-        while (k < cnt and k < 512) : (k += 1) {
-            const at = findIn(priv, "dup ", q) orelse break;
-            var r = at + 4;
-            while (r < priv.len and isSpace(priv[r])) r += 1;
-            if (r >= priv.len or !isDigit(priv[r])) { q = at + 4; continue; }
-            const idx = readUint(priv, &r);
-            while (r < priv.len and isSpace(priv[r])) r += 1;
-            if (r >= priv.len or !isDigit(priv[r])) { q = at + 4; continue; }
-            const len = readUint(priv, &r);
-            while (r < priv.len and isSpace(priv[r])) r += 1;
-            while (r < priv.len and !isSpace(priv[r])) r += 1;
-            r += 1;
-            if (r + len > priv.len) break;
-            if (idx < 512) {
-                const rr = stash(area, &w_at, priv[r .. r + len], leniv);
-                t1_pool[f.t1_sub + idx] = rr;
-                if (idx + 1 > f.t1_sub_n) f.t1_sub_n = @intCast(idx + 1);
-            }
-            q = r + len;
-        }
-        t1_pool_n += 512;
-    } else {
-        t1_pool_n += 512;
-    }
-
-    // CharStrings — 코드에 이름이 맞는 것만 담는다
-    var got: u32 = 0;
-    if (findIn(priv, "/CharStrings", 0)) |ca| {
-        var q = ca + 12;
-        var guard: u32 = 0;
-        while (q < priv.len and guard < 4096) {
-            guard += 1;
-            const e = t1Entry(priv, &q) orelse continue;
-            if (e.len == 0 or e.len > 65535) continue;
-            var c: u32 = 0;
-            var used = false;
-            while (c < 256) : (c += 1) {
-                if (enc_len[c] == 0) continue;
-                if (!txEq(encGet(c), e.name)) continue;
-                if (!used) {
-                    const rr = stash(area, &w_at, priv[e.off .. e.off + e.len], leniv);
-                    if (rr.len == 0) break;
-                    t1_pool[f.t1_cs + c] = rr;
-                    used = true;
-                    got += 1;
-                } else {
-                    t1_pool[f.t1_cs + c] = t1_pool[f.t1_cs + c - 1];
-                }
-            }
-            if (used) {
-                // 표준 인코딩 이름과도 맞춰 둔다 (seac 가 그 코드로 부른다)
-                var sc2: u32 = 32;
-                var nb: [1]u8 = undefined;
-                while (sc2 < 127) : (sc2 += 1) {
-                    if (!txEq(stdName(sc2, &nb), e.name)) continue;
-                    var c3: u32 = 0;
-                    while (c3 < 256) : (c3 += 1) {
-                        if (enc_len[c3] == 0 or !txEq(encGet(c3), e.name)) continue;
-                        if (t1_pool[f.t1_cs + c3].len > 0) f.t1_std[sc2] = @intCast(c3);
-                        break;
-                    }
-                }
-                // 같은 이름이 여러 코드에 걸리면 앞의 것을 나눠 쓴다
-                var c2: u32 = 0;
-                var first: ?T1Range = null;
-                while (c2 < 256) : (c2 += 1) {
-                    if (enc_len[c2] == 0 or !txEq(encGet(c2), e.name)) continue;
-                    if (first == null) first = t1_pool[f.t1_cs + c2] else t1_pool[f.t1_cs + c2] = first.?;
-                }
-            }
-        }
-    }
-    if (got == 0) return;
-    t1_used += (w_at + 3) & ~@as(u32, 3);
-    f.t1 = true;
-    f.kind |= 1024;
-    if (find(b[fbody..fend], "/FontMatrix", 0)) |ma| {
-        var q = fbody + ma + 11;
-        while (q < fend and b[q] != '[') q += 1;
-        q += 1;
-        var k: u32 = 0;
-        while (k < 6 and q < fend) : (k += 1) f.fm[k] = readFloat(b, &q);
-    }
-}
-
-/// Type1 charstring 을 돌려 외곽선을 그리기 명령으로 낸다.
-const T1State = struct {
-    x: f32 = 0,
-    y: f32 = 0,
-    st: [48]f32 = undefined,
-    sp: usize = 0,
-    ps: [32]f32 = undefined,
-    ps_head: usize = 0,
-    ps_n: usize = 0,
-    flex: bool = false,
-    fx: [8]f32 = undefined,
-    fy: [8]f32 = undefined,
-    fn_: usize = 0,
-    drew: bool = false,
-    done: bool = false,
-    sb: f32 = 0,
-    seac: bool = false,
-    asb: f32 = 0,
-    adx: f32 = 0,
-    ady: f32 = 0,
-    bchar: u32 = 0,
-    achar: u32 = 0,
-};
-
-fn t1Push(s: *T1State, v: f32) void {
-    if (s.sp < s.st.len) { s.st[s.sp] = v; s.sp += 1; }
-}
-fn t1Pop(s: *T1State) f32 {
-    if (s.sp == 0) return 0;
-    s.sp -= 1;
-    return s.st[s.sp];
-}
-fn t1PsPush(s: *T1State, v: f32) void {
-    if (s.ps_n < s.ps.len) { s.ps[s.ps_n] = v; s.ps_n += 1; }
-}
-fn t1PsPop(s: *T1State) f32 {
-    if (s.ps_head >= s.ps_n) return 0;
-    const v = s.ps[s.ps_head];
-    s.ps_head += 1;
-    return v;
-}
-
-fn t1Slice(r: T1Range) []const u8 {
-    if (r.len == 0 or t1Area() == 0) return &[_]u8{};
-    return @as([*]const u8, @ptrFromInt(t1Area() + r.off))[0..r.len];
-}
-
-/// 이동 — flex 중이면 점만 모은다
-fn t1Move(s: *T1State, dx: f32, dy: f32) void {
-    s.x += dx;
-    s.y += dy;
-    if (s.flex) {
-        if (s.fn_ < 8) { s.fx[s.fn_] = s.x; s.fy[s.fn_] = s.y; s.fn_ += 1; }
-        return;
-    }
-    emitOp(1, &[_]f32{ s.x, s.y });
-    s.drew = true;
-}
-
-fn t1Run(f: *const FontMap, r: T1Range, s: *T1State, dep: u32) void {
-    if (dep > 10) return;
-    const d = t1Slice(r);
-    var i: usize = 0;
-    while (i < d.len and !s.done) {
-        const v = d[i];
-        if (v >= 32) {
-            if (v <= 246) {
-                t1Push(s, @as(f32, @floatFromInt(@as(i32, v) - 139)));
-                i += 1;
-            } else if (v <= 250) {
-                if (i + 2 > d.len) return;
-                t1Push(s, @floatFromInt((@as(i32, v) - 247) * 256 + @as(i32, d[i + 1]) + 108));
-                i += 2;
-            } else if (v <= 254) {
-                if (i + 2 > d.len) return;
-                t1Push(s, @floatFromInt(-(@as(i32, v) - 251) * 256 - @as(i32, d[i + 1]) - 108));
-                i += 2;
-            } else {
-                if (i + 5 > d.len) return;
-                t1Push(s, @floatFromInt(@as(i32, @bitCast(be32(d, i + 1)))));
-                i += 5;
-            }
-            continue;
-        }
-        i += 1;
-        switch (v) {
-            13 => { // hsbw: 왼쪽 여백과 폭
-                if (s.sp >= 1) { s.x = s.st[0]; s.sb = s.st[0]; }
-                s.y = 0;
-                s.sp = 0;
-            },
-            9 => { emitOp(4, &[_]f32{}); s.sp = 0; }, // closepath
-            21 => { if (s.sp >= 2) t1Move(s, s.st[s.sp - 2], s.st[s.sp - 1]); s.sp = 0; },
-            22 => { if (s.sp >= 1) t1Move(s, s.st[s.sp - 1], 0); s.sp = 0; },
-            4 => { if (s.sp >= 1) t1Move(s, 0, s.st[s.sp - 1]); s.sp = 0; },
-            5 => {
-                if (s.sp >= 2) { s.x += s.st[0]; s.y += s.st[1]; emitOp(2, &[_]f32{ s.x, s.y }); s.drew = true; }
-                s.sp = 0;
-            },
-            6 => {
-                if (s.sp >= 1) { s.x += s.st[0]; emitOp(2, &[_]f32{ s.x, s.y }); s.drew = true; }
-                s.sp = 0;
-            },
-            7 => {
-                if (s.sp >= 1) { s.y += s.st[0]; emitOp(2, &[_]f32{ s.x, s.y }); s.drew = true; }
-                s.sp = 0;
-            },
-            8 => { // rrcurveto
-                if (s.sp >= 6) {
-                    const x1 = s.x + s.st[0];
-                    const y1 = s.y + s.st[1];
-                    const x2 = x1 + s.st[2];
-                    const y2 = y1 + s.st[3];
-                    s.x = x2 + s.st[4];
-                    s.y = y2 + s.st[5];
-                    emitOp(3, &[_]f32{ x1, y1, x2, y2, s.x, s.y });
-                    s.drew = true;
-                }
-                s.sp = 0;
-            },
-            30 => { // vhcurveto
-                if (s.sp >= 4) {
-                    const x1 = s.x;
-                    const y1 = s.y + s.st[0];
-                    const x2 = x1 + s.st[1];
-                    const y2 = y1 + s.st[2];
-                    s.x = x2 + s.st[3];
-                    s.y = y2;
-                    emitOp(3, &[_]f32{ x1, y1, x2, y2, s.x, s.y });
-                    s.drew = true;
-                }
-                s.sp = 0;
-            },
-            31 => { // hvcurveto
-                if (s.sp >= 4) {
-                    const x1 = s.x + s.st[0];
-                    const y1 = s.y;
-                    const x2 = x1 + s.st[1];
-                    const y2 = y1 + s.st[2];
-                    s.x = x2;
-                    s.y = y2 + s.st[3];
-                    emitOp(3, &[_]f32{ x1, y1, x2, y2, s.x, s.y });
-                    s.drew = true;
-                }
-                s.sp = 0;
-            },
-            10 => { // callsubr
-                const idx = t1Pop(s);
-                const k: i32 = @intFromFloat(idx);
-                if (k >= 0 and @as(u32, @intCast(k)) < f.t1_sub_n)
-                    t1Run(f, t1_pool[f.t1_sub + @as(u32, @intCast(k))], s, dep + 1);
-            },
-            11 => return, // return
-            14 => { s.done = true; return; }, // endchar
-            1, 3 => s.sp = 0, // hstem/vstem
-            12 => {
-                if (i >= d.len) return;
-                const v2 = d[i];
-                i += 1;
-                switch (v2) {
-                    12 => { // div
-                        const bb = t1Pop(s);
-                        const aa = t1Pop(s);
-                        t1Push(s, if (bb == 0) 0 else aa / bb);
-                    },
-                    16 => { // callothersubr
-                        const othr: i32 = @intFromFloat(t1Pop(s));
-                        const cnt: i32 = @intFromFloat(t1Pop(s));
-                        var n: usize = if (cnt > 0) @intCast(cnt) else 0;
-                        if (n > s.sp) n = s.sp;
-                        s.ps_head = 0;
-                        s.ps_n = 0;
-                        if (othr == 1) {
-                            s.flex = true;
-                            s.fn_ = 0;
-                            s.sp -= n;
-                        } else if (othr == 0) {
-                            // flex 끝 — 모은 점 여섯 개가 곡선 두 개다
-                            if (s.fn_ >= 7) {
-                                emitOp(3, &[_]f32{ s.fx[1], s.fy[1], s.fx[2], s.fy[2], s.fx[3], s.fy[3] });
-                                emitOp(3, &[_]f32{ s.fx[4], s.fy[4], s.fx[5], s.fy[5], s.fx[6], s.fy[6] });
-                                s.x = s.fx[6];
-                                s.y = s.fy[6];
-                                s.drew = true;
-                            }
-                            s.flex = false;
-                            s.sp -= n;
-                            t1PsPush(s, s.x);
-                            t1PsPush(s, s.y);
-                        } else if (othr == 3) {
-                            const arg = if (n >= 1) s.st[s.sp - 1] else 3;
-                            s.sp -= n;
-                            t1PsPush(s, arg);
-                        } else {
-                            var k: usize = 0;
-                            while (k < n) : (k += 1) t1PsPush(s, s.st[s.sp - n + k]);
-                            s.sp -= n;
-                        }
-                    },
-                    17 => t1Push(s, t1PsPop(s)), // pop
-                    33 => { // setcurrentpoint
-                        if (s.sp >= 2) { s.x = s.st[0]; s.y = s.st[1]; }
-                        s.sp = 0;
-                    },
-                    6 => { // seac — 밑글자에 악센트를 얹는다
-                        if (s.sp >= 5) {
-                            s.asb = s.st[s.sp - 5];
-                            s.adx = s.st[s.sp - 4];
-                            s.ady = s.st[s.sp - 3];
-                            s.bchar = @intFromFloat(@max(0, @min(126, s.st[s.sp - 2])));
-                            s.achar = @intFromFloat(@max(0, @min(126, s.st[s.sp - 1])));
-                            s.seac = true;
-                        }
-                        s.sp = 0;
-                        s.done = true;
-                        return;
-                    },
-                    else => s.sp = 0, // dotsection·stem3 등
-                }
-            },
-            else => s.sp = 0,
-        }
-    }
-}
-
-/// 코드 하나를 외곽선으로 그린다. 그렸으면 true.
-fn drawType1(f: *const FontMap, code: u32) bool {
-    if (!f.t1 or code > 255) return false;
-    const r = t1_pool[f.t1_cs + code];
-    if (r.len == 0) return false;
-    var s = T1State{};
-    t1Run(f, r, &s, 0);
-    if (s.seac) {
-        // 밑글자와 악센트를 따로 그린다
-        const bi = if (s.bchar < 128) f.t1_std[s.bchar] else 0;
-        const ai = if (s.achar < 128) f.t1_std[s.achar] else 0;
-        var drew = false;
-        if (bi != 0 and t1_pool[f.t1_cs + bi].len > 0) {
-            var sb2 = T1State{};
-            t1Run(f, t1_pool[f.t1_cs + bi], &sb2, 0);
-            if (sb2.drew) { emitOp(4, &[_]f32{}); emitOp(6, &[_]f32{0}); drew = true; }
-        }
-        if (ai != 0 and t1_pool[f.t1_cs + ai].len > 0) {
-            emitOp(14, &[_]f32{});
-            emitOp(16, &[_]f32{ 1, 0, 0, 1, s.sb - s.asb + s.adx, s.ady });
-            var sa2 = T1State{};
-            t1Run(f, t1_pool[f.t1_cs + ai], &sa2, 0);
-            if (sa2.drew) { emitOp(4, &[_]f32{}); emitOp(6, &[_]f32{0}); drew = true; }
-            emitOp(15, &[_]f32{});
-        }
-        return drew;
-    }
-    if (!s.drew) return false;
-    emitOp(4, &[_]f32{}); // closepath
-    emitOp(6, &[_]f32{0}); // 채우기 (비영 감김)
-    return true;
-}
-
-// ===== CFF 를 OpenType 으로 감싸기 =====
+// ===== 맨 CFF 를 OpenType 으로 감싼다 (c/pdfcff.zig) =====
 //
-// PDF 의 FontFile3 은 대개 맨 CFF 다 — sfnt 껍데기가 없어 FontFace 가 받지
-// 않는다. PDF.js 도 같은 일을 한다: CFF 를 그대로 'CFF ' 표에 넣고, 규격이
-// 요구하는 나머지 표(head·hhea·maxp·hmtx·OS/2·name·post)를 지어 붙인다.
-// 글자 폭은 PDF 가 이미 알려 준 /W·/Widths 를 쓴다.
-
-fn readOff(b: []const u8, at: usize, n: u8) u32 {
-    var v: u32 = 0;
-    var i: u8 = 0;
-    while (i < n) : (i += 1) {
-        if (at + i >= b.len) return 0;
-        v = (v << 8) | b[at + i];
-    }
-    return v;
-}
-
-/// INDEX 의 끝 위치 (CFF1)
-fn cffIndexEnd(b: []const u8, at: usize) ?usize {
-    if (at + 2 > b.len) return null;
-    const count = be16(b, at);
-    if (count == 0) return at + 2;
-    if (at + 3 > b.len) return null;
-    const os = b[at + 2];
-    if (os < 1 or os > 4) return null;
-    const offs = at + 3;
-    const last_at = offs + @as(usize, count) * os;
-    if (last_at + os > b.len) return null;
-    const last = readOff(b, last_at, os);
-    const data = offs + (@as(usize, count) + 1) * os - 1;
-    if (data > b.len or last > b.len - data) return null;
-    return data + last;
-}
-
-fn cffIndexItem(b: []const u8, at: usize, i: u32) ?[]const u8 {
-    if (at + 3 > b.len) return null;
-    const count = be16(b, at);
-    if (i >= count) return null;
-    const os = b[at + 2];
-    if (os < 1 or os > 4) return null;
-    const offs = at + 3;
-    const o1 = readOff(b, offs + @as(usize, i) * os, os);
-    const o2 = readOff(b, offs + (@as(usize, i) + 1) * os, os);
-    const data = offs + (@as(usize, count) + 1) * os - 1;
-    if (o2 < o1 or data > b.len or o2 > b.len - data or o1 == 0) return null;
-    return b[data + o1 .. data + o2];
-}
-
-/// Top DICT 에서 연산자 하나의 마지막 피연산자를 읽는다.
-fn cffDictInt(d: []const u8, want: u16) ?i32 {
-    var i: usize = 0;
-    var last: i32 = 0;
-    var have = false;
-    while (i < d.len) {
-        const b0 = d[i];
-        if (b0 <= 21) {
-            var key: u16 = b0;
-            i += 1;
-            if (b0 == 12) {
-                if (i >= d.len) return null;
-                key = 0x0C00 | @as(u16, d[i]);
-                i += 1;
-            }
-            if (key == want and have) return last;
-            have = false;
-            continue;
-        }
-        if (b0 == 28) {
-            if (i + 3 > d.len) return null;
-            last = @as(i16, @bitCast(be16(d, i + 1)));
-            have = true;
-            i += 3;
-        } else if (b0 == 29) {
-            if (i + 5 > d.len) return null;
-            last = @bitCast(be32(d, i + 1));
-            have = true;
-            i += 5;
-        } else if (b0 == 30) {
-            // 실수 — 0xf 반니블이 끝을 알린다
-            i += 1;
-            while (i < d.len) : (i += 1) {
-                const v = d[i];
-                if ((v >> 4) == 0x0F or (v & 0x0F) == 0x0F) { i += 1; break; }
-            }
-            have = false;
-        } else if (b0 >= 32 and b0 <= 246) {
-            last = @as(i32, b0) - 139;
-            have = true;
-            i += 1;
-        } else if (b0 >= 247 and b0 <= 250) {
-            if (i + 2 > d.len) return null;
-            last = (@as(i32, b0) - 247) * 256 + @as(i32, d[i + 1]) + 108;
-            have = true;
-            i += 2;
-        } else if (b0 >= 251 and b0 <= 254) {
-            if (i + 2 > d.len) return null;
-            last = -(@as(i32, b0) - 251) * 256 - @as(i32, d[i + 1]) - 108;
-            have = true;
-            i += 2;
-        } else {
-            i += 1;
-        }
-    }
-    return null;
-}
-
-/// CFF 의 글리프 수 (CharStrings INDEX 의 개수)
-fn cffGlyphCount(cff: []const u8) u32 {
-    if (cff.len < 8) return 0;
-    if (cff[0] != 1) return 0; // CFF1 만
-    var at: usize = cff[2]; // hdrSize
-    at = cffIndexEnd(cff, at) orelse return 0; // Name INDEX
-    const top_at = at;
-    at = cffIndexEnd(cff, at) orelse return 0; // Top DICT INDEX
-    const top = cffIndexItem(cff, top_at, 0) orelse return 0;
-    const cs = cffDictInt(top, 17) orelse return 0;
-    if (cs <= 0 or @as(usize, @intCast(cs)) + 2 > cff.len) return 0;
-    return be16(cff, @intCast(cs));
-}
-
-fn wrStr(d: []u8, o: usize, s: []const u8) void {
-    if (o + s.len > d.len) return;
-    @memcpy(d[o..][0..s.len], s);
-}
-
-/// UTF-16BE 로 적는다 (아스키만)
-fn wrU16Str(d: []u8, o: usize, s: []const u8) usize {
-    var i: usize = 0;
-    while (i < s.len) : (i += 1) {
-        if (o + i * 2 + 2 > d.len) break;
-        d[o + i * 2] = 0;
-        d[o + i * 2 + 1] = s[i];
-    }
-    return s.len * 2;
-}
-
-/// name 표 하나를 짓는다. 쓴 바이트 수.
-fn buildName(dst: []u8) u32 {
-    const ids = [_]u16{ 1, 2, 3, 4, 6 };
-    const count: u16 = ids.len;
-    const str_off: u16 = 6 + count * 12;
-    if (dst.len < str_off + 32) return 0;
-    wr16(dst, 0, 0);
-    wr16(dst, 2, count);
-    wr16(dst, 4, str_off);
-    const fam = "PDFEmbedded";
-    const sub = "Regular";
-    const fam_len = wrU16Str(dst, str_off, fam);
-    const sub_len = wrU16Str(dst, str_off + fam_len, sub);
-    var i: usize = 0;
-    while (i < count) : (i += 1) {
-        const r = 6 + i * 12;
-        wr16(dst, r + 0, 3); // 윈도
-        wr16(dst, r + 2, 1); // 유니코드 BMP
-        wr16(dst, r + 4, 0x0409);
-        wr16(dst, r + 6, ids[i]);
-        if (ids[i] == 2) {
-            wr16(dst, r + 8, @intCast(sub_len));
-            wr16(dst, r + 10, @intCast(fam_len));
-        } else {
-            wr16(dst, r + 8, @intCast(fam_len));
-            wr16(dst, r + 10, 0);
-        }
-    }
-    return @intCast(str_off + fam_len + sub_len);
-}
-
-/// 맨 CFF 를 OTTO 로 감싼다. 성공하면 길이, 실패하면 0.
-fn buildOtto(cff: []const u8, f: *FontMap, dst: []u8) u32 {
-    const ng = cffGlyphCount(cff);
-    if (ng == 0 or ng > 65535) return 0;
-    if (dst.len < cff.len + 4096) return 0;
-    const scratch = dst.len - (dst.len / 4);
-    if (scratch <= cff.len + 1024) return 0;
-
-    const cmap_len = buildFontCmap(f, @intCast(ng), dst[scratch..]);
-    if (cmap_len == 0) return 0;
-
-    // 표 아홉 개 — 태그 오름차순이어야 한다
-    const out_n: u32 = 9;
-    const dir = 12 + out_n * 16;
-    var pos: u32 = (dir + 3) & ~@as(u32, 3);
-
-    var tags: [9]u32 = undefined;
-    var offs: [9]u32 = undefined;
-    var lens: [9]u32 = undefined;
-    var head_pos: u32 = 0;
-    var t: u32 = 0;
-
-    const put = struct {
-        fn go(d: []u8, p: *u32, tg: *[9]u32, of: *[9]u32, ln: *[9]u32, idx: *u32,
-             tag: u32, len: u32, limit: u32) bool
-        {
-            if (p.* + len > limit) return false;
-            tg[idx.*] = tag;
-            of[idx.*] = p.*;
-            ln[idx.*] = len;
-            idx.* += 1;
-            const end = p.* + len;
-            p.* = (end + 3) & ~@as(u32, 3);
-            @memset(d[end..p.*], 0);
-            return true;
-        }
-    }.go;
-
-    // CFF
-    if (pos + cff.len > scratch) return 0;
-    @memcpy(dst[pos..][0..cff.len], cff);
-    if (!put(dst, &pos, &tags, &offs, &lens, &t, 0x43464620, @intCast(cff.len), @intCast(scratch))) return 0;
-
-    // OS/2 (판 4)
-    {
-        const at = pos;
-        @memset(dst[at .. at + 96], 0);
-        wr16(dst, at + 0, 4);
-        wr16(dst, at + 2, 500); // xAvgCharWidth
-        wr16(dst, at + 4, 400); // usWeightClass
-        wr16(dst, at + 6, 5); // usWidthClass
-        wr16(dst, at + 30, 50); // yStrikeoutSize
-        wr16(dst, at + 32, 300); // yStrikeoutPosition
-        wrStr(dst, at + 58, "PDF ");
-        wr16(dst, at + 62, 0x0040); // fsSelection = REGULAR
-        wr16(dst, at + 64, 0x0020);
-        wr16(dst, at + 66, 0xFFFF);
-        wr16(dst, at + 68, 800); // sTypoAscender
-        wr16(dst, at + 70, @as(u16, 0) -% 200); // sTypoDescender
-        wr16(dst, at + 72, 200);
-        wr16(dst, at + 74, 1000); // usWinAscent
-        wr16(dst, at + 76, 300); // usWinDescent
-        wr32(dst, at + 78, 1); // ulCodePageRange1
-        wr16(dst, at + 86, 500); // sxHeight
-        wr16(dst, at + 88, 700); // sCapHeight
-        wr16(dst, at + 92, 0x20); // usBreakChar
-        wr16(dst, at + 94, 1); // usMaxContext
-        if (!put(dst, &pos, &tags, &offs, &lens, &t, 0x4F532F32, 96, @intCast(scratch))) return 0;
-    }
-
-    // cmap
-    if (pos + cmap_len > scratch) return 0;
-    @memcpy(dst[pos..][0..cmap_len], dst[scratch..][0..cmap_len]);
-    if (!put(dst, &pos, &tags, &offs, &lens, &t, 0x636D6170, cmap_len, @intCast(scratch))) return 0;
-
-    // head
-    {
-        const at = pos;
-        head_pos = at;
-        @memset(dst[at .. at + 54], 0);
-        wr32(dst, at + 0, 0x00010000);
-        wr32(dst, at + 4, 0x00010000);
-        wr32(dst, at + 12, 0x5F0F3CF5); // magic
-        wr16(dst, at + 16, 3); // flags
-        wr16(dst, at + 18, 1000); // unitsPerEm
-        wr16(dst, at + 36, @as(u16, 0) -% 500); // xMin
-        wr16(dst, at + 38, @as(u16, 0) -% 500); // yMin
-        wr16(dst, at + 40, 1500); // xMax
-        wr16(dst, at + 42, 1500); // yMax
-        wr16(dst, at + 46, 3); // lowestRecPPEM
-        wr16(dst, at + 48, 2); // fontDirectionHint
-        if (!put(dst, &pos, &tags, &offs, &lens, &t, 0x68656164, 54, @intCast(scratch))) return 0;
-    }
-
-    // hhea
-    {
-        const at = pos;
-        @memset(dst[at .. at + 36], 0);
-        wr32(dst, at + 0, 0x00010000);
-        wr16(dst, at + 4, 800); // ascender
-        wr16(dst, at + 6, @as(u16, 0) -% 200); // descender
-        wr16(dst, at + 10, 1000); // advanceWidthMax
-        wr16(dst, at + 16, 1000); // xMaxExtent
-        wr16(dst, at + 18, 1); // caretSlopeRise
-        wr16(dst, at + 34, @intCast(ng)); // numberOfHMetrics
-        if (!put(dst, &pos, &tags, &offs, &lens, &t, 0x68686561, 36, @intCast(scratch))) return 0;
-    }
-
-    // hmtx — 폭은 PDF 가 알려 준 값을 쓴다
-    {
-        const at = pos;
-        const len = ng * 4;
-        if (at + len > scratch) return 0;
-        var g: u32 = 0;
-        while (g < ng) : (g += 1) {
-            const w = widthOf(f, g);
-            const wi: u16 = @intFromFloat(@max(0, @min(65535, w)));
-            wr16(dst, at + g * 4, wi);
-            wr16(dst, at + g * 4 + 2, 0);
-        }
-        if (!put(dst, &pos, &tags, &offs, &lens, &t, 0x686D7478, len, @intCast(scratch))) return 0;
-    }
-
-    // maxp (CFF 는 0.5 판)
-    {
-        const at = pos;
-        wr32(dst, at + 0, 0x00005000);
-        wr16(dst, at + 4, @intCast(ng));
-        if (!put(dst, &pos, &tags, &offs, &lens, &t, 0x6D617870, 6, @intCast(scratch))) return 0;
-    }
-
-    // name
-    {
-        const at = pos;
-        const len = buildName(dst[at..scratch]);
-        if (len == 0) return 0;
-        if (!put(dst, &pos, &tags, &offs, &lens, &t, 0x6E616D65, len, @intCast(scratch))) return 0;
-    }
-
-    // post 3.0
-    {
-        const at = pos;
-        @memset(dst[at .. at + 32], 0);
-        wr32(dst, at + 0, 0x00030000);
-        wr16(dst, at + 8, @as(u16, 0) -% 100); // underlinePosition
-        wr16(dst, at + 10, 50);
-        if (!put(dst, &pos, &tags, &offs, &lens, &t, 0x706F7374, 32, @intCast(scratch))) return 0;
-    }
-
-    // 표 목록
-    wr32(dst, 0, 0x4F54544F); // 'OTTO'
-    wr16(dst, 4, @intCast(out_n));
-    var p2: u32 = 1;
-    var es: u16 = 0;
-    while (p2 * 2 <= out_n) : (p2 *= 2) es += 1;
-    wr16(dst, 6, @intCast(p2 * 16));
-    wr16(dst, 8, es);
-    wr16(dst, 10, @intCast(out_n * 16 - p2 * 16));
-    var k: u32 = 0;
-    while (k < t) : (k += 1) {
-        const r = 12 + k * 16;
-        wr32(dst, r, tags[k]);
-        wr32(dst, r + 4, sumTable(dst, offs[k], lens[k]));
-        wr32(dst, r + 8, offs[k]);
-        wr32(dst, r + 12, lens[k]);
-    }
-    if (head_pos != 0) {
-        wr32(dst, head_pos + 8, 0);
-        const whole = sumTable(dst, 0, pos);
-        wr32(dst, head_pos + 8, 0xB1B0AFBA -% whole);
-    }
-    return pos;
-}
-
-/// 방금 등록한 글꼴에 파일을 붙인다.
-fn attachFontFile(data: []const u8, is_cff: bool) void {
-    if (font_n == 0 or fontArea() == 0) return;
-    const f = &fontsBuf()[font_n - 1];
-    const room = font_cap - font_used;
-    if (room < 4096) return;
-    // 필요한 만큼만 떼어 준다.
-    //
-    // 예전에는 남은 자리를 통째로 넘겼다. 그런데 글꼴을 다시 짜는 쪽은
-    // "받은 자리의 절반" 을 임시 자리로 쓴다(scratch = dst.len / 2). 8MB 를
-    // 통째로 주면 4MB 지점에 쓰고, OTTO 는 6MB 지점에도 쓴다 — 실제로는
-    // 100KB 도 안 쓰면서 8MB 전체를 만지게 되고, 그만큼이 진짜 메모리가
-    // 된다. 한글 문서 하나를 그리는 데 13MB 가 그렇게 나갔다.
-    //
-    // 원본의 네 배에 여유를 얹으면 넉넉하다 — 표를 다시 짜고 cmap 을
-    // 새로 붙여도 그 안에 든다.
-    const want = @min(room, @max(@as(usize, 256 * 1024), data.len * 4 + 128 * 1024));
-    const area = @as([*]u8, @ptrFromInt(fontArea() + font_used))[0..want];
-    var n: u32 = 0;
-    if (is_cff) {
-        n = buildOtto(data, f, area);
-        if (n == 0) return; // 껍데기를 못 지으면 싣지 않는다
-        f.kind |= 512;
-        f.file_off = font_used;
-        f.file_len = n;
-        font_used += (n + 3) & ~@as(u32, 3);
-        return;
-    }
-    if (f.n > 0 or f.identity) n = patchFont(data, f, area);
-    if (n == 0) {
-        // 코드표가 없으면 파일의 cmap 을 그대로 믿는다. 다만 겉이라도 성한
-        // 것만 싣는다 — 깨진 파일을 넘겨 봐야 FontFace 가 거절하고, 그동안
-        // 메모리만 먹는다.
-        if (data.len < 12 or data.len > room or data.len > 4 * 1024 * 1024) return;
-        const tag = be32(data, 0);
-        if (tag != 0x00010000 and tag != 0x74727565 and tag != 0x4F54544F) return;
-        const num = be16(data, 4);
-        if (num == 0 or num > 64 or 12 + @as(usize, num) * 16 > data.len) return;
-        @memcpy(area[0..data.len], data);
-        n = @intCast(data.len);
-    }
-    f.file_off = font_used;
-    f.file_len = n;
-    font_used += (n + 3) & ~@as(u32, 3);
-}
-
-/// 글자 하나만큼 자리를 옮긴다. 세로쓰기는 아래로 흐른다.
-fn advance(f: ?*const FontMap, adv: f32, m: Mat) Mat {
-    const vert = if (f) |ff| ff.vertical else false;
-    if (vert) return matMul(.{ .e = 0, .f = -adv }, m);
-    return matMul(.{ .e = adv, .f = 0 }, m);
-}
+// 부르는 자리를 안 건드리도록 이름만 이어 둔다.
+const pdfcff = @import("pdfcff.zig");
+const advance = pdfcff.advance;
+const attachFontFile = pdfcff.attachFontFile;
 
 // ===== CID → 글리프 번호 =====
 //
@@ -12839,7 +10815,7 @@ fn std14For(b: []const u8, fbody: usize, fend: usize) ?*const [256]u16 {
     return null;
 }
 
-fn widthOf(f: *const FontMap, code: u32) f32 {
+pub fn widthOf(f: *const FontMap, code: u32) f32 {
     var i: u16 = 0;
     while (i < f.wn) : (i += 1) if (u16buf(f.wcodes_at, f.wcodes_cap)[i] == code) return @floatFromInt(u16buf(f.wvals_at, f.wvals_cap)[i]);
     // 표준 14종은 문서가 /Widths 를 안 적어도 된다. 그때는 Adobe 가 낸
@@ -13205,7 +11181,7 @@ fn attachWidths(b: []const u8, fbody: usize) void {
 }
 
 /// "<<" 로 시작하는 딕셔너리의 끝(">>" 다음)을 찾는다.
-fn dictEnd(b: []const u8, s: usize, limit: usize) usize {
+pub fn dictEnd(b: []const u8, s: usize, limit: usize) usize {
     var p = s;
     var depth: u32 = 0;
     while (p + 1 < limit) : (p += 1) {
@@ -13801,14 +11777,14 @@ export fn merge() usize {
 /// 어느 객체가 살아 있는가. 문서에서 본 가장 큰 번호에 맞춰 잡는다 —
 /// 예전에는 [65536] 고정이라, 번호가 그보다 큰 객체는 살아 있어도
 /// 조용히 버려졌다(compact 로 낸 파일에서 그 객체만 사라졌다).
-var reach_at: usize = 0;
-var reach_n: usize = 0;
-fn reachTable() []bool {
+pub var reach_at: usize = 0;
+pub var reach_n: usize = 0;
+pub fn reachTable() []bool {
     if (reach_at == 0 or reach_n == 0) return &[_]bool{};
     return @as([*]bool, @ptrFromInt(reach_at))[0..reach_n];
 }
 
-fn objRange(b: []const u8, num: u32) ?struct { start: usize, dict_end: usize, end: usize } {
+pub fn objRange(b: []const u8, num: u32) ?struct { start: usize, dict_end: usize, end: usize } {
     const body = findObj(b, num) orelse return null;
     const end = find(b, "endobj", body) orelse b.len;
     const sm = find(b[body..end], "stream", 0);
@@ -13816,7 +11792,7 @@ fn objRange(b: []const u8, num: u32) ?struct { start: usize, dict_end: usize, en
     return .{ .start = body, .dict_end = de, .end = end };
 }
 
-fn markReach(b: []const u8, num: u32, depth: u32) void {
+pub fn markReach(b: []const u8, num: u32, depth: u32) void {
     const reach = reachTable();
     if (num >= reach.len or depth > 64) return;
     if (reach[num]) return;
