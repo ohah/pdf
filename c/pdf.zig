@@ -162,12 +162,6 @@ pub fn zoneAlloc(bytes: usize) ?usize {
 /// 넉넉히 잡아 둔 것을 실제로 쓴 만큼으로 줄인다.
 pub fn zoneShrink(to: usize) void { if (to >= zoneBase()) zone_top = to; }
 
-/// 글꼴 표 하나의 짝 배열을 읽는다. 아직 안 잡았으면 빈 것을 준다.
-pub fn u16buf(at: usize, cap: u32) []u16 {
-    if (at == 0 or cap == 0) return &[_]u16{};
-    return @as([*]u16, @ptrFromInt(at))[0..cap];
-}
-
 var big: struct {
     /// 큰 임시 자리 하나. 돌려 쓴다.
     ///
@@ -1755,9 +1749,7 @@ fn findForm(name: []const u8) i32 {
 
 export fn imageSlots() u32 { return img.n; }
 export fn jbDbgN() u32 { return jbig2.dbg_n; }
-export fn jbDbg(i: u32, k: u32) i32 { return if (i < jbig2.dbg_n and k < 5) jbig2.dbg[i][k] else 0; }
 export fn jbSymN() u32 { return jbig2.sym_n; }
-export fn jbSymW(i: u32) u32 { return if (i < jbig2.sym_n) jbig2.syms[i].w else 0; }
 export fn slotKind(i: u32) u32 { return if (i < img.n) imgs.all()[i].kind else 0; }
 export fn slotWidth(i: u32) u32 { return if (i < img.n) imgs.all()[i].w else 0; }
 export fn slotHeight(i: u32) u32 { return if (i < img.n) imgs.all()[i].h else 0; }
