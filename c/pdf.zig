@@ -2682,7 +2682,7 @@ fn lookup(f: *const FontMap, code: u32) u32 {
     return code;
 }
 
-export fn resetPage(w: f32, h: f32) void {
+fn resetPage(w: f32, h: f32) void {
     subcReset();
     t3cReset();
     item_n = 0;
@@ -2731,7 +2731,7 @@ fn widthRoom(f: *FontMap, want: u32) bool {
 }
 
 /// 폰트 하나를 등록한다. cmap 이 비어 있으면 코드=유니코드로 본다.
-export fn addFont(name: [*]const u8, name_len: u32, cmap: [*]const u8, cmap_len: u32) void {
+fn addFont(name: [*]const u8, name_len: u32, cmap: [*]const u8, cmap_len: u32) void {
     if (!fonts.room(fontarea.n + 1)) return;
     const f = &fonts.all()[fontarea.n];
     // 이 자리는 구역에서 떼어 온 것이라, 앞서 누가 쓰던 값이 그대로 남아
@@ -3115,11 +3115,6 @@ pub fn subStream(num: u32, depth: u32) ?[]const u8 {
     @memcpy(dst[0..n], cs[0..n]);
     subcPut(num, dst[0..n]);
     return dst[0..n];
-}
-
-export fn runContent(buf: [*]const u8, len: u32) u32 {
-    runOps(buf[0..len], 0);
-    return item_n;
 }
 
 pub fn runOps(b: []const u8, depth: u32) void {

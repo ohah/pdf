@@ -12,6 +12,30 @@ function ok(name, cond, got) {
   fail++; bad.push(`${name}${got !== undefined ? ` (실제: ${got})` : ''}`);
 }
 
+// ── 내보낸 이름이 소스와 정확히 같은가
+//
+// 빌드 스크립트가 --export= 목록을 손으로 들고 있었다. 같은 사실이 두 곳에
+// 적혀 있으니 조용히 어긋났다 — addFont·resetPage·runContent 셋이 소스엔
+// export 인데 목록엔 없어 wasm 에 안 나갔다. 지금은 소스에서 뽑는다.
+{
+  const m = await WebAssembly.compile(wasm);
+  const got = new Set(WebAssembly.Module.exports(m).filter((e) => e.kind === 'function').map((e) => e.name));
+  got.delete('_start'); // wasi 가 붙이는 것
+  const src = new Set();
+  for (const f of fs.readdirSync('c').filter((x) => x.endsWith('.zig'))) {
+    for (const mm of fs.readFileSync(`c/${f}`, 'utf8').matchAll(/^(?:pub )?export fn (\w+)/gm)) src.add(mm[1]);
+  }
+  const onlyWasm = [...got].filter((x) => !src.has(x));
+  const onlySrc = [...src].filter((x) => !got.has(x));
+  ok('소스의 export fn 이 전부 wasm 에 나간다', onlySrc.length === 0, onlySrc.join(','));
+  ok('wasm 에 소스에 없는 export 가 없다', onlyWasm.length === 0, onlyWasm.join(','));
+  // 어긋나면 뒤의 시험은 다 터진다 — 여기서 바로 알리고 멈춘다.
+  if (onlySrc.length || onlyWasm.length) {
+    console.log(`  ✗ 내보낸 이름이 소스와 다르다 — 소스에만 [${onlySrc}] · wasm 에만 [${onlyWasm}]`);
+    process.exit(1);
+  }
+}
+
 const loadNoForm = (f) => load(f, 0, true, false);
 async function load(file, page = 0, feed = true, formOn = true) {
   const m = await WebAssembly.instantiate(wasm, { wasi_snapshot_preview1: new Proxy({}, { get: () => () => 0 }) });
@@ -1536,6 +1560,7 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   ok('목차 400개를 읽는다', ex.outlineCount() === 400, ex.outlineCount());
   ok('목차를 읽어도 메모리 앞자리를 안 밟는다', diff === 0, `${diff}바이트 바뀜`);
 }
+
 
 console.log(`  기능 단언 ${pass + fail}개 중 통과 ${pass}, 실패 ${fail}`);
 if (bad.length) bad.forEach((b3) => console.log('    ✗ ' + b3));
