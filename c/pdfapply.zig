@@ -736,7 +736,7 @@ pub fn apply() usize {
             new_nums[new_n] = ap;
             new_n += 1;
             core.appendNum(&pos, ap);
-            core.appendStr(&pos, " 0 obj\n<< /Type /XObject /Subtype /core.Form /BBox [0 0 ");
+            core.appendStr(&pos, " 0 obj\n<< /Type /XObject /Subtype /Form /BBox [0 0 ");
             core.appendNum(&pos, @intFromFloat(@max(1, w)));
             core.appendStr(&pos, " ");
             core.appendNum(&pos, @intFromFloat(@max(1, h)));
@@ -1176,7 +1176,7 @@ pub fn apply() usize {
                     new_nums[new_n] = ap_obj;
                     new_n += 1;
                     core.appendNum(&pos, ap_obj);
-                    core.appendStr(&pos, " 0 obj\n<< /Type /XObject /Subtype /core.Form /BBox [0 0 ");
+                    core.appendStr(&pos, " 0 obj\n<< /Type /XObject /Subtype /Form /BBox [0 0 ");
                     core.appendNum(&pos, @intFromFloat(@max(1, bw)));
                     core.appendStr(&pos, " ");
                     core.appendNum(&pos, @intFromFloat(@max(1, bh)));
@@ -1289,7 +1289,7 @@ pub fn apply() usize {
                     new_nums[new_n] = ap_obj;
                     new_n += 1;
                     core.appendNum(&pos, ap_obj);
-                    core.appendStr(&pos, " 0 obj\n<< /Type /XObject /Subtype /core.Form /BBox [0 0 ");
+                    core.appendStr(&pos, " 0 obj\n<< /Type /XObject /Subtype /Form /BBox [0 0 ");
                     core.appendNum(&pos, @intFromFloat(@max(1, bw)));
                     core.appendStr(&pos, " ");
                     core.appendNum(&pos, @intFromFloat(@max(1, bh)));

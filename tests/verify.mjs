@@ -1445,6 +1445,34 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   ok('표준 14종 폭을 쓴다', Math.abs((x1 - x0) - 22.78) < 0.02, x1 - x0);
 }
 
+// 내보낸 PDF 에 우리 모듈 이름이 새어 나가지 않는지.
+//
+// pdf.zig 를 여러 파일로 떼면서 이름 앞에 core. 을 붙였는데, 그 치환이
+// 문자열 안까지 들어가 "/Subtype /Form" 이 "/Subtype /core.Form" 으로
+// 나갔다. 우리 뷰어는 견뎠지만 규격에 없는 이름이라 다른 뷰어는 겉모습을
+//못 그린다. 적대적 시험이 apply() 를 부르긴 했으나 죽는지만 봐서 놓쳤다.
+{
+  const m = await WebAssembly.instantiate(wasm, { wasi_snapshot_preview1: new Proxy({}, { get: () => () => 0 }) });
+  const ex = m.instance.exports;
+  const buf = fs.readFileSync(`${S}/korean.pdf`);
+  ex.reserve(buf.length, buf.length * 3 + 201326592);
+  new Uint8Array(ex.memory.buffer, ex.inputPtr(), buf.length).set(buf);
+  ex.parse(buf.length);
+  ex.clearPick();
+  for (let i = 0; i < ex.pageCount(); i++) ex.addPick(i);
+  ex.setRotate(0); ex.clearWatermark(); ex.clearLabels();
+  // 주석은 겉모습(appearance) 폼 XObject 를 낸다 — 그 자리를 밟아야 한다
+  ex.clearNotes();
+  ex.addNote(1, 0, 100, 100, 300, 140, 1, 0, 0);
+  for (const c of '메모') ex.addNoteChar(c.codePointAt(0));
+  const n = ex.apply();
+  const out = Buffer.from(new Uint8Array(ex.memory.buffer, ex.outputPtr(), n)).toString('latin1');
+  ok('라벨 얹은 결과가 나온다', n > buf.length, n);
+  ok('겉모습 폼이 /Subtype /Form 이다', out.includes('/Subtype /Form'), out.includes('/Subtype /core.Form') ? '/core.Form 으로 나갔다' : '없음');
+  const leak = /\/(core|root|pdf[a-z0-9]*)\./.exec(out);
+  ok('내보낸 PDF 에 모듈 이름이 안 샌다', !leak, leak && leak[0]);
+}
+
 console.log(`  기능 단언 ${pass + fail}개 중 통과 ${pass}, 실패 ${fail}`);
 if (bad.length) bad.forEach((b3) => console.log('    ✗ ' + b3));
 process.exit(fail ? 1 : 0);
