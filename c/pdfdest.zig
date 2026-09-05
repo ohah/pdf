@@ -16,58 +16,32 @@ const pdfform = @import("pdfform.zig");
 // 목차와 링크가 "3쪽" 대신 이름으로 가리키는 문서가 흔하다. 이름을 물어보면
 // 풀어 주는 길은 있었는데(destByName) 목록을 통째로 내어 주는 길이 없었다.
 /// dest_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
-var dest_buf_at: usize = 0;
-var dest_buf_cap: u32 = 0;
-pub fn dest_buf() []u8 {
-    if (dest_buf_at == 0 or dest_buf_cap == 0) return &[_]u8{};
-    return @as([*]u8, @ptrFromInt(dest_buf_at))[0..dest_buf_cap];
-}
-fn dest_bufRoom(want: u32) bool {
-    return core.growTable(&dest_buf_at, &dest_buf_cap, want, 1, 32768);
-}
+pub var dest_buf: core.Table(u8) = .{};
 /// 이름 목적지. 256 이던 것을 올렸다 — 책 한 권은 그보다 많다.
 /// 이름 붙은 자리의 이름 위치. 필요한 만큼 늘어난다(세는 상한 없음).
-var dest_off_at: usize = 0;
-var dest_off_cap: u32 = 0;
-pub fn dest_offBuf() []u32 {
-    if (dest_off_at == 0 or dest_off_cap == 0) return &[_]u32{};
-    return @as([*]u32, @ptrFromInt(dest_off_at))[0..dest_off_cap];
-}
-fn dest_offRoom(want: u32) bool { return core.growTable(&dest_off_at, &dest_off_cap, want, @sizeOf(u32), 256); }
+pub var dest_off: core.Table(u32) = .{};
 /// 그 이름의 길이. 필요한 만큼 늘어난다(세는 상한 없음).
-var dest_len_at: usize = 0;
-var dest_len_cap: u32 = 0;
-pub fn dest_lenBuf() []u8 {
-    if (dest_len_at == 0 or dest_len_cap == 0) return &[_]u8{};
-    return @as([*]u8, @ptrFromInt(dest_len_at))[0..dest_len_cap];
-}
-fn dest_lenRoom(want: u32) bool { return core.growTable(&dest_len_at, &dest_len_cap, want, @sizeOf(u8), 256); }
+pub var dest_len: core.Table(u8) = .{};
 /// 그 자리가 가리키는 쪽. 256 개로 못박혀 있었다. 필요한 만큼 늘어난다(세는 상한 없음).
-var dest_page_at: usize = 0;
-var dest_page_cap: u32 = 0;
-pub fn dest_pageBuf() []i32 {
-    if (dest_page_at == 0 or dest_page_cap == 0) return &[_]i32{};
-    return @as([*]i32, @ptrFromInt(dest_page_at))[0..dest_page_cap];
-}
-fn dest_pageRoom(want: u32) bool { return core.growTable(&dest_page_at, &dest_page_cap, want, @sizeOf(i32), 256); }
+pub var dest_page: core.Table(i32) = .{};
 pub var dest_n: u32 = 0;
 var dest_used: u32 = 0;
 
 pub fn destCount() u32 { return dest_n; }
-pub fn destNameOff(i: u32) u32 { return if (i < dest_n) dest_offBuf()[i] else 0; }
-pub fn destNameLen(i: u32) u32 { return if (i < dest_n) dest_lenBuf()[i] else 0; }
-pub fn destPageOf(i: u32) i32 { return if (i < dest_n) dest_pageBuf()[i] else -1; }
-pub fn destTextPtr() [*]u8 { return @ptrFromInt(if (dest_buf_at == 0) core.heapBase() else dest_buf_at); }
+pub fn destNameOff(i: u32) u32 { return if (i < dest_n) dest_off.all()[i] else 0; }
+pub fn destNameLen(i: u32) u32 { return if (i < dest_n) dest_len.all()[i] else 0; }
+pub fn destPageOf(i: u32) i32 { return if (i < dest_n) dest_page.all()[i] else -1; }
+pub fn destTextPtr() [*]u8 { return @ptrFromInt(if (dest_buf.at == 0) core.heapBase() else dest_buf.at); }
 
 fn addDest(name: []const u8, page: i32) void {
     if (name.len == 0 or name.len > 255) return;
-    if (!dest_offRoom(dest_n + 1) or !dest_lenRoom(dest_n + 1) or !dest_pageRoom(dest_n + 1)) return;
-    _ = dest_bufRoom(dest_used + @as(u32, @intCast(name.len)) + 64);
-    if (dest_used + name.len > dest_buf().len) return;
-    dest_offBuf()[dest_n] = dest_used;
-    dest_lenBuf()[dest_n] = @intCast(name.len);
-    dest_pageBuf()[dest_n] = page;
-    @memcpy(dest_buf()[dest_used..][0..name.len], name);
+    if (!dest_off.room(dest_n + 1, 256) or !dest_len.room(dest_n + 1, 256) or !dest_page.room(dest_n + 1, 256)) return;
+    _ = dest_buf.room(dest_used + @as(u32, @intCast(name.len)) + 64, 32768);
+    if (dest_used + name.len > dest_buf.all().len) return;
+    dest_off.all()[dest_n] = dest_used;
+    dest_len.all()[dest_n] = @intCast(name.len);
+    dest_page.all()[dest_n] = page;
+    @memcpy(dest_buf.all()[dest_used..][0..name.len], name);
     dest_used += @intCast(name.len);
     dest_n += 1;
 }

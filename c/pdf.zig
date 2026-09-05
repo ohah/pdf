@@ -190,9 +190,7 @@ pub var pages_obj: u32 = 0;
 /// Catalog 객체 번호 — 만들 때 /AcroForm 을 손대는 데 쓴다
 pub var doc_root: u32 = 0;
 /// 사용자가 고른 순서
-var pick_at: usize = 0;
-var pick_cap: u32 = 0;
-pub fn pick() []u32 { return u32sAt(pick_at, pick_cap); }
+pub var pick: Table(u32) = .{};
 pub var pick_n: usize = 0;
 pub var rotate: i32 = 0;
 /// 워터마크 문구 (라틴 문자만 — 표준 글꼴을 쓰므로 한글은 넣을 수 없다)
@@ -1158,11 +1156,11 @@ pub export fn parse(len: usize) u32 {
     zoneShrink(pg_at + @as(usize, page_count) * 4);
     {
         // 고른 쪽은 같은 쪽을 두 번 넣을 수도 있어 넉넉히 잡는다
-        pick_cap = page_count * 2 + 64;
-        pick_at = zoneAlloc(@as(usize, pick_cap) * 4) orelse return 0;
+        pick.cap = page_count * 2 + 64;
+        pick.at = zoneAlloc(@as(usize, pick.cap) * 4) orelse return 0;
         pick_n = 0;
-        rot_at = zoneAlloc(@as(usize, page_count) * 2 + 2) orelse return 0;
-        rot_cap = page_count;
+        rot.at = zoneAlloc(@as(usize, page_count) * 2 + 2) orelse return 0;
+        rot.cap = page_count;
         clearPageRotate();
         lbl_off_at = zoneAlloc(@as(usize, page_count) * 4 + 4) orelse return 0;
         lbl_len_at = zoneAlloc(@as(usize, page_count) + 4) orelse return 0;
@@ -1190,31 +1188,26 @@ pub export fn parse(len: usize) u32 {
 
 export fn clearPick() void { pick_n = 0; }
 export fn addPick(i: u32) void {
-    if (pick_n < pick_cap and i < page_count) { pick()[pick_n] = i; pick_n += 1; }
+    if (pick_n < pick.cap and i < page_count) { pick.all()[pick_n] = i; pick_n += 1; }
 }
 export fn setRotate(deg: i32) void { rotate = deg; }
 
 /// 쪽마다 따로 돌리기. -1 은 "정하지 않음" 이라 전체 회전을 따른다.
-var rot_at: usize = 0;
-var rot_cap: u32 = 0;
-fn rot_each() []i16 {
-    if (rot_at == 0 or rot_cap == 0) return &[_]i16{};
-    return @as([*]i16, @ptrFromInt(rot_at))[0..rot_cap];
-}
+var rot: Table(i16) = .{};
 export fn clearPageRotate() void {
-    for (rot_each()) |*r| r.* = -1;
+    for (rot.all()) |*r| r.* = -1;
 }
 export fn setPageRotate(page: u32, deg: i32) void {
-    if (page >= rot_cap) return;
+    if (page >= rot.cap) return;
     const d = @mod(deg, 360);
-    rot_each()[page] = @intCast(if (d < 0) d + 360 else d);
+    rot.all()[page] = @intCast(if (d < 0) d + 360 else d);
 }
 pub fn rotOf(page: u32) i32 {
-    if (page < rot_cap and rot_each()[page] >= 0) return rot_each()[page];
+    if (page < rot.cap and rot.all()[page] >= 0) return rot.all()[page];
     return rotate;
 }
 pub fn anyPageRotate() bool {
-    for (rot_each()) |r| if (r >= 0) return true;
+    for (rot.all()) |r| if (r >= 0) return true;
     return false;
 }
 
@@ -1624,13 +1617,8 @@ const CSpace = struct {
 // /ICCBased 는 "이 값은 이 프로파일 기준이다" 라고 알려 준다. 그걸 안 쓰고
 // 단순식으로 넘기면 색이 어긋난다 — 마젠타 자리에 형광 마젠타가 찍혔다.
 const icc = @import("pdficc.zig");
-var icc_profs_at: usize = 0;
-var icc_profs_cap: u32 = 0;
+var icc_profs: Table(icc.Profile) = .{};
 var icc_n: u32 = 0;
-fn iccBuf() []icc.Profile {
-    if (icc_profs_at == 0 or icc_profs_cap == 0) return &[_]icc.Profile{};
-    return @as([*]icc.Profile, @ptrFromInt(icc_profs_at))[0..icc_profs_cap];
-}
 /// 프로파일 바이트를 담아 두는 자리 — 스트림 임시 자리는 곧 덮이므로 옮긴다
 var icc_data_at: usize = 0;
 var icc_data_cap: u32 = 0;
@@ -1639,7 +1627,7 @@ var icc_data_used: u32 = 0;
 /// 프로파일 스트림을 읽어 담는다. 담은 번호, 못 읽으면 -1.
 fn addIcc(bytes: []const u8) i32 {
     if (bytes.len < 132 or bytes.len > 8 * 1024 * 1024) return -1;
-    if (!growTable(&icc_profs_at, &icc_profs_cap, icc_n + 1, @sizeOf(icc.Profile), 4)) return -1;
+    if (!growTable(&icc_profs.at, &icc_profs.cap, icc_n + 1, @sizeOf(icc.Profile), 4)) return -1;
     const need = icc_data_used + @as(u32, @intCast(bytes.len));
     if (!growTable(&icc_data_at, &icc_data_cap, need, 1, 65536)) return -1;
     const dst = @as([*]u8, @ptrFromInt(icc_data_at))[0..icc_data_cap];
@@ -1648,7 +1636,7 @@ fn addIcc(bytes: []const u8) i32 {
     icc_data_used = need;
     const p = icc.parse(mine);
     if (p.kind == .none) return -1;
-    iccBuf()[icc_n] = p;
+    icc_profs.all()[icc_n] = p;
     icc_n += 1;
     return @intCast(icc_n - 1);
 }
@@ -1656,7 +1644,7 @@ fn addIcc(bytes: []const u8) i32 {
 /// 성분 값을 프로파일로 옮긴다. 못 하면 false.
 fn iccToRgb(ix: i32, in: []const f32, out: *[3]f32) bool {
     if (ix < 0 or @as(u32, @intCast(ix)) >= icc_n) return false;
-    return icc.toRgb(&iccBuf()[@intCast(ix)], in, out);
+    return icc.toRgb(&icc_profs.all()[@intCast(ix)], in, out);
 }
 /// 이름 붙은 색 공간. 필요한 만큼 늘어난다(세는 상한 없음).
 var cspaces: Table(CSpace) = .{};
@@ -4327,12 +4315,7 @@ const NoteT = struct {
     obj: u32 = 0,
 };
 /// 사용자가 더한 것 — 세는 상한은 없다(자리잡개에서 늘어난다)
-var notes_at: usize = 0;
-var notes_cap: u32 = 0;
-pub fn notes() []NoteT {
-    if (notes_at == 0 or notes_cap == 0) return &[_]NoteT{};
-    return @as([*]NoteT, @ptrFromInt(notes_at))[0..notes_cap];
-}
+pub var notes: Table(NoteT) = .{};
 pub var note_n: u32 = 0;
 pub var note_buf: [64 * 1024]u8 = undefined;
 var note_used: u32 = 0;
@@ -4343,21 +4326,21 @@ export fn clearNotes() void { note_n = 0; note_used = 0; note_pt_n = 0; }
 export fn addNote(kind: u32, page: u32, x0: f32, y0: f32, x1: f32, y1: f32,
     r: f32, g: f32, b: f32) u32
 {
-    if (!growTable(&notes_at, &notes_cap, note_n, @sizeOf(NoteT), 64)) return 0;
-    notes()[note_n] = .{
+    if (!growTable(&notes.at, &notes.cap, note_n, @sizeOf(NoteT), 64)) return 0;
+    notes.all()[note_n] = .{
         .kind = @intCast(@min(kind, 6)), .page = page,
         .rect = .{ @min(x0, x1), @min(y0, y1), @max(x0, x1), @max(y0, y1) },
         .col = .{ @max(0, @min(1, r)), @max(0, @min(1, g)), @max(0, @min(1, b)) },
         .off = note_used, .len = 0, .pts = 0, .obj = 0,
     };
-    if (notes()[note_n].kind == 6) notes()[note_n].off = note_pt_n;
+    if (notes.all()[note_n].kind == 6) notes.all()[note_n].off = note_pt_n;
     note_n += 1;
     return 1;
 }
 /// 메모 글 한 글자 (utf-8 로 담는다)
 export fn addNoteChar(c: u32) void {
     if (note_n == 0) return;
-    const t = &notes()[note_n - 1];
+    const t = &notes.all()[note_n - 1];
     if (c < 0x80) {
         if (note_used + 1 > note_buf.len) return;
         note_buf[note_used] = @intCast(c);
@@ -4384,12 +4367,12 @@ export fn addNotePoint(x: f32, y: f32) void {
     note_pts[note_pt_n] = x;
     note_pts[note_pt_n + 1] = y;
     note_pt_n += 2;
-    notes()[note_n - 1].pts += 1;
+    notes.all()[note_n - 1].pts += 1;
 }
 
 pub fn notesOnPage(page: u32) bool {
     var i: u32 = 0;
-    while (i < note_n) : (i += 1) if (notes()[i].page == page) return true;
+    while (i < note_n) : (i += 1) if (notes.all()[i].page == page) return true;
     return false;
 }
 
@@ -4525,12 +4508,7 @@ const NewFieldT = struct {
     obj: u32,
 };
 /// 사용자가 더한 것 — 세는 상한은 없다(자리잡개에서 늘어난다)
-var newf_at: usize = 0;
-var newf_cap: u32 = 0;
-pub fn newf() []NewFieldT {
-    if (newf_at == 0 or newf_cap == 0) return &[_]NewFieldT{};
-    return @as([*]NewFieldT, @ptrFromInt(newf_at))[0..newf_cap];
-}
+pub var newf: Table(NewFieldT) = .{};
 pub var newf_n: u32 = 0;
 pub var newf_buf: [16 * 1024]u8 = undefined;
 var newf_used: u32 = 0;
@@ -4541,7 +4519,7 @@ export fn clearNewFields() void {
 }
 
 export fn addNewField(page: u32, kind: u32, x0: f32, y0: f32, x1: f32, y1: f32) u32 {
-    if (!growTable(&newf_at, &newf_cap, newf_n, @sizeOf(NewFieldT), 32)) return 0;
+    if (!growTable(&newf.at, &newf.cap, newf_n, @sizeOf(NewFieldT), 32)) return 0;
     // 없는 쪽에 달라고 하면 그냥 안 단다. 예전에는 쪽 표가 [4096] 고정이라
     // 빈 자리(0)를 읽었지만, 지금은 그 뒤가 다른 표라 엉뚱한 번호를 집는다.
     if (page >= page_count) return 0;
@@ -4550,7 +4528,7 @@ export fn addNewField(page: u32, kind: u32, x0: f32, y0: f32, x1: f32, y1: f32) 
     const lo_y = @min(y0, y1);
     const hi_y = @max(y0, y1);
     if (!(hi_x - lo_x > 1) or !(hi_y - lo_y > 1)) return 0;
-    newf()[newf_n] = .{
+    newf.all()[newf_n] = .{
         .page = page, .kind = @intCast(@min(kind, 1)),
         .rect = .{ lo_x, lo_y, hi_x, hi_y },
         .off = newf_used, .len = 0, .obj = 0,
@@ -4562,7 +4540,7 @@ export fn addNewField(page: u32, kind: u32, x0: f32, y0: f32, x1: f32, y1: f32) 
 /// 방금 만든 칸의 이름에 글자 하나를 잇는다 (utf-8 로 담는다).
 export fn addNewFieldChar(c: u32) void {
     if (newf_n == 0) return;
-    const f = &newf()[newf_n - 1];
+    const f = &newf.all()[newf_n - 1];
     var tmp: [4]u8 = undefined;
     var n: u32 = 0;
     if (c < 0x80) {
@@ -5756,61 +5734,35 @@ fn collectInfo(b: []const u8) void {
 // ===== 링크와 목차 =====
 
 /// 쪽 하나의 링크. 세는 상한은 없다 — 필요한 만큼 늘어난다.
-pub var link_at: usize = 0;
-pub var link_cap: u32 = 0;
-pub fn links() []Link {
-    if (link_at == 0 or link_cap == 0) return &[_]Link{};
-    return @as([*]Link, @ptrFromInt(link_at))[0..link_cap];
-}
+pub var link: Table(Link) = .{};
 pub const Link = struct { rect: [4]f32, off: u32, len: u32, page: i32 };
 
 pub var link_n: u32 = 0;
 /// link_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
-var link_buf_at: usize = 0;
-var link_buf_cap: u32 = 0;
-pub fn link_buf() []u8 {
-    if (link_buf_at == 0 or link_buf_cap == 0) return &[_]u8{};
-    return @as([*]u8, @ptrFromInt(link_buf_at))[0..link_buf_cap];
-}
-pub fn link_bufRoom(want: u32) bool {
-    return growTable(&link_buf_at, &link_buf_cap, want, 1, 16384);
-}
+pub var link_buf: Table(u8) = .{};
 pub var link_buf_n: u32 = 0;
 
 export fn linkCount() u32 { return link_n; }
-export fn linkRect(i: u32, k: u32) f32 { return if (i < link_n and k < 4) links()[i].rect[k] else 0; }
-export fn linkOff(i: u32) u32 { return if (i < link_n) links()[i].off else 0; }
-export fn linkLen(i: u32) u32 { return if (i < link_n) links()[i].len else 0; }
-export fn linkPage(i: u32) i32 { return if (i < link_n) links()[i].page else -1; }
-export fn linkTextPtr() [*]u8 { return @ptrFromInt(if (link_buf_at == 0) heapBase() else link_buf_at); }
+export fn linkRect(i: u32, k: u32) f32 { return if (i < link_n and k < 4) link.all()[i].rect[k] else 0; }
+export fn linkOff(i: u32) u32 { return if (i < link_n) link.all()[i].off else 0; }
+export fn linkLen(i: u32) u32 { return if (i < link_n) link.all()[i].len else 0; }
+export fn linkPage(i: u32) i32 { return if (i < link_n) link.all()[i].page else -1; }
+export fn linkTextPtr() [*]u8 { return @ptrFromInt(if (link_buf.at == 0) heapBase() else link_buf.at); }
 
 /// 목차 줄 수. 세는 상한은 없다.
-var mark_at: usize = 0;
-var mark_cap: u32 = 0;
+pub var mark: Table(Bookmark) = .{};
 const Bookmark = struct { depth: u8, off: u32, len: u32, page: i32 };
-pub fn marks() []Bookmark {
-    if (mark_at == 0 or mark_cap == 0) return &[_]Bookmark{};
-    return @as([*]Bookmark, @ptrFromInt(mark_at))[0..mark_cap];
-}
 pub var mark_n: u32 = 0;
 /// mark_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
-var mark_buf_at: usize = 0;
-var mark_buf_cap: u32 = 0;
-pub fn mark_buf() []u8 {
-    if (mark_buf_at == 0 or mark_buf_cap == 0) return &[_]u8{};
-    return @as([*]u8, @ptrFromInt(mark_buf_at))[0..mark_buf_cap];
-}
-pub fn mark_bufRoom(want: u32) bool {
-    return growTable(&mark_buf_at, &mark_buf_cap, want, 1, 32768);
-}
+pub var mark_buf: Table(u8) = .{};
 pub var mark_buf_n: u32 = 0;
 
 export fn outlineCount() u32 { return mark_n; }
-export fn outlineDepth(i: u32) u32 { return if (i < mark_n) marks()[i].depth else 0; }
-export fn outlineOff(i: u32) u32 { return if (i < mark_n) marks()[i].off else 0; }
-export fn outlineLen(i: u32) u32 { return if (i < mark_n) marks()[i].len else 0; }
-export fn outlinePage(i: u32) i32 { return if (i < mark_n) marks()[i].page else -1; }
-export fn outlineTextPtr() [*]u8 { return @ptrFromInt(if (mark_buf_at == 0) heapBase() else mark_buf_at); }
+export fn outlineDepth(i: u32) u32 { return if (i < mark_n) mark.all()[i].depth else 0; }
+export fn outlineOff(i: u32) u32 { return if (i < mark_n) mark.all()[i].off else 0; }
+export fn outlineLen(i: u32) u32 { return if (i < mark_n) mark.all()[i].len else 0; }
+export fn outlinePage(i: u32) i32 { return if (i < mark_n) mark.all()[i].page else -1; }
+export fn outlineTextPtr() [*]u8 { return @ptrFromInt(if (mark_buf.at == 0) heapBase() else mark_buf.at); }
 
 /// 쪽 객체 번호를 쪽 차례로 바꾼다.
 pub fn pageIndexOf(obj: u32) i32 {
@@ -5992,40 +5944,27 @@ const StructNode = struct {
     alt_len: u16 = 0,
 };
 /// 태그 구조 나무의 마디. 세는 상한은 없다.
-var st_at: usize = 0;
-var st_cap: u32 = 0;
-fn st_nodes() []StructNode {
-    if (st_at == 0 or st_cap == 0) return &[_]StructNode{};
-    return @as([*]StructNode, @ptrFromInt(st_at))[0..st_cap];
-}
+var stn: Table(StructNode) = .{};
 var st_n: u32 = 0;
 /// st_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
-var st_buf_at: usize = 0;
-var st_buf_cap: u32 = 0;
-fn st_buf() []u8 {
-    if (st_buf_at == 0 or st_buf_cap == 0) return &[_]u8{};
-    return @as([*]u8, @ptrFromInt(st_buf_at))[0..st_buf_cap];
-}
-fn st_bufRoom(want: u32) bool {
-    return growTable(&st_buf_at, &st_buf_cap, want, 1, 32768);
-}
+var st_buf: Table(u8) = .{};
 var st_used: u32 = 0;
 
 export fn structCount() u32 { return st_n; }
-export fn structDepth(i: u32) u32 { return if (i < st_n) st_nodes()[i].depth else 0; }
-export fn structPageOf(i: u32) i32 { return if (i < st_n) st_nodes()[i].page else -1; }
-export fn structMcid(i: u32) i32 { return if (i < st_n) st_nodes()[i].mcid else -1; }
-export fn structRoleOff(i: u32) u32 { return if (i < st_n) st_nodes()[i].role_off else 0; }
-export fn structRoleLen(i: u32) u32 { return if (i < st_n) st_nodes()[i].role_len else 0; }
-export fn structAltOff(i: u32) u32 { return if (i < st_n) st_nodes()[i].alt_off else 0; }
-export fn structAltLen(i: u32) u32 { return if (i < st_n) st_nodes()[i].alt_len else 0; }
-export fn structTextPtr() [*]u8 { return @ptrFromInt(if (st_buf_at == 0) heapBase() else st_buf_at); }
+export fn structDepth(i: u32) u32 { return if (i < st_n) stn.all()[i].depth else 0; }
+export fn structPageOf(i: u32) i32 { return if (i < st_n) stn.all()[i].page else -1; }
+export fn structMcid(i: u32) i32 { return if (i < st_n) stn.all()[i].mcid else -1; }
+export fn structRoleOff(i: u32) u32 { return if (i < st_n) stn.all()[i].role_off else 0; }
+export fn structRoleLen(i: u32) u32 { return if (i < st_n) stn.all()[i].role_len else 0; }
+export fn structAltOff(i: u32) u32 { return if (i < st_n) stn.all()[i].alt_off else 0; }
+export fn structAltLen(i: u32) u32 { return if (i < st_n) stn.all()[i].alt_len else 0; }
+export fn structTextPtr() [*]u8 { return @ptrFromInt(if (st_buf.at == 0) heapBase() else st_buf.at); }
 
 fn stPut(txt: []const u8) struct { off: u32, len: u16 } {
-    _ = st_bufRoom(st_used + @as(u32, @intCast(txt.len)) + 64);
-    if (txt.len == 0 or st_used + txt.len > st_buf().len or txt.len > 65535) return .{ .off = 0, .len = 0 };
+    _ = st_buf.room(st_used + @as(u32, @intCast(txt.len)) + 64, 32768);
+    if (txt.len == 0 or st_used + txt.len > st_buf.all().len or txt.len > 65535) return .{ .off = 0, .len = 0 };
     const off = st_used;
-    @memcpy(st_buf()[off..][0..txt.len], txt);
+    @memcpy(st_buf.all()[off..][0..txt.len], txt);
     st_used += @intCast(txt.len);
     return .{ .off = off, .len = @intCast(txt.len) };
 }
@@ -6033,7 +5972,7 @@ fn stPut(txt: []const u8) struct { off: u32, len: u16 } {
 /// 구조 요소 하나와 그 아래를 훑는다. /K 는 숫자(MCID)·딕셔너리·배열 셋 다 온다.
 fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) void {
     if (depth > 32) return;
-    if (!growTable(&st_at, &st_cap, st_n, @sizeOf(StructNode), 256)) return;
+    if (!growTable(&stn.at, &stn.cap, st_n, @sizeOf(StructNode), 256)) return;
     var node: StructNode = .{ .depth = depth, .page = page_hint };
 
     var tmp: [64]u8 = undefined;
@@ -6050,8 +5989,8 @@ fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) vo
     }
     // 대체 글(/Alt) — 그림에 붙는 설명이다
     if (keyPos(b, ob, oe, "/Alt")) |aa| {
-        _ = st_bufRoom(st_used + 8192);
-        const n2 = copyPdfText(b, aa + 4, oe, st_buf(), st_used);
+        _ = st_buf.room(st_used + 8192, 32768);
+        const n2 = copyPdfText(b, aa + 4, oe, st_buf.all(), st_used);
         if (n2 > 0) {
             node.alt_off = st_used;
             node.alt_len = @intCast(n2);
@@ -6067,7 +6006,7 @@ fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) vo
     }
     node.page = page;
     const me = st_n;
-    st_nodes()[st_n] = node;
+    stn.all()[st_n] = node;
     st_n += 1;
 
     // 아래를 훑는다
@@ -6086,7 +6025,7 @@ fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) vo
         if (is_ref) {
             if (findObj(b, v)) |kb| walkStruct(b, kb, objDictEnd(b, kb), depth + 1, page);
         } else {
-            st_nodes()[me].mcid = @intCast(v);
+            stn.all()[me].mcid = @intCast(v);
         }
         return;
     }
@@ -6115,9 +6054,9 @@ fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) vo
             } else {
                 // 그냥 MCID — 잎으로 담는다
                 var leaf: StructNode = .{ .depth = depth + 1, .page = page, .mcid = @intCast(v) };
-                leaf.role_off = st_nodes()[me].role_off;
-                leaf.role_len = st_nodes()[me].role_len;
-                st_nodes()[st_n] = leaf;
+                leaf.role_off = stn.all()[me].role_off;
+                leaf.role_len = stn.all()[me].role_len;
+                stn.all()[st_n] = leaf;
                 st_n += 1;
             }
             continue;
@@ -6156,10 +6095,6 @@ const collectDests = pdfdest.collectDests;
 const collectViewPrefs = pdfdest.collectViewPrefs;
 const collectXmp = pdfdest.collectXmp;
 const destArray = pdfdest.destArray;
-const dest_buf = pdfdest.dest_buf;
-const dest_lenBuf = pdfdest.dest_lenBuf;
-const dest_offBuf = pdfdest.dest_offBuf;
-const dest_pageBuf = pdfdest.dest_pageBuf;
 const findKeyDest = pdfdest.findKeyDest;
 export fn destCount() u32 { return pdfdest.destCount(); }
 export fn destNameOff(i: u32) u32 { return pdfdest.destNameOff(i); }
@@ -6258,13 +6193,13 @@ fn readDestFull(b: []const u8, at: usize, to: usize) void {
 fn openByName(name: []const u8) void {
     var i: u32 = 0;
     while (i < pdfdest.dest_n) : (i += 1) {
-        const off = dest_offBuf()[i];
-        const len = dest_lenBuf()[i];
+        const off = pdfdest.dest_off.all()[i];
+        const len = pdfdest.dest_len.all()[i];
         if (len != name.len) continue;
-        const buf = dest_buf();
+        const buf = pdfdest.dest_buf.all();
         if (off + len > buf.len) continue;
         if (!std_mem_eq(buf[off..][0..len], name)) continue;
-        open_page = dest_pageBuf()[i];
+        open_page = pdfdest.dest_page.all()[i];
         open_kind = 2;
         open_x = nan();
         open_y = nan();
@@ -6357,19 +6292,11 @@ var att_name_off: Table(u32) = .{};
 var att_name_len: Table(u32) = .{};
 var att_n: u32 = 0;
 /// att_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
-var att_buf_at: usize = 0;
-var att_buf_cap: u32 = 0;
-fn att_buf() []u8 {
-    if (att_buf_at == 0 or att_buf_cap == 0) return &[_]u8{};
-    return @as([*]u8, @ptrFromInt(att_buf_at))[0..att_buf_cap];
-}
-fn att_bufRoom(want: u32) bool {
-    return growTable(&att_buf_at, &att_buf_cap, want, 1, 8192);
-}
+var att_buf: Table(u8) = .{};
 var att_used: u32 = 0;
 
 export fn attCount() u32 { return att_n; }
-export fn attTextPtr() usize { return (if (att_buf_at == 0) heapBase() else att_buf_at); }
+export fn attTextPtr() usize { return (if (att_buf.at == 0) heapBase() else att_buf.at); }
 export fn attNameOff(i: u32) u32 { return if (i < att_n) att_name_off.all()[i] else 0; }
 export fn attNameLen(i: u32) u32 { return if (i < att_n) att_name_len.all()[i] else 0; }
 
@@ -6420,8 +6347,8 @@ fn walkAttAt(b: []const u8, ob: usize, oe: usize, depth: u8) void {
         while (q < end and attRoom(att_n + 1) and guard < 4096) : (guard += 1) {
             while (q < end and b[q] != '(' and b[q] != '<') q += 1;
             if (q >= end) break;
-            _ = att_bufRoom(att_used + 4096);
-            const nm = sigPutStrTo(b, q, end, att_buf(), &att_used);
+            _ = att_buf.room(att_used + 4096, 8192);
+            const nm = sigPutStrTo(b, q, end, att_buf.all(), &att_used);
             // 이름 뒤의 값이 파일 명세다
             q = skipVal(b, q, end);
             while (q < end and isSpace(b[q])) q += 1;
@@ -6493,19 +6420,14 @@ fn checkXfa(b: []const u8) void {
 // 스트림 하나이거나, [(name) 스트림 (name) 스트림 …] 배열이다. 배열이면
 // template·datasets 같은 조각이 이름마다 따로 들어 있어 이어 붙여야 한다.
 // 여기서는 XML 을 통째로 꺼내 주고, 뜯어 그리는 것은 xfa.ts 가 한다.
-var xfa_at: usize = 0;
-var xfa_cap: u32 = 0;
+var xfa: Table(u8) = .{};
 var xfa_used: u32 = 0;
-fn xfaBuf() []u8 {
-    if (xfa_at == 0 or xfa_cap == 0) return &[_]u8{};
-    return @as([*]u8, @ptrFromInt(xfa_at))[0..xfa_cap];
-}
 export fn xfaXmlLen() u32 { return xfa_used; }
-export fn xfaXmlPtr() usize { return if (xfa_at == 0) heapBase() else xfa_at; }
+export fn xfaXmlPtr() usize { return if (xfa.at == 0) heapBase() else xfa.at; }
 
 fn xfaAppend(part: []const u8) void {
-    if (!growTable(&xfa_at, &xfa_cap, xfa_used + @as(u32, @intCast(part.len)) + 2, 1, 65536)) return;
-    const buf = xfaBuf();
+    if (!growTable(&xfa.at, &xfa.cap, xfa_used + @as(u32, @intCast(part.len)) + 2, 1, 65536)) return;
+    const buf = xfa.all();
     @memcpy(buf[xfa_used..][0..part.len], part);
     xfa_used += @intCast(part.len);
     buf[xfa_used] = '\n';

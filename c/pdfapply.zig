@@ -42,12 +42,7 @@ const LabelT = struct {
     mobj: u32 = 0,
 };
 /// 사용자가 더한 것 — 세는 상한은 없다(자리잡개에서 늘어난다)
-var labs_at: usize = 0;
-var labs_cap: u32 = 0;
-fn labs() []LabelT {
-    if (labs_at == 0 or labs_cap == 0) return &[_]LabelT{};
-    return @as([*]LabelT, @ptrFromInt(labs_at))[0..labs_cap];
-}
+var labs: core.Table(LabelT) = .{};
 var lab_n: u32 = 0;
 var lab_cp: [4096]u32 = undefined;
 var lab_cn: u32 = 0;
@@ -55,8 +50,8 @@ var lab_body: [16384]u8 = undefined;
 
 pub fn clearLabels() void { lab_n = 0; lab_cn = 0; }
 pub fn addLabel(page: u32, x: f32, y: f32, size: f32, r: f32, g: f32, bb: f32) u32 {
-    if (!core.growTable(&labs_at, &labs_cap, lab_n, @sizeOf(LabelT), 32)) return 0;
-    labs()[lab_n] = .{
+    if (!core.growTable(&labs.at, &labs.cap, lab_n, @sizeOf(LabelT), 32)) return 0;
+    labs.all()[lab_n] = .{
         .page = page, .x = x, .y = y, .size = size,
         .col = .{ r, g, bb }, .off = @intCast(lab_cn), .n = 0,
     };
@@ -67,7 +62,7 @@ pub fn addLabel(page: u32, x: f32, y: f32, size: f32, r: f32, g: f32, bb: f32) u
 pub fn setLabelMask(w: u32, h: u32, len: u32, pw: f32, ph: f32) u32 {
     if (lab_n == 0) return 0;
     const at = core.maskAlloc(len, w, h) orelse return 0;
-    const L = &labs()[lab_n - 1];
+    const L = &labs.all()[lab_n - 1];
     L.mw = w;
     L.mh = h;
     L.moff = at;
@@ -101,12 +96,12 @@ pub fn addLabelChar(c: u32) void {
     if (lab_n == 0 or lab_cn >= lab_cp.len) return;
     lab_cp[lab_cn] = c;
     lab_cn += 1;
-    labs()[lab_n - 1].n += 1;
+    labs.all()[lab_n - 1].n += 1;
 }
 
 fn pageHasLabels(page: u32) bool {
     var i: u32 = 0;
-    while (i < lab_n) : (i += 1) if (labs()[i].page == page and labs()[i].n > 0) return true;
+    while (i < lab_n) : (i += 1) if (labs.all()[i].page == page and labs.all()[i].n > 0) return true;
     return false;
 }
 
@@ -124,7 +119,7 @@ fn buildLabelStream(page: u32) usize {
     bl += 2;
     var li: u32 = 0;
     while (li < lab_n) : (li += 1) {
-        const L = labs()[li];
+        const L = labs.all()[li];
         if (L.page != page or L.n == 0) continue;
         if (bl + 512 > dst.len) break;
 
@@ -381,7 +376,7 @@ pub fn apply() usize {
     var i: usize = 0;
     while (i < core.pick_n) : (i += 1) {
         core.appendStr(&pos, " ");
-        core.appendNum(&pos, core.page_objs()[core.pick()[i]]);
+        core.appendNum(&pos, core.page_objs()[core.pick.all()[i]]);
         core.appendStr(&pos, " 0 R");
     }
     core.appendStr(&pos, " ] >>\nendobj\n");
@@ -448,11 +443,11 @@ pub fn apply() usize {
         }.f;
         var mi: u32 = 0;
         while (mi < lab_n) : (mi += 1) {
-            if (labs()[mi].mlen == 0) continue;
-            labs()[mi].mobj = mask_next;
+            if (labs.all()[mi].mlen == 0) continue;
+            labs.all()[mi].mobj = mask_next;
             mask_next += 1;
             any_mask = true;
-            writeMask(labs()[mi].mobj, labs()[mi].mw, labs()[mi].mh, labs()[mi].moff, labs()[mi].mlen,
+            writeMask(labs.all()[mi].mobj, labs.all()[mi].mw, labs.all()[mi].mh, labs.all()[mi].moff, labs.all()[mi].mlen,
                 new_offsets, new_nums, &new_n, &pos);
         }
         if (wm_mlen > 0) {
@@ -471,7 +466,7 @@ pub fn apply() usize {
         var use_doc = false;
         var doc_font: u8 = 0;
         if (!core.wmIsAscii()) {
-            _ = core.renderPage(core.pick()[0]);
+            _ = core.renderPage(core.pick.all()[0]);
             var fi: u8 = 0;
             outer: while (fi < core.font_n) : (fi += 1) {
                 if (core.fonts.all()[fi].n == 0 or core.fonts.all()[fi].name_len == 0) continue;
@@ -484,7 +479,7 @@ pub fn apply() usize {
                 break;
             }
         } else {
-            _ = core.renderPage(core.pick()[0]);
+            _ = core.renderPage(core.pick.all()[0]);
         }
 
         // 쪽 한가운데에 비스듬히, 쪽 크기에 맞춰 얹는다
@@ -595,7 +590,7 @@ pub fn apply() usize {
     if (has_notes) {
         var ni: u32 = 0;
         while (ni < core.note_n and new_n + 3 < new_nums.len and core.outRoom(pos, 8192)) : (ni += 1) {
-            const t = &core.notes()[ni];
+            const t = &core.notes.all()[ni];
             const w = t.rect[2] - t.rect[0];
             const h = t.rect[3] - t.rect[1];
             if (w < 1 or h < 1) continue;
@@ -869,7 +864,7 @@ pub fn apply() usize {
         core.appendStr(&pos, " 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\nendobj\n");
         var fi: u32 = 0;
         while (fi < core.newf_n and new_n + 2 < new_nums.len and core.outRoom(pos, 2048)) : (fi += 1) {
-            const f = &core.newf()[fi];
+            const f = &core.newf.all()[fi];
             if (f.page >= core.page_count) continue;
             f.obj = mask_next;
             mask_next += 1;
@@ -907,15 +902,15 @@ pub fn apply() usize {
     if (core.rotate != 0 or overlay or core.anyPageRotate() or has_notes or core.anyFieldStruct()) {
         i = 0;
         while (i < core.pick_n) : (i += 1) {
-            const obj = core.page_objs()[core.pick()[i]];
+            const obj = core.page_objs()[core.pick.all()[i]];
             const body = core.findObj(b, obj) orelse continue;
             const end = core.find(b, "endobj", body) orelse b.len;
             // 이 쪽에 라벨이 있으면 그릴 스트림을 먼저 적어 둔다.
             // 쪽마다 자리가 다르니 스트림도 쪽마다 하나씩 나간다.
             var my_lab: u32 = 0;
-            if (lab_n > 0 and pageHasLabels(core.pick()[i]) and new_n + 2 < new_nums.len) {
-                _ = core.renderPage(core.pick()[i]);
-                const bl2 = buildLabelStream(core.pick()[i]);
+            if (lab_n > 0 and pageHasLabels(core.pick.all()[i]) and new_n + 2 < new_nums.len) {
+                _ = core.renderPage(core.pick.all()[i]);
+                const bl2 = buildLabelStream(core.pick.all()[i]);
                 if (bl2 > 2) {
                     my_lab = lab_base + lab_used;
                     lab_used += 1;
@@ -986,7 +981,7 @@ pub fn apply() usize {
                 pos += 1;
                 cq2 += 1;
             }
-            if ((has_notes and core.notesOnPage(core.pick()[i])) or core.anyFieldStruct()) {
+            if ((has_notes and core.notesOnPage(core.pick.all()[i])) or core.anyFieldStruct()) {
                 // 원래 있던 주석에 새로 단 것을 이어 붙인다
                 core.appendStr(&pos, " /Annots [");
                 if (core.findObj(b, obj)) |pb2| {
@@ -1015,16 +1010,16 @@ pub fn apply() usize {
                 }
                 var nk: u32 = 0;
                 while (nk < core.note_n) : (nk += 1) {
-                    if (core.notes()[nk].page != core.pick()[i] or core.notes()[nk].obj == 0) continue;
+                    if (core.notes.all()[nk].page != core.pick.all()[i] or core.notes.all()[nk].obj == 0) continue;
                     core.appendStr(&pos, " ");
-                    core.appendNum(&pos, core.notes()[nk].obj);
+                    core.appendNum(&pos, core.notes.all()[nk].obj);
                     core.appendStr(&pos, " 0 R");
                 }
                 var nf: u32 = 0;
                 while (nf < core.newf_n) : (nf += 1) {
-                    if (core.newf()[nf].page != core.pick()[i] or core.newf()[nf].obj == 0) continue;
+                    if (core.newf.all()[nf].page != core.pick.all()[i] or core.newf.all()[nf].obj == 0) continue;
                     core.appendStr(&pos, " ");
-                    core.appendNum(&pos, core.newf()[nf].obj);
+                    core.appendNum(&pos, core.newf.all()[nf].obj);
                     core.appendStr(&pos, " 0 R");
                 }
                 core.appendStr(&pos, " ]");
@@ -1043,7 +1038,7 @@ pub fn apply() usize {
                 const v: i32 = @intCast(core.readUint(b, &rp) % 360);
                 break :blk if (neg) -v else v;
             };
-            const rot_here = src_rot + core.rotOf(core.pick()[i]);
+            const rot_here = src_rot + core.rotOf(core.pick.all()[i]);
             if (@mod(rot_here, 360) != 0) {
                 core.appendStr(&pos, " /Rotate ");
                 const r = @mod(rot_here, 360);
@@ -1231,7 +1226,7 @@ pub fn apply() usize {
                     var size: f32 = 0;
                     if (pdfform.fieldLookup(b, e.obj, "/DA", 0)) |r| {
                         const da = pdfform.fldPutStr(b, r[0], r[1]);
-                        const txt = pdfform.fld_buf()[da[0]..][0..da[1]];
+                        const txt = pdfform.fld_buf.all()[da[0]..][0..da[1]];
                         if (core.findIn(txt, " Tf", 0)) |ti| {
                             var dx: usize = ti;
                             while (dx > 0 and core.isSpace(txt[dx - 1])) dx -= 1;
@@ -1436,9 +1431,9 @@ pub fn apply() usize {
                         core.appendStr(&pos, " /AcroForm << /Fields [");
                         var nf0: u32 = 0;
                         while (nf0 < core.newf_n) : (nf0 += 1) {
-                            if (core.newf()[nf0].obj == 0) continue;
+                            if (core.newf.all()[nf0].obj == 0) continue;
                             core.appendStr(&pos, " ");
-                            core.appendNum(&pos, core.newf()[nf0].obj);
+                            core.appendNum(&pos, core.newf.all()[nf0].obj);
                             core.appendStr(&pos, " 0 R");
                         }
                         core.appendStr(&pos, " ] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv ");
@@ -1504,9 +1499,9 @@ pub fn apply() usize {
                                     }
                                     var nf2: u32 = 0;
                                     while (nf2 < core.newf_n) : (nf2 += 1) {
-                                        if (core.newf()[nf2].obj == 0) continue;
+                                        if (core.newf.all()[nf2].obj == 0) continue;
                                         core.appendStr(&pos, " ");
-                                        core.appendNum(&pos, core.newf()[nf2].obj);
+                                        core.appendNum(&pos, core.newf.all()[nf2].obj);
                                         core.appendStr(&pos, " 0 R");
                                     }
                                     core.appendStr(&pos, " ]");
@@ -1617,11 +1612,11 @@ pub fn apply() usize {
                 core.appendStr(&pos, " /XObject <<");
                 var mj: u32 = 0;
                 while (mj < lab_n) : (mj += 1) {
-                    if (labs()[mj].mobj == 0) continue;
+                    if (labs.all()[mj].mobj == 0) continue;
                     core.appendStr(&pos, " /PdLb");
                     core.appendNum(&pos, mj);
                     core.appendStr(&pos, " ");
-                    core.appendNum(&pos, labs()[mj].mobj);
+                    core.appendNum(&pos, labs.all()[mj].mobj);
                     core.appendStr(&pos, " 0 R");
                 }
                 if (wm_mobj != 0) {

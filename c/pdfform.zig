@@ -17,8 +17,7 @@ const core = @import("pdf.zig");
 // 그려 둔 그림이다. 우리는 자리와 값을 꺼내 화면에 진짜 입력 칸을 얹고,
 // 만들 때 값과 겉모습을 다시 써 넣는다.
 /// 문서의 입력 칸. 세는 상한은 없다.
-var field_at: usize = 0;
-var field_cap: u32 = 0;
+var field: core.Table(FieldT) = .{};
 const FieldT = struct {
     obj: u32,
     rect: [4]f32,
@@ -44,51 +43,39 @@ const FieldT = struct {
     fmt_off: u32,
     fmt_len: u32,
 };
-fn fields() []FieldT {
-    if (field_at == 0 or field_cap == 0) return &[_]FieldT{};
-    return @as([*]FieldT, @ptrFromInt(field_at))[0..field_cap];
-}
 pub var field_n: u32 = 0;
 /// fld_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
-var fld_buf_at: usize = 0;
-var fld_buf_cap: u32 = 0;
-pub fn fld_buf() []u8 {
-    if (fld_buf_at == 0 or fld_buf_cap == 0) return &[_]u8{};
-    return @as([*]u8, @ptrFromInt(fld_buf_at))[0..fld_buf_cap];
-}
-fn fld_bufRoom(want: u32) bool {
-    return core.growTable(&fld_buf_at, &fld_buf_cap, want, 1, 65536);
-}
+pub var fld_buf: core.Table(u8) = .{};
 pub var fld_used: u32 = 0;
 
 pub fn fieldCount() u32 { return field_n; }
-pub fn fieldObj(i: u32) u32 { return if (i < field_n) fields()[i].obj else 0; }
-pub fn fieldRect(i: u32, k: u32) f32 { return if (i < field_n and k < 4) fields()[i].rect[k] else 0; }
-pub fn fieldKind(i: u32) u32 { return if (i < field_n) fields()[i].kind else 0; }
-pub fn fieldFlags(i: u32) u32 { return if (i < field_n) fields()[i].flags else 0; }
-pub fn fieldMaxLen(i: u32) u32 { return if (i < field_n) fields()[i].maxlen else 0; }
-pub fn fieldSize(i: u32) f32 { return if (i < field_n) fields()[i].size else 0; }
-pub fn fieldAlign(i: u32) u32 { return if (i < field_n) fields()[i].align_ else 0; }
-pub fn fieldCalcOff(i: u32) u32 { return if (i < field_n) fields()[i].calc_off else 0; }
-pub fn fieldCalcLen(i: u32) u32 { return if (i < field_n) fields()[i].calc_len else 0; }
-pub fn fieldFmtOff(i: u32) u32 { return if (i < field_n) fields()[i].fmt_off else 0; }
-pub fn fieldFmtLen(i: u32) u32 { return if (i < field_n) fields()[i].fmt_len else 0; }
-pub fn fieldChecked(i: u32) u32 { return if (i < field_n and fields()[i].checked) 1 else 0; }
-pub fn fieldTextPtr() [*]u8 { return @ptrFromInt(if (fld_buf_at == 0) core.heapBase() else fld_buf_at); }
-pub fn fieldNameOff(i: u32) u32 { return if (i < field_n) fields()[i].name_off else 0; }
-pub fn fieldNameLen(i: u32) u32 { return if (i < field_n) fields()[i].name_len else 0; }
-pub fn fieldValOff(i: u32) u32 { return if (i < field_n) fields()[i].val_off else 0; }
-pub fn fieldValLen(i: u32) u32 { return if (i < field_n) fields()[i].val_len else 0; }
-pub fn fieldOnOff(i: u32) u32 { return if (i < field_n) fields()[i].on_off else 0; }
-pub fn fieldOnLen(i: u32) u32 { return if (i < field_n) fields()[i].on_len else 0; }
-pub fn fieldOptsOff(i: u32) u32 { return if (i < field_n) fields()[i].opts_off else 0; }
-pub fn fieldOptsLen(i: u32) u32 { return if (i < field_n) fields()[i].opts_len else 0; }
+pub fn fieldObj(i: u32) u32 { return if (i < field_n) field.all()[i].obj else 0; }
+pub fn fieldRect(i: u32, k: u32) f32 { return if (i < field_n and k < 4) field.all()[i].rect[k] else 0; }
+pub fn fieldKind(i: u32) u32 { return if (i < field_n) field.all()[i].kind else 0; }
+pub fn fieldFlags(i: u32) u32 { return if (i < field_n) field.all()[i].flags else 0; }
+pub fn fieldMaxLen(i: u32) u32 { return if (i < field_n) field.all()[i].maxlen else 0; }
+pub fn fieldSize(i: u32) f32 { return if (i < field_n) field.all()[i].size else 0; }
+pub fn fieldAlign(i: u32) u32 { return if (i < field_n) field.all()[i].align_ else 0; }
+pub fn fieldCalcOff(i: u32) u32 { return if (i < field_n) field.all()[i].calc_off else 0; }
+pub fn fieldCalcLen(i: u32) u32 { return if (i < field_n) field.all()[i].calc_len else 0; }
+pub fn fieldFmtOff(i: u32) u32 { return if (i < field_n) field.all()[i].fmt_off else 0; }
+pub fn fieldFmtLen(i: u32) u32 { return if (i < field_n) field.all()[i].fmt_len else 0; }
+pub fn fieldChecked(i: u32) u32 { return if (i < field_n and field.all()[i].checked) 1 else 0; }
+pub fn fieldTextPtr() [*]u8 { return @ptrFromInt(if (fld_buf.at == 0) core.heapBase() else fld_buf.at); }
+pub fn fieldNameOff(i: u32) u32 { return if (i < field_n) field.all()[i].name_off else 0; }
+pub fn fieldNameLen(i: u32) u32 { return if (i < field_n) field.all()[i].name_len else 0; }
+pub fn fieldValOff(i: u32) u32 { return if (i < field_n) field.all()[i].val_off else 0; }
+pub fn fieldValLen(i: u32) u32 { return if (i < field_n) field.all()[i].val_len else 0; }
+pub fn fieldOnOff(i: u32) u32 { return if (i < field_n) field.all()[i].on_off else 0; }
+pub fn fieldOnLen(i: u32) u32 { return if (i < field_n) field.all()[i].on_len else 0; }
+pub fn fieldOptsOff(i: u32) u32 { return if (i < field_n) field.all()[i].opts_off else 0; }
+pub fn fieldOptsLen(i: u32) u32 { return if (i < field_n) field.all()[i].opts_len else 0; }
 
 fn fldPut(bytes: []const u8) [2]u32 {
-    _ = fld_bufRoom(fld_used + @as(u32, @intCast(bytes.len)) + 64);
-    const n: u32 = @intCast(@min(bytes.len, fld_buf().len - fld_used));
+    _ = fld_buf.room(fld_used + @as(u32, @intCast(bytes.len)) + 64, 65536);
+    const n: u32 = @intCast(@min(bytes.len, fld_buf.all().len - fld_used));
     if (n == 0) return .{ fld_used, 0 };
-    @memcpy(fld_buf()[fld_used..][0..n], bytes[0..n]);
+    @memcpy(fld_buf.all()[fld_used..][0..n], bytes[0..n]);
     const off = fld_used;
     fld_used += n;
     return .{ off, n };
@@ -254,15 +241,10 @@ fn fieldScript(b: []const u8, num: u32, sub: []const u8) [2]u32 {
 }
 
 /// 셈하는 차례 (/AcroForm /CO). 값을 하나 고치면 이 차례로 다시 셈한다.
-var calc_at: usize = 0;
-var calc_cap: u32 = 0;
+var calc: core.Table(u32) = .{};
 var calc_n: u32 = 0;
-fn calcBuf() []u32 {
-    if (calc_at == 0 or calc_cap == 0) return &[_]u32{};
-    return @as([*]u32, @ptrFromInt(calc_at))[0..calc_cap];
-}
 pub fn calcOrderCount() u32 { return calc_n; }
-pub fn calcOrderObj(i: u32) u32 { return if (i < calc_n) calcBuf()[i] else 0; }
+pub fn calcOrderObj(i: u32) u32 { return if (i < calc_n) calc.all()[i] else 0; }
 
 pub fn collectCalcOrder(b: []const u8) void {
     calc_n = 0;
@@ -294,8 +276,8 @@ pub fn collectCalcOrder(b: []const u8) void {
         if (q2 < end and core.isDigit(b[q2])) _ = core.readUint(b, &q2);
         while (q2 < end and core.isSpace(b[q2])) q2 += 1;
         if (q2 < end and b[q2] == 'R') q2 += 1;
-        if (!core.growTable(&calc_at, &calc_cap, calc_n + 1, 4, 16)) break;
-        calcBuf()[calc_n] = num;
+        if (!core.growTable(&calc.at, &calc.cap, calc_n + 1, 4, 16)) break;
+        calc.all()[calc_n] = num;
         calc_n += 1;
     }
 }
@@ -342,8 +324,8 @@ pub fn collectFields(b: []const u8, body: usize, end: usize) void {
         if (core.intAfter(b, ab, abe, "/F")) |fl| {
             if ((fl & 2) != 0) continue; // 숨김
         }
-        if (!core.growTable(&field_at, &field_cap, field_n, @sizeOf(FieldT), 64)) break;
-        const f = &fields()[field_n];
+        if (!core.growTable(&field.at, &field.cap, field_n, @sizeOf(FieldT), 64)) break;
+        const f = &field.all()[field_n];
         f.* = .{
             .obj = num, .rect = .{ 0, 0, 0, 0 }, .kind = 0, .flags = 0, .maxlen = 0,
             .size = 0, .align_ = 0, .name_off = 0, .name_len = 0, .val_off = 0,
@@ -408,7 +390,7 @@ pub fn collectFields(b: []const u8, body: usize, end: usize) void {
         // /DA 에서 글자 크기 — "/Helv 9 Tf 0 g"
         if (fieldLookup(b, num, "/DA", 0)) |r| {
             const da = fldPutStr(b, r[0], r[1]);
-            const txt = fld_buf()[da[0]..][0..da[1]];
+            const txt = fld_buf.all()[da[0]..][0..da[1]];
             if (core.findIn(txt, " Tf", 0)) |ti| {
                 var j: usize = ti;
                 while (j > 0 and (core.isSpace(txt[j - 1]))) j -= 1;

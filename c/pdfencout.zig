@@ -211,7 +211,7 @@ pub fn compact() usize {
 
     // 고른 쪽과 그 아래 딸린 것들만 표시한다
     var i: usize = 0;
-    while (i < core.pick_n) : (i += 1) core.markReach(b, core.page_objs()[core.pick()[i]], 0);
+    while (i < core.pick_n) : (i += 1) core.markReach(b, core.page_objs()[core.pick.all()[i]], 0);
 
     var pos: usize = 0;
     core.appendStr(&pos, "%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
@@ -301,7 +301,7 @@ pub fn compact() usize {
     i = 0;
     while (i < core.pick_n) : (i += 1) {
         core.appendStr(&pos, " ");
-        core.appendNum(&pos, core.page_objs()[core.pick()[i]]);
+        core.appendNum(&pos, core.page_objs()[core.pick.all()[i]]);
         core.appendStr(&pos, " 0 R");
     }
     core.appendStr(&pos, " ] >>\nendobj\n");

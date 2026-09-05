@@ -36,13 +36,7 @@ const SigT = struct {
 };
 /// 서명. 16 이던 것을 올렸다 — 결재선이 긴 문서는 그보다 많다.
 /// 전자 서명. 필요한 만큼 늘어난다(세는 상한 없음).
-var sigs_at: usize = 0;
-var sigs_cap: u32 = 0;
-fn sigsBuf() []SigT {
-    if (sigs_at == 0 or sigs_cap == 0) return &[_]SigT{};
-    return @as([*]SigT, @ptrFromInt(sigs_at))[0..sigs_cap];
-}
-fn sigsRoom(want: u32) bool { return core.growTable(&sigs_at, &sigs_cap, want, @sizeOf(SigT), 8); }
+var sigs: core.Table(SigT) = .{};
 var sig_n: u32 = 0;
 const SIG_BUF = 1024 * 1024;
 /// sig_buf — 쓸 때 잡는다(그 갈래 문서가 아니면 안 잡는다)
@@ -178,7 +172,7 @@ pub fn collectSigs(b: []const u8) void {
     // 덮는 훑기라, 여기서 못 찾으면 아래 고리도 못 찾는다.
     if (core.find(b, "/ByteRange", 0) == null) return;
     var num: u32 = 1;
-    while (num < core.obj_cap and sigsRoom(sig_n + 1)) : (num += 1) {
+    while (num < core.obj_cap and sigs.room(sig_n + 1, 8)) : (num += 1) {
         if (core.objRankTable()[num] == 0) continue;
         const body = core.objOff()[num];
         if (body >= b.len) continue;
@@ -190,7 +184,7 @@ pub fn collectSigs(b: []const u8) void {
         while (cp < e and core.isSpace(b[cp])) cp += 1;
         if (cp >= e or b[cp] != '<' or (cp + 1 < e and b[cp + 1] == '<')) continue;
 
-        const f = &sigsBuf()[sig_n];
+        const f = &sigs.all()[sig_n];
         f.* = .{
             .obj = num, .range = .{ 0, 0, 0, 0 }, .der_off = 0, .der_len = 0,
             .name_off = 0, .name_len = 0, .date_off = 0, .date_len = 0,
@@ -267,20 +261,20 @@ pub fn collectSigs(b: []const u8) void {
 }
 
 pub fn sigCount() u32 { return sig_n; }
-pub fn sigRange(i: u32, k: u32) u32 { return if (i < sig_n and k < 4) sigsBuf()[i].range[k] else 0; }
+pub fn sigRange(i: u32, k: u32) u32 { return if (i < sig_n and k < 4) sigs.all()[i].range[k] else 0; }
 pub fn sigTextPtr() usize {
     const p = sig_buf();
     return if (p.len == 0) core.heapBase() else @intFromPtr(p.ptr);
 }
-pub fn sigDerOff(i: u32) u32 { return if (i < sig_n) sigsBuf()[i].der_off else 0; }
-pub fn sigDerLen(i: u32) u32 { return if (i < sig_n) sigsBuf()[i].der_len else 0; }
-pub fn sigNameOff(i: u32) u32 { return if (i < sig_n) sigsBuf()[i].name_off else 0; }
-pub fn sigNameLen(i: u32) u32 { return if (i < sig_n) sigsBuf()[i].name_len else 0; }
-pub fn sigDateOff(i: u32) u32 { return if (i < sig_n) sigsBuf()[i].date_off else 0; }
-pub fn sigDateLen(i: u32) u32 { return if (i < sig_n) sigsBuf()[i].date_len else 0; }
-pub fn sigReasonOff(i: u32) u32 { return if (i < sig_n) sigsBuf()[i].reason_off else 0; }
-pub fn sigReasonLen(i: u32) u32 { return if (i < sig_n) sigsBuf()[i].reason_len else 0; }
-pub fn sigSubOff(i: u32) u32 { return if (i < sig_n) sigsBuf()[i].sub_off else 0; }
-pub fn sigSubLen(i: u32) u32 { return if (i < sig_n) sigsBuf()[i].sub_len else 0; }
-pub fn sigCovers(i: u32) u32 { return if (i < sig_n and sigsBuf()[i].covers) 1 else 0; }
-pub fn sigObj(i: u32) u32 { return if (i < sig_n) sigsBuf()[i].obj else 0; }
+pub fn sigDerOff(i: u32) u32 { return if (i < sig_n) sigs.all()[i].der_off else 0; }
+pub fn sigDerLen(i: u32) u32 { return if (i < sig_n) sigs.all()[i].der_len else 0; }
+pub fn sigNameOff(i: u32) u32 { return if (i < sig_n) sigs.all()[i].name_off else 0; }
+pub fn sigNameLen(i: u32) u32 { return if (i < sig_n) sigs.all()[i].name_len else 0; }
+pub fn sigDateOff(i: u32) u32 { return if (i < sig_n) sigs.all()[i].date_off else 0; }
+pub fn sigDateLen(i: u32) u32 { return if (i < sig_n) sigs.all()[i].date_len else 0; }
+pub fn sigReasonOff(i: u32) u32 { return if (i < sig_n) sigs.all()[i].reason_off else 0; }
+pub fn sigReasonLen(i: u32) u32 { return if (i < sig_n) sigs.all()[i].reason_len else 0; }
+pub fn sigSubOff(i: u32) u32 { return if (i < sig_n) sigs.all()[i].sub_off else 0; }
+pub fn sigSubLen(i: u32) u32 { return if (i < sig_n) sigs.all()[i].sub_len else 0; }
+pub fn sigCovers(i: u32) u32 { return if (i < sig_n and sigs.all()[i].covers) 1 else 0; }
+pub fn sigObj(i: u32) u32 { return if (i < sig_n) sigs.all()[i].obj else 0; }

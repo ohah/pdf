@@ -31,40 +31,27 @@ const Ann = struct {
     obj: u32 = 0,
 };
 /// 쪽 하나의 주석. 세는 상한은 없다.
-var ann_at: usize = 0;
-var ann_cap: u32 = 0;
-fn anns() []Ann {
-    if (ann_at == 0 or ann_cap == 0) return &[_]Ann{};
-    return @as([*]Ann, @ptrFromInt(ann_at))[0..ann_cap];
-}
+var ann: core.Table(Ann) = .{};
 var ann_n: u32 = 0;
 /// ann_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
-var ann_buf_at: usize = 0;
-var ann_buf_cap: u32 = 0;
-fn ann_buf() []u8 {
-    if (ann_buf_at == 0 or ann_buf_cap == 0) return &[_]u8{};
-    return @as([*]u8, @ptrFromInt(ann_buf_at))[0..ann_buf_cap];
-}
-fn ann_bufRoom(want: u32) bool {
-    return core.growTable(&ann_buf_at, &ann_buf_cap, want, 1, 65536);
-}
+var ann_buf: core.Table(u8) = .{};
 var ann_used: u32 = 0;
 
 pub fn annCount() u32 { return ann_n; }
-pub fn annObj(i: u32) u32 { return if (i < ann_n) anns()[i].obj else 0; }
-pub fn annFlags(i: u32) u32 { return if (i < ann_n) anns()[i].flags else 0; }
-pub fn annRect(i: u32, k: u32) f32 { return if (i < ann_n and k < 4) anns()[i].rect[k] else 0; }
-pub fn annHasColor(i: u32) u32 { return if (i < ann_n and anns()[i].has_color) 1 else 0; }
-pub fn annColor(i: u32, k: u32) f32 { return if (i < ann_n and k < 3) anns()[i].color[k] else 0; }
-pub fn annTextPtr() [*]u8 { return @ptrFromInt(if (ann_buf_at == 0) core.heapBase() else ann_buf_at); }
-pub fn annSubOff(i: u32) u32 { return if (i < ann_n) anns()[i].sub_off else 0; }
-pub fn annSubLen(i: u32) u32 { return if (i < ann_n) anns()[i].sub_len else 0; }
-pub fn annBodyOff(i: u32) u32 { return if (i < ann_n) anns()[i].txt_off else 0; }
-pub fn annBodyLen(i: u32) u32 { return if (i < ann_n) anns()[i].txt_len else 0; }
-pub fn annAuthorOff(i: u32) u32 { return if (i < ann_n) anns()[i].au_off else 0; }
-pub fn annAuthorLen(i: u32) u32 { return if (i < ann_n) anns()[i].au_len else 0; }
-pub fn annDateOff(i: u32) u32 { return if (i < ann_n) anns()[i].dt_off else 0; }
-pub fn annDateLen(i: u32) u32 { return if (i < ann_n) anns()[i].dt_len else 0; }
+pub fn annObj(i: u32) u32 { return if (i < ann_n) ann.all()[i].obj else 0; }
+pub fn annFlags(i: u32) u32 { return if (i < ann_n) ann.all()[i].flags else 0; }
+pub fn annRect(i: u32, k: u32) f32 { return if (i < ann_n and k < 4) ann.all()[i].rect[k] else 0; }
+pub fn annHasColor(i: u32) u32 { return if (i < ann_n and ann.all()[i].has_color) 1 else 0; }
+pub fn annColor(i: u32, k: u32) f32 { return if (i < ann_n and k < 3) ann.all()[i].color[k] else 0; }
+pub fn annTextPtr() [*]u8 { return @ptrFromInt(if (ann_buf.at == 0) core.heapBase() else ann_buf.at); }
+pub fn annSubOff(i: u32) u32 { return if (i < ann_n) ann.all()[i].sub_off else 0; }
+pub fn annSubLen(i: u32) u32 { return if (i < ann_n) ann.all()[i].sub_len else 0; }
+pub fn annBodyOff(i: u32) u32 { return if (i < ann_n) ann.all()[i].txt_off else 0; }
+pub fn annBodyLen(i: u32) u32 { return if (i < ann_n) ann.all()[i].txt_len else 0; }
+pub fn annAuthorOff(i: u32) u32 { return if (i < ann_n) ann.all()[i].au_off else 0; }
+pub fn annAuthorLen(i: u32) u32 { return if (i < ann_n) ann.all()[i].au_len else 0; }
+pub fn annDateOff(i: u32) u32 { return if (i < ann_n) ann.all()[i].dt_off else 0; }
+pub fn annDateLen(i: u32) u32 { return if (i < ann_n) ann.all()[i].dt_len else 0; }
 
 
 /// 쪽에 달린 주석을 모두 걷는다. 링크·위젯도 포함한다 — 쓰는 쪽이 가린다.
@@ -92,7 +79,7 @@ pub fn collectAnnots(b: []const u8, body: usize, end: usize) void {
 
     var q = as2;
     while (q < ae) {
-        if (!core.growTable(&ann_at, &ann_cap, ann_n, @sizeOf(Ann), 128)) break;
+        if (!core.growTable(&ann.at, &ann.cap, ann_n, @sizeOf(Ann), 128)) break;
         while (q < ae and core.isSpace(b[q])) q += 1;
         if (q >= ae or b[q] == ']') break;
         if (!core.isDigit(b[q])) { q += 1; continue; }
@@ -109,11 +96,11 @@ pub fn collectAnnots(b: []const u8, body: usize, end: usize) void {
 
         var name: [32]u8 = undefined;
         const nn = core.nameAfter(b, ab, abe, "/Subtype", &name);
-        _ = ann_bufRoom(ann_used + nn + 64);
-        if (nn > 0 and ann_used + nn <= ann_buf().len) {
+        _ = ann_buf.room(ann_used + nn + 64, 65536);
+        if (nn > 0 and ann_used + nn <= ann_buf.all().len) {
             a.sub_off = ann_used;
             a.sub_len = nn;
-            @memcpy(ann_buf()[ann_used..][0..nn], name[0..nn]);
+            @memcpy(ann_buf.all()[ann_used..][0..nn], name[0..nn]);
             ann_used += nn;
         }
         if (core.find(b[ab..abe], "/Rect", 0)) |ra| {
@@ -154,21 +141,21 @@ pub fn collectAnnots(b: []const u8, body: usize, end: usize) void {
         }
         // 글(/Contents) · 쓴 이(/T) · 날짜(/M)
         if (core.find(b[ab..abe], "/Contents", 0)) |ta| {
-            _ = ann_bufRoom(ann_used + 8192);
-            const n2 = core.copyPdfText(b, ab + ta + 9, abe, ann_buf(), ann_used);
+            _ = ann_buf.room(ann_used + 8192, 65536);
+            const n2 = core.copyPdfText(b, ab + ta + 9, abe, ann_buf.all(), ann_used);
             if (n2 > 0) { a.txt_off = ann_used; a.txt_len = n2; ann_used += n2; }
         }
         if (core.keyPos(b, ab, abe, "/T")) |ta| {
-            _ = ann_bufRoom(ann_used + 8192);
-            const n2 = core.copyPdfText(b, ta + 2, abe, ann_buf(), ann_used);
+            _ = ann_buf.room(ann_used + 8192, 65536);
+            const n2 = core.copyPdfText(b, ta + 2, abe, ann_buf.all(), ann_used);
             if (n2 > 0) { a.au_off = ann_used; a.au_len = n2; ann_used += n2; }
         }
         if (core.keyPos(b, ab, abe, "/M")) |da| {
-            _ = ann_bufRoom(ann_used + 8192);
-            const n2 = core.copyPdfText(b, da + 2, abe, ann_buf(), ann_used);
+            _ = ann_buf.room(ann_used + 8192, 65536);
+            const n2 = core.copyPdfText(b, da + 2, abe, ann_buf.all(), ann_used);
             if (n2 > 0) { a.dt_off = ann_used; a.dt_len = n2; ann_used += n2; }
         }
-        anns()[ann_n] = a;
+        ann.all()[ann_n] = a;
         ann_n += 1;
     }
 }
@@ -228,8 +215,8 @@ pub fn collectLinks(b: []const u8, body: usize, end: usize) void {
             while (up < abe and core.isSpace(b[up])) up += 1;
             if (up < abe and (b[up] == '(' or b[up] == '<')) {
                 uoff = core.link_buf_n;
-                _ = core.link_bufRoom(core.link_buf_n + 8192);
-                ulen = core.copyPdfText(b, up, abe, core.link_buf(), core.link_buf_n);
+                _ = core.link_buf.room(core.link_buf_n + 8192, 16384);
+                ulen = core.copyPdfText(b, up, abe, core.link_buf.all(), core.link_buf_n);
                 core.link_buf_n += ulen;
                 break;
             }
@@ -241,8 +228,8 @@ pub fn collectLinks(b: []const u8, body: usize, end: usize) void {
             pg = core.destPage(b, ab + da + 2, abe);
         }
         if (ulen == 0 and pg < 0) continue;
-        if (!core.growTable(&core.link_at, &core.link_cap, core.link_n, @sizeOf(core.Link), 128)) break;
-        core.links()[core.link_n] = .{ .rect = rect, .off = uoff, .len = ulen, .page = pg };
+        if (!core.growTable(&core.link.at, &core.link.cap, core.link_n, @sizeOf(core.Link), 128)) break;
+        core.link.all()[core.link_n] = .{ .rect = rect, .off = uoff, .len = ulen, .page = pg };
         core.link_n += 1;
     }
 }
@@ -258,8 +245,8 @@ fn walkOutline(b: []const u8, first: u32, depth: u8) void {
         var len: u32 = 0;
         if (core.find(b[ob..oe], "/Title", 0)) |ta| {
             off = core.mark_buf_n;
-            _ = core.mark_bufRoom(core.mark_buf_n + 8192);
-            len = core.copyPdfText(b, ob + ta + 6, oe, core.mark_buf(), core.mark_buf_n);
+            _ = core.mark_buf.room(core.mark_buf_n + 8192, 32768);
+            len = core.copyPdfText(b, ob + ta + 6, oe, core.mark_buf.all(), core.mark_buf_n);
             core.mark_buf_n += len;
         }
         var pg: i32 = -1;
@@ -279,7 +266,7 @@ fn walkOutline(b: []const u8, first: u32, depth: u8) void {
             }
         }
         if (len > 0) {
-            core.marks()[core.mark_n] = .{ .depth = depth, .off = off, .len = len, .page = pg };
+            core.mark.all()[core.mark_n] = .{ .depth = depth, .off = off, .len = len, .page = pg };
             core.mark_n += 1;
         }
         // 자식
