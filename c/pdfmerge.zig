@@ -75,7 +75,7 @@ pub fn parseSecond(len: usize) u32 {
     // 빌려 쓰고 앞 64 개만 되돌렸다 — 첫 문서가 64 쪽을 넘으면 그 뒤가
     // 둘째 문서의 번호로 덮인 채 남았다.
     // 둘째 문서를 걷는 동안 첫 문서의 "잘렸다" 표시를 건드리지 않는다
-    const cut_keep = core.pages_cut;
+    const cut_keep = core.pagest.cut;
     const keep_at = core.walk.at;
     const keep_cap = core.walk.cap;
     const keep_ceil = core.walk.ceil;
@@ -85,7 +85,7 @@ pub fn parseSecond(len: usize) u32 {
     b2_at = core.walk.at;
     b2_cap_n = b2_page_n;
     core.zoneShrink(b2_at + @as(usize, b2_page_n) * 4);
-    core.pages_cut = cut_keep;
+    core.pagest.cut = cut_keep;
     core.walk.at = keep_at;
     core.walk.cap = keep_cap;
     core.walk.ceil = keep_ceil;
@@ -103,7 +103,7 @@ fn writeNum(pos: *usize, v: u32) void { core.appendNum(pos, v); }
 /// 두 문서를 이어 붙인다. 결과 길이를 돌려주고 0이면 실패.
 pub fn merge() usize {
     core.outbuf.len = 0;
-    if (core.bin2.len == 0 or b2_page_n == 0 or core.pages_obj == 0) return 0;
+    if (core.bin2.len == 0 or b2_page_n == 0 or core.pagest.obj == 0) return 0;
     const a = core.searchSlice();
     const b = b2Slice();
     const shift = 1000000; // A 의 번호와 겹치지 않게 넉넉히 민다
@@ -195,16 +195,16 @@ pub fn merge() usize {
 
     // 새 페이지 트리 — A 의 쪽 뒤에 B 의 쪽을 잇는다
     new_offsets[new_n] = pos;
-    new_nums[new_n] = core.pages_obj;
+    new_nums[new_n] = core.pagest.obj;
     new_n += 1;
-    writeNum(&pos, core.pages_obj);
+    writeNum(&pos, core.pagest.obj);
     core.appendStr(&pos, " 0 obj\n<< /Type /Pages /Count ");
     writeNum(&pos, core.cpage.count + b2_page_n);
     core.appendStr(&pos, " /Kids [");
     var t: u32 = 0;
     while (t < core.cpage.count) : (t += 1) {
         core.appendStr(&pos, " ");
-        writeNum(&pos, core.page_objs()[t]);
+        writeNum(&pos, core.pgs.all()[t]);
         core.appendStr(&pos, " 0 R");
     }
     t = 0;
@@ -226,7 +226,7 @@ pub fn merge() usize {
         new_n += 1;
         writeNum(&pos, obj + shift);
         core.appendStr(&pos, " 0 obj\n<< /Type /Page /Parent ");
-        writeNum(&pos, core.pages_obj);
+        writeNum(&pos, core.pagest.obj);
         core.appendStr(&pos, " 0 R");
         // 원본 딕셔너리에서 /Parent 를 뺀 나머지를 옮긴다
         var q = body;

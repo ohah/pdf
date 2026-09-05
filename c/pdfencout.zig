@@ -186,21 +186,21 @@ fn copyDictSealed(b: []const u8, from: usize, to: usize, pos: *usize, skip_len: 
 
 pub fn compact() usize {
     core.outbuf.len = 0;
-    if (core.pick_n == 0 or core.pages_obj == 0) return 0;
+    if (core.pick.n == 0 or core.pagest.obj == 0) return 0;
     const b = core.searchSlice();
 
     // 살아 있는 객체 표를 문서에서 본 가장 큰 번호에 맞춰 잡는다
     const reach_keep = core.zoneTop();
     defer core.zoneShrink(reach_keep);
-    core.reach_n = @as(usize, core.max_obj) + 64;
-    core.reach_at = core.zoneAlloc(core.reach_n) orelse { core.reach_n = 0; return 0; };
+    core.reacht.n = @as(usize, core.max_obj) + 64;
+    core.reacht.at = core.zoneAlloc(core.reacht.n) orelse { core.reacht.n = 0; return 0; };
     const reach = core.reachTable();
     @memset(reach, false);
 
     // 옛 페이지 트리를 먼저 방문한 것으로 막는다. 이렇게 하지 않으면
     // Catalog → Pages → 모든 쪽으로 내려가 버려서, 버리려던 쪽까지 전부
     // 살아남는다(= 파일이 하나도 줄지 않는다).
-    if (core.pages_obj < reach.len) reach[core.pages_obj] = true;
+    if (core.pagest.obj < reach.len) reach[core.pagest.obj] = true;
 
     var root: u32 = 0;
     if (core.trailerKeyOrScan(b, "/Root")) |at| {
@@ -211,7 +211,7 @@ pub fn compact() usize {
 
     // 고른 쪽과 그 아래 딸린 것들만 표시한다
     var i: usize = 0;
-    while (i < core.pick_n) : (i += 1) core.markReach(b, core.page_objs()[core.pick.all()[i]], 0);
+    while (i < core.pick.n) : (i += 1) core.markReach(b, core.pgs.all()[core.pick.items.all()[i]], 0);
 
     var pos: usize = 0;
     core.appendStr(&pos, "%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
@@ -232,7 +232,7 @@ pub fn compact() usize {
     var num: u32 = 1;
     while (num < reach.len and new_n < new_nums.len - 4) : (num += 1) {
         if (!reach[num]) continue;
-        if (num == core.pages_obj) continue;
+        if (num == core.pagest.obj) continue;
         const r = core.objRange(b, num) orelse continue;
         new_offsets[new_n] = pos;
         new_nums[new_n] = num;
@@ -292,16 +292,16 @@ pub fn compact() usize {
 
     // 새 페이지 트리
     new_offsets[new_n] = pos;
-    new_nums[new_n] = core.pages_obj;
+    new_nums[new_n] = core.pagest.obj;
     new_n += 1;
-    core.appendNum(&pos, core.pages_obj);
+    core.appendNum(&pos, core.pagest.obj);
     core.appendStr(&pos, " 0 obj\n<< /Type /Pages /Count ");
-    core.appendNum(&pos, @intCast(core.pick_n));
+    core.appendNum(&pos, @intCast(core.pick.n));
     core.appendStr(&pos, " /Kids [");
     i = 0;
-    while (i < core.pick_n) : (i += 1) {
+    while (i < core.pick.n) : (i += 1) {
         core.appendStr(&pos, " ");
-        core.appendNum(&pos, core.page_objs()[core.pick.all()[i]]);
+        core.appendNum(&pos, core.pgs.all()[core.pick.items.all()[i]]);
         core.appendStr(&pos, " 0 R");
     }
     core.appendStr(&pos, " ] >>\nendobj\n");

@@ -296,13 +296,13 @@ pub fn attachWidths(b: []const u8, fbody: usize) void {
                 const gn = core.readUint(b, &q);
                 // streamOf 의 결과는 다음 호출이 덮으므로 바로 옮겨 둔다
                 if (pdfform.streamOf(b, gn)) |m| {
-                    const room = core.C2G_POOL - core.c2g_used;
+                    const room = core.C2G_POOL - core.c2g.used;
                     const n = @min(m.len, room);
                     if (n >= 2) {
-                        @memcpy(core.c2g_pool()[core.c2g_used..][0..n], m[0..n]);
-                        f.c2g_off = core.c2g_used;
+                        @memcpy(core.c2g_pool()[core.c2g.used..][0..n], m[0..n]);
+                        f.c2g_off = core.c2g.used;
                         f.c2g_len = @intCast(n);
-                        core.c2g_used += @intCast(n);
+                        core.c2g.used += @intCast(n);
                         // 표가 있으면 CID 로 글리프를 집을 수 있다
                         f.identity = true;
                     } else f.identity = false;

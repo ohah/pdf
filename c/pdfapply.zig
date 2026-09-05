@@ -342,7 +342,7 @@ pub fn stripEncryptOut(len: usize) void {
 
 pub fn apply() usize {
     core.outbuf.len = 0;
-    if (core.pick_n == 0 or core.pages_obj == 0) return 0;
+    if (core.pick.n == 0 or core.pagest.obj == 0) return 0;
     // 페이지 객체가 ObjStm 안에 있을 수 있으므로 펼친 영역까지 훑는다.
     // 출력에 옮기는 원본은 core.in_len 까지다.
     const b = core.searchSlice();
@@ -360,23 +360,23 @@ pub fn apply() usize {
     // 하나가 객체 여럿을 낳는다 — 주석은 겉모습 스트림까지 둘, 새 칸도
     // 마찬가지다. 넉넉히 잡지 않으면 뒤가 조용히 빠진다(주석 2000개 중
     // 1038개만 나갔다).
-    const xr = xrefTables(core.pick_n * 4 + @as(usize, core.edit.n) * 2 + core.note.n * 3 + core.newf.n * 3 + 128) orelse return 0;
+    const xr = xrefTables(core.pick.n * 4 + @as(usize, core.edit.n) * 2 + core.note.n * 3 + core.newf.n * 3 + 128) orelse return 0;
     const new_offsets = xr.offs;
     const new_nums = xr.nums;
     var new_n: usize = 0;
 
     // 1) Pages 객체 — Kids 를 고른 순서로
     new_offsets[new_n] = pos;
-    new_nums[new_n] = core.pages_obj;
+    new_nums[new_n] = core.pagest.obj;
     new_n += 1;
-    core.appendNum(&pos, core.pages_obj);
+    core.appendNum(&pos, core.pagest.obj);
     core.appendStr(&pos, " 0 obj\n<< /Type /Pages /Count ");
-    core.appendNum(&pos, @intCast(core.pick_n));
+    core.appendNum(&pos, @intCast(core.pick.n));
     core.appendStr(&pos, " /Kids [");
     var i: usize = 0;
-    while (i < core.pick_n) : (i += 1) {
+    while (i < core.pick.n) : (i += 1) {
         core.appendStr(&pos, " ");
-        core.appendNum(&pos, core.page_objs()[core.pick.all()[i]]);
+        core.appendNum(&pos, core.pgs.all()[core.pick.items.all()[i]]);
         core.appendStr(&pos, " 0 R");
     }
     core.appendStr(&pos, " ] >>\nendobj\n");
@@ -397,7 +397,7 @@ pub fn apply() usize {
         wm_font = core.max_obj + 3;
         wm_res_base = core.max_obj + 4;
         // 리소스 객체가 쪽마다 하나씩 나가므로 그 뒤부터 라벨 스트림을 준다
-        lab_base = core.max_obj + 4 + @as(u32, @intCast(core.pick_n));
+        lab_base = core.max_obj + 4 + @as(u32, @intCast(core.pick.n));
 
         // 글꼴 — 표준 14 종이라 파일에 심지 않아도 된다
         new_offsets[new_n] = pos;
@@ -416,7 +416,7 @@ pub fn apply() usize {
         writeStream(&pos, new_offsets, new_nums, &new_n, wm_pre, "q\n");
     }
     // 라벨·워터마크가 쓸 그림을 먼저 적고 번호를 매긴다
-    var mask_next = core.max_obj + 4 + 2 * @as(u32, @intCast(core.pick_n)) + 1;
+    var mask_next = core.max_obj + 4 + 2 * @as(u32, @intCast(core.pick.n)) + 1;
     var any_mask = false;
     if (overlay) {
         const writeMask = struct {
@@ -466,7 +466,7 @@ pub fn apply() usize {
         var use_doc = false;
         var doc_font: u8 = 0;
         if (!core.wmIsAscii()) {
-            _ = core.renderPage(core.pick.all()[0]);
+            _ = core.renderPage(core.pick.items.all()[0]);
             var fi: u8 = 0;
             outer: while (fi < core.fontarea.n) : (fi += 1) {
                 if (core.fonts.all()[fi].n == 0 or core.fonts.all()[fi].name_len == 0) continue;
@@ -479,7 +479,7 @@ pub fn apply() usize {
                 break;
             }
         } else {
-            _ = core.renderPage(core.pick.all()[0]);
+            _ = core.renderPage(core.pick.items.all()[0]);
         }
 
         // 쪽 한가운데에 비스듬히, 쪽 크기에 맞춰 얹는다
@@ -884,7 +884,7 @@ pub fn apply() usize {
             }
             // /F 4 는 "찍을 때도 보인다" 는 뜻이다. 없으면 인쇄에서 사라진다.
             core.appendStr(&pos, " ] /F 4 /P ");
-            core.appendNum(&pos, core.page_objs()[f.page]);
+            core.appendNum(&pos, core.pgs.all()[f.page]);
             core.appendStr(&pos, " 0 R /MK << /BC [0 0 0] /BG [1 1 1] >> /DA ");
             if (f.kind == 1) {
                 core.appendStr(&pos, "(/ZaDb 0 Tf 0 g) /V /Off /AS /Off >>\nendobj\n");
@@ -901,16 +901,16 @@ pub fn apply() usize {
     // 3) 회전이나 워터마크가 있으면 각 페이지 객체를 다시 쓴다
     if (core.rotate != 0 or overlay or core.anyPageRotate() or has_notes or core.anyFieldStruct()) {
         i = 0;
-        while (i < core.pick_n) : (i += 1) {
-            const obj = core.page_objs()[core.pick.all()[i]];
+        while (i < core.pick.n) : (i += 1) {
+            const obj = core.pgs.all()[core.pick.items.all()[i]];
             const body = core.findObj(b, obj) orelse continue;
             const end = core.find(b, "endobj", body) orelse b.len;
             // 이 쪽에 라벨이 있으면 그릴 스트림을 먼저 적어 둔다.
             // 쪽마다 자리가 다르니 스트림도 쪽마다 하나씩 나간다.
             var my_lab: u32 = 0;
-            if (lab_n > 0 and pageHasLabels(core.pick.all()[i]) and new_n + 2 < new_nums.len) {
-                _ = core.renderPage(core.pick.all()[i]);
-                const bl2 = buildLabelStream(core.pick.all()[i]);
+            if (lab_n > 0 and pageHasLabels(core.pick.items.all()[i]) and new_n + 2 < new_nums.len) {
+                _ = core.renderPage(core.pick.items.all()[i]);
+                const bl2 = buildLabelStream(core.pick.items.all()[i]);
                 if (bl2 > 2) {
                     my_lab = lab_base + lab_used;
                     lab_used += 1;
@@ -981,7 +981,7 @@ pub fn apply() usize {
                 pos += 1;
                 cq2 += 1;
             }
-            if ((has_notes and core.notesOnPage(core.pick.all()[i])) or core.anyFieldStruct()) {
+            if ((has_notes and core.notesOnPage(core.pick.items.all()[i])) or core.anyFieldStruct()) {
                 // 원래 있던 주석에 새로 단 것을 이어 붙인다
                 core.appendStr(&pos, " /Annots [");
                 if (core.findObj(b, obj)) |pb2| {
@@ -1010,14 +1010,14 @@ pub fn apply() usize {
                 }
                 var nk: u32 = 0;
                 while (nk < core.note.n) : (nk += 1) {
-                    if (core.notes.all()[nk].page != core.pick.all()[i] or core.notes.all()[nk].obj == 0) continue;
+                    if (core.notes.all()[nk].page != core.pick.items.all()[i] or core.notes.all()[nk].obj == 0) continue;
                     core.appendStr(&pos, " ");
                     core.appendNum(&pos, core.notes.all()[nk].obj);
                     core.appendStr(&pos, " 0 R");
                 }
                 var nf: u32 = 0;
                 while (nf < core.newf.n) : (nf += 1) {
-                    if (core.newf.items.all()[nf].page != core.pick.all()[i] or core.newf.items.all()[nf].obj == 0) continue;
+                    if (core.newf.items.all()[nf].page != core.pick.items.all()[i] or core.newf.items.all()[nf].obj == 0) continue;
                     core.appendStr(&pos, " ");
                     core.appendNum(&pos, core.newf.items.all()[nf].obj);
                     core.appendStr(&pos, " 0 R");
@@ -1038,7 +1038,7 @@ pub fn apply() usize {
                 const v: i32 = @intCast(core.readUint(b, &rp) % 360);
                 break :blk if (neg) -v else v;
             };
-            const rot_here = src_rot + core.rotOf(core.pick.all()[i]);
+            const rot_here = src_rot + core.rotOf(core.pick.items.all()[i]);
             if (@mod(rot_here, 360) != 0) {
                 core.appendStr(&pos, " /Rotate ");
                 const r = @mod(rot_here, 360);
@@ -1408,8 +1408,8 @@ pub fn apply() usize {
         }
         // 겉모습을 다시 그릴 줄 아는 뷰어는 제 글꼴로 다시 그리게 한다 —
         // 우리가 넣은 겉모습은 표준 글꼴이라 한글이 빠진다.
-        if (core.doc_root != 0) {
-            if (core.findObj(b, core.doc_root)) |rb3| {
+        if (core.doc.root != 0) {
+            if (core.findObj(b, core.doc.root)) |rb3| {
                 const re3 = core.objDictEnd(b, rb3);
                 const has_acro = core.find(b[rb3..re3], "/AcroForm", 0) != null;
                 // 양식이 아예 없는 문서에 칸을 만들면 카탈로그에 양식을 새로 단다
@@ -1419,9 +1419,9 @@ pub fn apply() usize {
                     const hx0 = pdfenc.dictEnd(b, ix0, re3);
                     if (hx0 > ix0 + 2) {
                         new_offsets[new_n] = pos;
-                        new_nums[new_n] = core.doc_root;
+                        new_nums[new_n] = core.doc.root;
                         new_n += 1;
-                        core.appendNum(&pos, core.doc_root);
+                        core.appendNum(&pos, core.doc.root);
                         core.appendStr(&pos, " 0 obj\n<<");
                         var gx0 = ix0 + 2;
                         while (gx0 < hx0 - 2 and core.outRoom(pos, 64)) : (gx0 += 1) {

@@ -54,7 +54,7 @@ fn meshColor(sh: *const root.Shade, r: *MeshR, bpc: u32, dec: []const f32, nd: u
         const hi: f32 = if (nd >= 6) dec[5] else 1;
         const t = meshVal(r.get(bpc), bpc, lo, hi);
         var v: [4]f32 = .{ 0, 0, 0, 0 };
-        const nc = root.shadeFn(root.doc, sh, t, &v);
+        const nc = root.shadeFn(root.doc.items, sh, t, &v);
         root.rgbFrom(nc, v, &out);
         return out;
     }
@@ -116,7 +116,7 @@ fn meshTri(p: [3][2]f32, c: [3][3]f32, depth: u32) void {
 
 /// 4·5형 — 삼각형 그물
 fn paintTriMesh(sh: *const root.Shade) void {
-    const b = root.doc;
+    const b = root.doc.items;
     const ds = sh.ds;
     const de = sh.de;
     const bpco = root.intAfter(b, ds, de, "/BitsPerCoordinate") orelse return;
@@ -207,7 +207,7 @@ fn bez(t: f32) [4]f32 {
 
 /// 6·7형 — 이음 조각(Coons·텐서). 조각 하나를 격자로 훑어 칠한다.
 fn paintPatchMesh(sh: *const root.Shade) void {
-    const b = root.doc;
+    const b = root.doc.items;
     const ds = sh.ds;
     const de = sh.de;
     const bpco = root.intAfter(b, ds, de, "/BitsPerCoordinate") orelse return;
@@ -381,7 +381,7 @@ fn paintPatchMesh(sh: *const root.Shade) void {
 /// 1형 — x·y 를 받는 함수. 정의역을 격자로 훑어 칠한다.
 fn paintFnShade(sh: *const root.Shade) void {
     if (sh.fe <= sh.fs) return;
-    const b = root.doc;
+    const b = root.doc.items;
     root.emitOp(14, &[_]f32{});
     root.emitOp(16, &[_]f32{ sh.mat[0], sh.mat[1], sh.mat[2], sh.mat[3], sh.mat[4], sh.mat[5] });
     const N: u32 = 24;
@@ -414,7 +414,7 @@ fn shadeAvg(sh: *const root.Shade, out: *[3]f32) bool {
         var i: u32 = 0;
         while (i < 5) : (i += 1) {
             var v: [4]f32 = .{ 0, 0, 0, 0 };
-            const nc = root.shadeFn(root.doc, sh, @as(f32, @floatFromInt(i)) / 4, &v);
+            const nc = root.shadeFn(root.doc.items, sh, @as(f32, @floatFromInt(i)) / 4, &v);
             if (nc == 0) return false;
             var c3: [3]f32 = .{ 0, 0, 0 };
             root.rgbFrom(nc, v, &c3);
