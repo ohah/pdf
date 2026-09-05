@@ -10,6 +10,7 @@
 
 const std = @import("std");
 const root = @import("pdf.zig");
+const pdfenc = @import("pdfenc.zig");
 
 // ===== 계산기 함수 (/FunctionType 4) =====
 //
@@ -504,7 +505,7 @@ pub fn readShade(b: []const u8, ds: usize, de: usize, name: []const u8) void {
             var e2: usize = 0;
             if (b[p] == '<') {
                 s2 = p;
-                e2 = root.dictEnd(b, p, de);
+                e2 = pdfenc.dictEnd(b, p, de);
                 p = e2;
             } else if (root.isDigit(b[p])) {
                 const fnum = root.readUint(b, &p);

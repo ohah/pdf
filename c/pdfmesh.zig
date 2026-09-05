@@ -9,6 +9,7 @@
 
 const std = @import("std");
 const root = @import("pdf.zig");
+const pdfform = @import("pdfform.zig");
 
 // ===== 그물 셰이딩 =====
 //
@@ -125,7 +126,7 @@ fn paintTriMesh(sh: *const root.Shade) void {
     var dec: [16]f32 = undefined;
     const nd = root.readArr(b, ds, de, "/Decode", &dec);
     if (nd < 4) return;
-    const data = root.streamFrom(b, ds) orelse return;
+    const data = pdfform.streamFrom(b, ds) orelse return;
     var r = MeshR{ .d = data };
 
     const rowlen = root.intAfter(b, ds, de, "/VerticesPerRow") orelse 0;
@@ -216,7 +217,7 @@ fn paintPatchMesh(sh: *const root.Shade) void {
     var dec: [16]f32 = undefined;
     const nd = root.readArr(b, ds, de, "/Decode", &dec);
     if (nd < 4) return;
-    const data = root.streamFrom(b, ds) orelse return;
+    const data = pdfform.streamFrom(b, ds) orelse return;
     var r = MeshR{ .d = data };
     const tensor = sh.kind == 7;
     const npt: u32 = if (tensor) 16 else 12;

@@ -9,6 +9,7 @@
 
 const std = @import("std");
 const root = @import("pdf.zig");
+const pdfenc = @import("pdfenc.zig");
 
 // ===== Type1 글꼴 =====
 //
@@ -220,7 +221,7 @@ pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) v
         if (root.find(b[fbody..fend], "/Encoding", 0)) |ea| {
             var q = fbody + ea + 9;
             while (q < fend and root.isSpace(b[q])) q += 1;
-            if (q < fend and b[q] == '<') { es2 = q; ee2 = root.dictEnd(b, q, fend); }
+            if (q < fend and b[q] == '<') { es2 = q; ee2 = pdfenc.dictEnd(b, q, fend); }
             else if (q < fend and root.isDigit(b[q])) {
                 const n2 = root.readUint(b, &q);
                 if (root.findObj(b, n2)) |eb| { es2 = eb; ee2 = root.find(b, "endobj", eb) orelse b.len; }

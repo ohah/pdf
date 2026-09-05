@@ -9,6 +9,7 @@
 
 const std = @import("std");
 const root = @import("pdf.zig");
+const pdfsynth = @import("pdfsynth.zig");
 
 // ===== CFF 를 OpenType 으로 감싸기 =====
 //
@@ -185,7 +186,7 @@ fn buildOtto(cff: []const u8, f: *root.FontMap, dst: []u8) u32 {
     const scratch = dst.len - (dst.len / 4);
     if (scratch <= cff.len + 1024) return 0;
 
-    const cmap_len = root.buildFontCmap(f, @intCast(ng), dst[scratch..]);
+    const cmap_len = pdfsynth.buildFontCmap(f, @intCast(ng), dst[scratch..]);
     if (cmap_len == 0) return 0;
 
     // 표 아홉 개 — 태그 오름차순이어야 한다
@@ -379,7 +380,7 @@ pub fn attachFontFile(data: []const u8, is_cff: bool) void {
         root.font_used += (n + 3) & ~@as(u32, 3);
         return;
     }
-    if (f.n > 0 or f.identity) n = root.patchFont(data, f, area);
+    if (f.n > 0 or f.identity) n = pdfsynth.patchFont(data, f, area);
     if (n == 0) {
         // 코드표가 없으면 파일의 cmap 을 그대로 믿는다. 다만 겉이라도 성한
         // 것만 싣는다 — 깨진 파일을 넘겨 봐야 FontFace 가 거절하고, 그동안

@@ -9,6 +9,8 @@
 
 const std = @import("std");
 const core = @import("pdf.zig");
+const pdfform = @import("pdfform.zig");
+const pdfenc = @import("pdfenc.zig");
 
 // ===== 라벨 =====
 //
@@ -262,12 +264,12 @@ pub fn skipVal(b: []const u8, from: usize, end: usize) usize {
         }
         return end;
     }
-    if (p + 1 < end and b[p] == '<' and b[p + 1] == '<') return core.dictEnd(b, p, end);
+    if (p + 1 < end and b[p] == '<' and b[p + 1] == '<') return pdfenc.dictEnd(b, p, end);
     if (b[p] == '<') {
         while (p < end and b[p] != '>') p += 1;
         return @min(p + 1, end);
     }
-    if (b[p] == '[') return core.arrayEnd(b, p, end);
+    if (b[p] == '[') return pdfenc.arrayEnd(b, p, end);
     if (core.isDigit(b[p]) or b[p] == '-' or b[p] == '.') {
         _ = core.readFloat(b, &p);
         // 참조인가 — "n g R"
@@ -996,7 +998,7 @@ pub fn apply() usize {
                         var e4 = pe2;
                         if (ap4 < pe2 and b[ap4] == '[') {
                             s4 = ap4 + 1;
-                            e4 = core.arrayEnd(b, ap4, pe2) - 1;
+                            e4 = pdfenc.arrayEnd(b, ap4, pe2) - 1;
                         } else if (ap4 < pe2 and core.isDigit(b[ap4])) {
                             const an4 = core.readUint(b, &ap4);
                             if (core.findObj(b, an4)) |ob4| {
@@ -1004,7 +1006,7 @@ pub fn apply() usize {
                                 const oe4 = core.find(b, "endobj", ob4) orelse b.len;
                                 while (q4b < oe4 and b[q4b] != '[') q4b += 1;
                                 s4 = q4b + 1;
-                                e4 = core.arrayEnd(b, q4b, oe4) - 1;
+                                e4 = pdfenc.arrayEnd(b, q4b, oe4) - 1;
                             }
                         }
                         // 지우기로 고른 칸은 여기서 빠진다
@@ -1116,7 +1118,7 @@ pub fn apply() usize {
             var ds2 = ob;
             while (ds2 < oe and b[ds2] != '<') ds2 += 1;
             if (ds2 >= oe) continue;
-            const de2 = core.dictEnd(b, ds2, oe);
+            const de2 = pdfenc.dictEnd(b, ds2, oe);
             if (de2 <= ds2 + 2) continue;
             const val = core.edit_buf[e.off..][0..e.len];
 
@@ -1218,7 +1220,7 @@ pub fn apply() usize {
                     ap_next += 1;
                     // 여러 줄인지
                     var multi = false;
-                    if (core.fieldLookup(b, e.obj, "/Ff", 0)) |r| {
+                    if (pdfform.fieldLookup(b, e.obj, "/Ff", 0)) |r| {
                         var vp = r[0];
                         while (vp < r[1] and core.isSpace(b[vp])) vp += 1;
                         if (vp < r[1] and core.isDigit(b[vp])) {
@@ -1227,9 +1229,9 @@ pub fn apply() usize {
                         }
                     }
                     var size: f32 = 0;
-                    if (core.fieldLookup(b, e.obj, "/DA", 0)) |r| {
-                        const da = core.fldPutStr(b, r[0], r[1]);
-                        const txt = core.fld_buf()[da[0]..][0..da[1]];
+                    if (pdfform.fieldLookup(b, e.obj, "/DA", 0)) |r| {
+                        const da = pdfform.fldPutStr(b, r[0], r[1]);
+                        const txt = pdfform.fld_buf()[da[0]..][0..da[1]];
                         if (core.findIn(txt, " Tf", 0)) |ti| {
                             var dx: usize = ti;
                             while (dx > 0 and core.isSpace(txt[dx - 1])) dx -= 1;
@@ -1238,7 +1240,7 @@ pub fn apply() usize {
                             var pz: usize = 0;
                             if (ex < dx) size = core.readFloat(txt[ex..dx], &pz);
                         }
-                        core.fld_used = da[0];
+                        pdfform.fld_used = da[0];
                     }
                     if (size <= 0) size = if (multi) 10 else @min(12, @max(6, bh * 0.62));
                     const lead = size * 1.16;
@@ -1419,7 +1421,7 @@ pub fn apply() usize {
                 if (!has_acro and core.newf_n > 0 and new_n + 1 < new_nums.len) {
                     var ix0 = rb3;
                     while (ix0 < re3 and b[ix0] != '<') ix0 += 1;
-                    const hx0 = core.dictEnd(b, ix0, re3);
+                    const hx0 = pdfenc.dictEnd(b, ix0, re3);
                     if (hx0 > ix0 + 2) {
                         new_offsets[new_n] = pos;
                         new_nums[new_n] = core.doc_root;
@@ -1453,7 +1455,7 @@ pub fn apply() usize {
                             const abe3 = core.objDictEnd(b, ab3);
                             var ix = ab3;
                             while (ix < abe3 and b[ix] != '<') ix += 1;
-                            const hx = core.dictEnd(b, ix, abe3);
+                            const hx = pdfenc.dictEnd(b, ix, abe3);
                             if (hx > ix + 2 and new_n + 1 < new_nums.len) {
                                 new_offsets[new_n] = pos;
                                 new_nums[new_n] = an3;
@@ -1487,7 +1489,7 @@ pub fn apply() usize {
                                         var fe2 = abe3;
                                         if (fp < abe3 and b[fp] == '[') {
                                             fs2 = fp + 1;
-                                            fe2 = core.arrayEnd(b, fp, abe3) - 1;
+                                            fe2 = pdfenc.arrayEnd(b, fp, abe3) - 1;
                                         } else if (fp < abe3 and core.isDigit(b[fp])) {
                                             const fn2 = core.readUint(b, &fp);
                                             if (core.findObj(b, fn2)) |fb2| {
@@ -1495,7 +1497,7 @@ pub fn apply() usize {
                                                 var fq = fb2;
                                                 while (fq < fee and b[fq] != '[') fq += 1;
                                                 fs2 = fq + 1;
-                                                fe2 = core.arrayEnd(b, fq, fee) - 1;
+                                                fe2 = pdfenc.arrayEnd(b, fq, fee) - 1;
                                             }
                                         }
                                         core.copyRefsKeeping(b, fs2, fe2, &pos);
