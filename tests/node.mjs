@@ -195,6 +195,13 @@ const t = (name, cond, got) => {
       const four = await px("t-bpc.pdf", 130, 60);
       t("2비트 회색 그림을 그린다", near(two, [0, 0, 0]), two.join(","));
       t("4비트 회색 그림을 그린다", near(four, [170, 170, 170]), four.join(","));
+      // 무색 무늬(/PaintType 2)는 칸 안에 색이 없다 — scn 이 준 색으로
+      // 그려야 한다. 안 그러면 늘 같은 회색으로 나온다.
+      const u1 = await px("t-uncolored.pdf", 20, 50);
+      const u2 = await px("t-uncolored.pdf", 150, 50);
+      t("무색 무늬가 준 색으로 그려진다",
+        u1[0] > 150 && u1[1] < 120 && u1[2] < 120 && u2[2] > 150 && u2[0] < 120,
+        `${u1.join(",")} / ${u2.join(",")}`);
       const s1 = await px("t-sep.pdf", 50, 50);
       const s2 = await px("t-sep.pdf", 150, 50);
       t("Separation 이 잉크 변환 함수를 탄다", near(s1, [209, 224, 245]) && near(s2, [48, 117, 209]),

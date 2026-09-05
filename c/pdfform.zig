@@ -707,6 +707,12 @@ pub fn paintTile(idx: u32, depth: u32) void {
     core.emitOp(9, &[_]f32{}); // 경로 비우기
     // 한 판 크기와 무늬 좌표계를 알려 준다
     core.emitOp(35, &[_]f32{ xs, ys, t.mat[0], t.mat[1], t.mat[2], t.mat[3], t.mat[4], t.mat[5] });
+    // 무색 무늬(/PaintType 2)는 칸 안에 색이 없다 — 부르는 쪽이 준 색을
+    // 미리 깔아 둔다. 안 깔면 칸이 앞서 쓰던 색으로 그려진다.
+    if (t.uncolored == 1 and core.tile_ink_on) {
+        core.emitOp(11, &[_]f32{ core.tile_ink[0], core.tile_ink[1], core.tile_ink[2] });
+        core.emitOp(12, &[_]f32{ core.tile_ink[0], core.tile_ink[1], core.tile_ink[2] });
+    }
     core.runOps(stream, depth + 1);
     core.emitOp(36, &[_]f32{});
     core.emitOp(15, &[_]f32{}); // restore

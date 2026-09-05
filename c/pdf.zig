@@ -3717,9 +3717,27 @@ pub fn runOps(b: []const u8, depth: u32) void {
                     if (!stroke and tiles.all()[@intCast(ti)].obj != 0 and depth < 2) {
                         pending_tile = ti;
                     }
-                    r = tiles.all()[@intCast(ti)].r;
-                    g2 = tiles.all()[@intCast(ti)].g;
-                    b3 = tiles.all()[@intCast(ti)].b;
+                    const tl = &tiles.all()[@intCast(ti)];
+                    if (tl.uncolored == 1 and sp >= 1) {
+                        // 무색 무늬 — 칸 안에 색이 없다. scn 앞에 놓인 값이
+                        // 색이다. 이걸 안 쓰면 무늬가 늘 같은 회색이 된다.
+                        if (sp >= 4) {
+                            var rgb7: [3]f32 = .{ 0, 0, 0 };
+                            cmykRgb(st[0], st[1], st[2], st[3], &rgb7);
+                            r = rgb7[0]; g2 = rgb7[1]; b3 = rgb7[2];
+                        } else if (sp >= 3) {
+                            r = st[0]; g2 = st[1]; b3 = st[2];
+                        } else {
+                            r = st[0]; g2 = st[0]; b3 = st[0];
+                        }
+                        tile_ink = .{ r, g2, b3 };
+                        tile_ink_on = true;
+                    } else {
+                        r = tl.r;
+                        g2 = tl.g;
+                        b3 = tl.b;
+                        tile_ink_on = false;
+                    }
                 } else {
                     r = 0.6;
                     g2 = 0.6;
@@ -3956,6 +3974,7 @@ fn scanShadings(b: []const u8, rs: usize, re_: usize) void {
                         t2.r = 0.6;
                         t2.g = 0.6;
                         t2.b = 0.6;
+                        t2.uncolored = if (intAfter(b, ds, de3, "/PaintType")) |pv| (if (pv == 2) 1 else 0) else 0;
                         t2.obj = 0;
                         t2.mat = .{ 1, 0, 0, 1, 0, 0 };
                         t2.xstep = 0;
@@ -6905,7 +6924,12 @@ const Tile = struct {
     mat: [6]f32,
     xstep: f32,
     ystep: f32,
+    /// /PaintType 2 (무색 무늬) 인가. 칸 안에 색이 없어 부르는 쪽이 준다.
+    uncolored: u8 = 0,
 };
+/// 무색 무늬에 쓸 색 — scn 이 정하고 paintTile 이 칸을 그리기 전에 깐다
+pub var tile_ink: [3]f32 = .{ 0, 0, 0 };
+pub var tile_ink_on: bool = false;
 /// 이름 붙은 타일 무늬. 필요한 만큼 늘어난다(세는 상한 없음).
 pub var tiles: Table(Tile, 16) = .{};
 var tile_n: u32 = 0;
