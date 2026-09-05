@@ -3705,7 +3705,8 @@ pub fn inheritedKey(b: []const u8, body0: usize, end0: usize, key: []const u8) ?
 ///
 /// 폼 XObject 는 제 리소스를 따로 갖는다. 그 안의 글꼴도 등록해 두어야
 /// 폼을 그릴 때 글자가 나온다.
-pub fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
+/// /Shading·/Pattern — 그러데이션과 무늬
+fn scanShadings(b: []const u8, rs: usize, re_: usize) void {
     // Shading 과 Pattern
     for ([_][]const u8{ "/Shading", "/Pattern" }) |key| {
         const ka = find(b[rs..re_], key, 0) orelse continue;
@@ -3827,7 +3828,10 @@ pub fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
             q = nq;
         }
     }
+}
 
+/// /ColorSpace — 이름마다 성분 수와 갈래
+fn scanColorSpaces(b: []const u8, rs: usize, re_: usize) void {
     // ColorSpace — 이름마다 성분 수와 갈래를 적어 둔다
     if (find(b[rs..re_], "/ColorSpace", 0)) |ca| {
         var p = rs + ca + 11;
@@ -3925,7 +3929,10 @@ pub fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
             q = nq;
         }
     }
+}
 
+/// /Properties — BDC 가 가리키는 레이어 이름표
+fn scanProperties(b: []const u8, rs: usize, re_: usize) void {
     // Properties — BDC 가 가리키는 레이어 이름표
     if (find(b[rs..re_], "/Properties", 0)) |pa| {
         var p = rs + pa + 11;
@@ -3958,7 +3965,10 @@ pub fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
             q = nq;
         }
     }
+}
 
+/// /ExtGState — 투명도(ca/CA)와 선 굵기(LW)
+fn scanExtGStates(b: []const u8, rs: usize, re_: usize) void {
     // ExtGState — 투명도(ca/CA)와 선 굵기(LW)
     if (find(b[rs..re_], "/ExtGState", 0)) |ga| {
         var p = rs + ga + 10;
@@ -4076,7 +4086,10 @@ pub fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
             q = nq;
         }
     }
+}
 
+/// /Font — 쪽에 쓰이는 글꼴
+fn scanFonts(b: []const u8, rs: usize, re_: usize) void {
     if (find(b[rs..re_], "/Font", 0)) |fa| {
         var p = rs + fa + 5;
         while (p < re_ and isSpace(b[p])) p += 1;
@@ -4131,7 +4144,10 @@ pub fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
             q = nq;
         }
     }
+}
 
+/// /XObject — 그림과 폼. 폼은 제 자원을 따로 갖는다
+fn scanXObjects(b: []const u8, rs: usize, re_: usize, depth: u32) void {
     // 그림 한 장을 꺼낸다. 스캔 문서는 쪽마다 큰 그림 하나가 전부라,
     // 그것만 그려도 미리보기로는 충분하다.
     img.kind = 0;
@@ -4219,6 +4235,15 @@ pub fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
             q = nq;
         }
     }
+}
+
+pub fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
+    scanShadings(b, rs, re_);
+    scanColorSpaces(b, rs, re_);
+    scanProperties(b, rs, re_);
+    scanExtGStates(b, rs, re_);
+    scanFonts(b, rs, re_);
+    scanXObjects(b, rs, re_, depth);
 }
 
 /// 페이지의 폰트와 콘텐츠를 찾아 글자를 뽑는다. 항목 수를 돌려준다.
