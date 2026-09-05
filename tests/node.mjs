@@ -172,6 +172,35 @@ const t = (name, cond, got) => {
     t("그리며 글자 자리도 준다", Array.isArray(r.runs), typeof r.runs);
     pdf.close();
 
+    // 새 견본으로 잡은 셋 — 색과 그림이 규격대로 나오는가.
+    //
+    // 기대값은 poppler 가 같은 크기로 그려 낸 값이다. 셋 다 예전에는
+    // 어긋났다: /Decode [1 0] 을 무시했고, 2·4비트 회색 그림을 통째로
+    // 안 그렸고, Separation 은 잉크 변환 함수를 안 태우고 회색으로 칠했다.
+    {
+      const px = async (name, x, y) => {
+        const d2 = await PDFDocument.open(`${FX}/${name}`);
+        const c2 = createCanvas(10, 10);
+        await d2.render(1, c2, { scale: 1, dpr: 1 });
+        const g2 = c2.getContext("2d").getImageData(0, 0, c2.width, c2.height).data;
+        const i = (y * c2.width + x) * 4;
+        const v = [g2[i], g2[i + 1], g2[i + 2]];
+        d2.close();
+        return v;
+      };
+      const near = (a, b2, tol = 12) => a.every((v, i) => Math.abs(v - b2[i]) <= tol);
+      const dec = await px("t-decode.pdf", 130, 60);
+      t("/Decode [1 0] 이 값을 뒤집는다", near(dec, [225, 225, 225]), dec.join(","));
+      const two = await px("t-bpc.pdf", 25, 60);
+      const four = await px("t-bpc.pdf", 130, 60);
+      t("2비트 회색 그림을 그린다", near(two, [0, 0, 0]), two.join(","));
+      t("4비트 회색 그림을 그린다", near(four, [170, 170, 170]), four.join(","));
+      const s1 = await px("t-sep.pdf", 50, 50);
+      const s2 = await px("t-sep.pdf", 150, 50);
+      t("Separation 이 잉크 변환 함수를 탄다", near(s1, [209, 224, 245]) && near(s2, [48, 117, 209]),
+        `${s1.join(",")} / ${s2.join(",")}`);
+    }
+
     // 문서를 잇달아 열어도 앞 문서의 그림이 안 나오는가.
     //
     // 엔진 인스턴스는 문서끼리 나눠 쓴다(Node 에서는 모듈 하나). 스텐실

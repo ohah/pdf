@@ -1,0 +1,41 @@
+%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /ExtGState << /G0 << /Type /ExtGState /BM /Normal /ca 1 >> /G1 << /Type /ExtGState /BM /Multiply /ca 1 >> /G2 << /Type /ExtGState /BM /Screen /ca 1 >> /G3 << /Type /ExtGState /BM /Overlay /ca 1 >> /G4 << /Type /ExtGState /BM /Darken /ca 1 >> /G5 << /Type /ExtGState /BM /Lighten /ca 1 >> /G6 << /Type /ExtGState /BM /ColorDodge /ca 1 >> /G7 << /Type /ExtGState /BM /ColorBurn /ca 1 >> /G8 << /Type /ExtGState /BM /HardLight /ca 1 >> /G9 << /Type /ExtGState /BM /SoftLight /ca 1 >> /G10 << /Type /ExtGState /BM /Difference /ca 1 >> /G11 << /Type /ExtGState /BM /Exclusion /ca 1 >> >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<<  /Length 562 >>
+stream
+0 0.6 0.3 rg 0 0 200 200 re f
+q /G0 gs 0.9 0.2 0.1 rg 10 150 40 40 re f Q
+q /G1 gs 0.9 0.2 0.1 rg 58 150 40 40 re f Q
+q /G2 gs 0.9 0.2 0.1 rg 106 150 40 40 re f Q
+q /G3 gs 0.9 0.2 0.1 rg 154 150 40 40 re f Q
+q /G4 gs 0.9 0.2 0.1 rg 10 102 40 40 re f Q
+q /G5 gs 0.9 0.2 0.1 rg 58 102 40 40 re f Q
+q /G6 gs 0.9 0.2 0.1 rg 106 102 40 40 re f Q
+q /G7 gs 0.9 0.2 0.1 rg 154 102 40 40 re f Q
+q /G8 gs 0.9 0.2 0.1 rg 10 54 40 40 re f Q
+q /G9 gs 0.9 0.2 0.1 rg 58 54 40 40 re f Q
+q /G10 gs 0.9 0.2 0.1 rg 106 54 40 40 re f Q
+q /G11 gs 0.9 0.2 0.1 rg 154 54 40 40 re f Q
+
+endstream
+endobj
+xref
+0 5
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000802 00000 n 
+trailer
+<< /Size 5 /Root 1 0 R >>
+startxref
+1416
+%%EOF

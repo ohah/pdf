@@ -1,0 +1,40 @@
+%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<<  /Length 580 >>
+stream
+q BT /F1 20 Tf 1 0 0 RG 0 0 0.8 rg 0.8 w 0 Tr 12 170 Td (Mode 0) Tj ET Q
+q BT /F1 20 Tf 1 0 0 RG 0 0 0.8 rg 0.8 w 1 Tr 12 149 Td (Mode 1) Tj ET Q
+q BT /F1 20 Tf 1 0 0 RG 0 0 0.8 rg 0.8 w 2 Tr 12 128 Td (Mode 2) Tj ET Q
+q BT /F1 20 Tf 1 0 0 RG 0 0 0.8 rg 0.8 w 3 Tr 12 107 Td (Mode 3) Tj ET Q
+q BT /F1 20 Tf 1 0 0 RG 0 0 0.8 rg 0.8 w 4 Tr 12 86 Td (Mode 4) Tj ET Q
+q BT /F1 20 Tf 1 0 0 RG 0 0 0.8 rg 0.8 w 5 Tr 12 65 Td (Mode 5) Tj ET Q
+q BT /F1 20 Tf 1 0 0 RG 0 0 0.8 rg 0.8 w 6 Tr 12 44 Td (Mode 6) Tj ET Q
+q BT /F1 20 Tf 1 0 0 RG 0 0 0.8 rg 0.8 w 7 Tr 12 23 Td (Mode 7) Tj ET Q
+
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000873 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+943
+%%EOF

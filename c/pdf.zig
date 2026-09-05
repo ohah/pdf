@@ -1657,6 +1657,14 @@ const CSpace = struct {
     comps: u8,
     /// ICC 프로파일 자리 (iccs.profs 의 번호). 없으면 -1.
     icc: i32 = -1,
+    /// Separation·DeviceN 의 잉크 변환 함수가 놓인 자리. 없으면 fn_e == 0.
+    ///
+    /// 이 함수를 안 태우면 잉크 양을 그냥 회색으로 볼 수밖에 없다. 별색
+    /// 한 통으로 찍은 문서가 회색으로 나왔다 — 파랑이어야 할 자리가.
+    fn_s: usize = 0,
+    fn_e: usize = 0,
+    /// 함수가 내놓는 값을 받을 대체 색공간의 성분 수 (1·3·4)
+    alt_comps: u8 = 3,
 };
 
 // ===== ICC 색 프로파일 =====
@@ -1762,6 +1770,118 @@ export fn slotLen(i: u32) u32 { return if (i < img.n) imgs.all()[i].len else 0; 
 export fn slotFlip(i: u32) u32 { return if (i < img.n) imgs.all()[i].flip else 0; }
 export fn slotSMask(i: u32) u32 { return if (i < img.n) imgs.all()[i].smask else 0; }
 
+/// Separation·DeviceN 배열에서 대체 색공간과 잉크 변환 함수를 찾는다.
+///
+///   [/Separation /이름 대체공간 함수]
+///   [/DeviceN [이름들] 대체공간 함수]
+///
+/// 대체공간은 이름(/DeviceRGB…)이거나 딴 객체다. 함수는 거의 언제나 객체
+/// 번호로 온다 — 스트림일 수 있어서다(형식 0·4).
+fn tintOf(b: []const u8, vs: usize, ve: usize, dn: bool, fs: *usize, fe: *usize, alt: *u8) void {
+    fs.* = 0;
+    fe.* = 0;
+    alt.* = 3;
+    // 이름/이름배열을 건너뛴다
+    var p = vs;
+    while (p < ve and b[p] != '[') p += 1;
+    if (p >= ve) return;
+    p += 1;
+    while (p < ve and isSpace(b[p])) p += 1;
+    // /Separation 또는 /DeviceN 이름표를 지난다
+    while (p < ve and !isSpace(b[p])) p += 1;
+    while (p < ve and isSpace(b[p])) p += 1;
+    if (dn) {
+        // 이름 배열 통째로 건너뛴다
+        if (p < ve and b[p] == '[') {
+            var d: u32 = 0;
+            while (p < ve) : (p += 1) {
+                if (b[p] == '[') d += 1;
+                if (b[p] == ']') { d -= 1; if (d == 0) { p += 1; break; } }
+            }
+        }
+    } else {
+        while (p < ve and !isSpace(b[p])) p += 1; // 잉크 이름 하나
+    }
+    while (p < ve and isSpace(b[p])) p += 1;
+    // 대체 색공간
+    if (p < ve and b[p] == '/') {
+        const ns = p;
+        var w = p + 1;
+        while (w < ve and !isSpace(b[w]) and b[w] != '/' and b[w] != ']') w += 1;
+        const nm = b[ns..w];
+        alt.* = if (findIn(nm, "CMYK", 0) != null) 4
+            else if (findIn(nm, "Gray", 0) != null) 1
+            else 3;
+        p = w;
+    } else if (p < ve and b[p] == '[') {
+        // 배열로 온 대체 공간 — 성분 수만 어림한다
+        var d: u32 = 0;
+        const st2 = p;
+        while (p < ve) : (p += 1) {
+            if (b[p] == '[') d += 1;
+            if (b[p] == ']') { d -= 1; if (d == 0) { p += 1; break; } }
+        }
+        const inner = b[st2..p];
+        alt.* = if (findIn(inner, "CMYK", 0) != null) 4
+            else if (findIn(inner, "Gray", 0) != null) 1
+            else 3;
+    } else if (p < ve and isDigit(b[p])) {
+        var w = p;
+        const on = readUint(b, &w);
+        if (findObj(b, on)) |ob| {
+            const oe = objDictEnd(b, ob);
+            const inner = b[ob..oe];
+            alt.* = if (findIn(inner, "CMYK", 0) != null) 4
+                else if (findIn(inner, "Gray", 0) != null) 1
+                else 3;
+        }
+        // "n g R" 세 낱말을 지난다
+        var seen: u32 = 0;
+        while (p < ve and seen < 3) {
+            while (p < ve and isSpace(b[p])) p += 1;
+            while (p < ve and !isSpace(b[p]) and b[p] != ']') p += 1;
+            seen += 1;
+        }
+    }
+    while (p < ve and isSpace(b[p])) p += 1;
+    // 함수
+    if (p < ve and isDigit(b[p])) {
+        var w = p;
+        const on = readUint(b, &w);
+        if (findObj(b, on)) |ob| {
+            fs.* = ob;
+            fe.* = find(b, "endobj", ob) orelse b.len;
+        }
+    } else if (p < ve and b[p] == '<') {
+        fs.* = p;
+        fe.* = dictEnd(b, p, ve);
+    }
+}
+
+/// 2·4비트 회색을 8비트로 편다. dst 안에서 제자리로 바꾼다.
+fn expandLowBpc(dst: [*]u8, w: u32, h: u32, bpc: u32, room: usize, got: *u32) bool {
+    const row_in = (w * bpc + 7) / 8;
+    const need = @as(usize, w) * @as(usize, h);
+    if (need == 0 or need + @as(usize, row_in) * h > room) return false;
+    const maxv: u32 = (@as(u32, 1) << @intCast(bpc)) - 1;
+    // 뒤에서 앞으로 펴면 제자리로 바꿔도 아직 안 읽은 바이트를 안 덮는다
+    var yy: u32 = h;
+    while (yy > 0) {
+        yy -= 1;
+        var xx: u32 = w;
+        while (xx > 0) {
+            xx -= 1;
+            const bit = xx * bpc;
+            const byte = dst[yy * row_in + bit / 8];
+            const shift: u3 = @intCast(8 - bpc - (bit % 8));
+            const v = (byte >> shift) & @as(u8, @intCast(maxv));
+            dst[yy * w + xx] = @intCast(@as(u32, v) * 255 / maxv);
+        }
+    }
+    got.* = @intCast(need);
+    return true;
+}
+
 /// 그림 객체 하나를 풀어 그림 표에 담는다. 담은 칸 번호를 준다.
 fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
     if (!imgs.room(img.n + 2)) return null;
@@ -1843,6 +1963,8 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
         if (q + 4 <= oe and std_mem_eq(b[q .. q + 4], "true")) { is_mask = true; bpc = 1; }
     }
     var flip = false;
+    // CMYK 갈래는 제 안에서 이미 뒤집는다 — 두 번 먹이지 않으려고 적어 둔다
+    var flip_done = false;
     if (find(b[ob..oe], "/Decode", 0)) |da| {
         var q = ob + da + 7;
         while (q < oe and b[q] != '[') q += 1;
@@ -1961,6 +2083,7 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
                     const rgb = dst[got..][0 .. px * 3];
                     const scratch = dst[got + px * 3 ..][0..extra];
                     const n2 = jpeg.decodeCmyk(dst[0..got], rgb, scratch, flip);
+                    flip_done = true;
                     if (n2 > 0) {
                         // 앞으로 당겨 놓는다 — 바깥은 dst 앞부터 읽는다
                         var mv: usize = 0;
@@ -2011,8 +2134,13 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
                 const npx = @as(usize, w) * @as(usize, h);
                 const comps = if (npx == 0) 0 else length / npx;
                 kind = if (comps >= 3) 1 else if (comps >= 1) 2 else 0;
+            } else if (bpc == 2 or bpc == 4) {
+                // 2·4비트 회색은 8비트로 펴 둔다. 압축된 갈래에는 이 길이
+                // 있었는데 필터 없는 갈래에는 없어, 그런 그림이 통째로
+                // 하얗게 나왔다(kind 0 은 "안 그린다" 는 뜻이다).
+                kind = if (expandLowBpc(dst, w, h, bpc, room, &got)) 2 else 0;
             } else kind = 0;
-            if (kind != 0 and rowb * h > length) kind = 0;
+            if (kind != 0 and (bpc == 8 or bpc == 1) and rowb * h > length) kind = 0;
         }
     } else if (is_flate or find(b[ob..oe], "/LZWDecode", 0) != null or
         find(b[ob..oe], "/RunLengthDecode", 0) != null or
@@ -2047,6 +2175,7 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
                     // CMYK 다. 예전에는 3성분으로 읽어 화소가 통째로 밀렸다 —
                     // 시안이 빨강으로, 검정이 초록으로 나왔다.
                     got = cmykToRgb(dst, n_px, img_icc, flip);
+                    flip_done = true;
                     kind = 1;
                 } else if (comps >= 3) kind = 1 else if (comps >= 1) kind = 2;
             } else if (bpc == 16) {
@@ -2060,6 +2189,7 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
                 const comps = @as(usize, half) / (if (n_px == 0) 1 else n_px);
                 if (comps == 4) {
                     got = cmykToRgb(dst, n_px, img_icc, flip);
+                    flip_done = true;
                     kind = 1;
                 } else if (comps >= 3) kind = 1 else if (comps >= 1) kind = 2;
             } else if (bpc == 2 or bpc == 4) {
@@ -2088,6 +2218,16 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
         }
     }
     if (kind == 0) return null;
+
+    // /Decode [1 0] — 값을 뒤집는다.
+    //
+    // 여태 CMYK 와 1비트 스텐실에만 먹였다. 8비트 회색·RGB 그림에는 안
+    // 먹여, 뒤집으라는 문서를 그대로 그렸다. 색 표(팔레트)가 붙은 그림은
+    // /Decode 가 값이 아니라 색 번호를 다시 매기라는 뜻이라 건드리지 않는다.
+    if (flip and !flip_done and (kind == 1 or kind == 2) and pal_n == 0) {
+        var q3: u32 = 0;
+        while (q3 < got) : (q3 += 1) dst[q3] = 255 - dst[q3];
+    }
 
     const im = &imgs.all()[img.n];
     const nl = @min(name.len, 24);
@@ -3585,6 +3725,31 @@ pub fn runOps(b: []const u8, depth: u32) void {
                     g2 = 0.6;
                     b3 = 0.6;
                 }
+            } else if (ci >= 0 and kind == CS_TINT and cspaces.all()[@intCast(ci)].fn_e > 0 and
+                sp >= cspaces.all()[@intCast(ci)].comps)
+            {
+                // Separation·DeviceN — 잉크 양을 변환 함수에 태워 대체
+                // 색공간의 값으로 바꾼다. 안 태우면 잉크 양을 그대로 회색
+                // 으로 볼 수밖에 없어, 별색으로 찍은 자리가 회색이 된다.
+                const cs3 = cspaces.all()[@intCast(ci)];
+                const from = sp - cs3.comps;
+                var outv: [4]f32 = .{ 0, 0, 0, 0 };
+                // 함수 자리는 *파일* 기준이다. 여기 b 는 내용 스트림이라
+                // 그걸 넘기면 엉뚱한 바이트를 읽는다 — 그래서 늘 0 을 내고
+                // 회색으로 떨어졌다.
+                const n_out = pdffn.evalFnN(searchSlice(), cs3.fn_s, cs3.fn_e, st[from..sp], &outv);
+                if (n_out > 0) {
+                    var rgb6: [3]f32 = .{ 0, 0, 0 };
+                    pdffn.rgbFrom(@min(n_out, @as(u32, cs3.alt_comps)), outv, &rgb6);
+                    r = rgb6[0];
+                    g2 = rgb6[1];
+                    b3 = rgb6[2];
+                } else {
+                    const v4 = st[sp - 1];
+                    r = 1 - v4;
+                    g2 = r;
+                    b3 = r;
+                }
             } else if (ci >= 0 and cspaces.all()[@intCast(ci)].icc >= 0 and
                 sp >= cspaces.all()[@intCast(ci)].comps)
             {
@@ -3895,10 +4060,28 @@ fn scanColorSpaces(b: []const u8, rs: usize, re_: usize) void {
                 var kind: u8 = CS_RGB;
                 var comps: u8 = 3;
                 var icc_ix: i32 = -1;
+                var tint_s: usize = 0;
+                var tint_e: usize = 0;
+                var tint_alt: u8 = 3;
                 if (findIn(val, "/Pattern", 0) != null) { kind = CS_PATTERN; comps = 1; }
                 else if (findIn(val, "/Lab", 0) != null) { kind = CS_LAB; comps = 3; }
-                else if (findIn(val, "/Separation", 0) != null) { kind = CS_TINT; comps = 1; }
-                else if (findIn(val, "/DeviceN", 0) != null) { kind = CS_TINT; comps = 1; }
+                else if (findIn(val, "/Separation", 0) != null or findIn(val, "/DeviceN", 0) != null) {
+                    kind = CS_TINT;
+                    const dn = findIn(val, "/DeviceN", 0) != null;
+                    comps = 1;
+                    // [/DeviceN [이름들] 대체공간 함수] — 이름 수가 성분 수다
+                    if (dn) {
+                        if (findIn(val, "[", if (findIn(val, "/DeviceN", 0)) |x| x + 8 else 0)) |ns| {
+                            var cnt: u8 = 0;
+                            var w = vs + ns + 1;
+                            while (w < ve and b[w] != ']') : (w += 1) {
+                                if (b[w] == '/') cnt +|= 1;
+                            }
+                            if (cnt > 0) comps = @min(cnt, 8);
+                        }
+                    }
+                    tintOf(b, vs, ve, dn, &tint_s, &tint_e, &tint_alt);
+                }
                 else if (findIn(val, "/Indexed", 0) != null) { kind = CS_GRAY; comps = 1; }
                 else if (findIn(val, "/DeviceGray", 0) != null or findIn(val, "/CalGray", 0) != null) { kind = CS_GRAY; comps = 1; }
                 else if (findIn(val, "/DeviceCMYK", 0) != null) { kind = CS_CMYK; comps = 4; }
@@ -3934,6 +4117,9 @@ fn scanColorSpaces(b: []const u8, rs: usize, re_: usize) void {
                 c2.kind = kind;
                 c2.comps = comps;
                 c2.icc = icc_ix;
+                c2.fn_s = tint_s;
+                c2.fn_e = tint_e;
+                c2.alt_comps = tint_alt;
                 cs_n += 1;
             }
             q = nq;
