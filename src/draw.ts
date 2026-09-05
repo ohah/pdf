@@ -110,6 +110,26 @@ function tagOf(buf: Uint8Array): string {
 export type Stencil = { w: number; h: number; flip: boolean; bytes: Uint8Array; key: string };
 
 /** 1비트 마스크나 8비트 그림을 작은 캔버스로 만든다. */
+/**
+ * 그림을 키워 그릴 때는 뭉개지 않는다.
+ *
+ * 캔버스 기본값은 뭉개기 켬이다. 스캔본(500×680)을 894 화소 폭으로 늘리면
+ * 획이 흐려져 검정이 112 까지 옅어졌다 — pdf.js 는 32 로 또렷하다. 규격도
+ * 부드럽게 하라는 것은 /Interpolate 가 참일 때뿐이고 기본은 아니다.
+ *
+ * 줄여 그릴 때는 켜 둔다. 끄면 원본 화소를 띄엄띄엄 집어 무아레가 진다.
+ */
+function smoothFor(g: CanvasRenderingContext2D, img: CanvasImageSource): void {
+  // CanvasImageSource 에는 width 가 없는 갈래(VideoFrame)도 들어 있다.
+  // 크기를 못 읽으면 예전대로 둔다.
+  const q = img as { width?: number; height?: number };
+  if (typeof q.width !== "number" || typeof q.height !== "number") return;
+  const m = g.getTransform();
+  const onW = Math.hypot(m.a, m.b);
+  const onH = Math.hypot(m.c, m.d);
+  g.imageSmoothingEnabled = !(onW > q.width + 0.5 || onH > q.height + 0.5);
+}
+
 function inlineCanvas(
   src: Uint8Array, off: number, len: number,
   w: number, h: number, bpc: number, isMask: boolean, flip: boolean,
@@ -343,7 +363,7 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
   type TileLayer = {
     ctx: CanvasRenderingContext2D; parent: CanvasRenderingContext2D;
     mat: [number, number, number, number, number, number];
-    xs: number; ys: number; sx: number; sy: number; depth: number;
+    xs: number; ys: number; sx: number; sy: number; tw: number; th: number; depth: number;
   };
   const tiles: (TileLayer | null)[] = [];
   const like = () => {
@@ -489,7 +509,7 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
         if (!tg) { tiles.push(null); break; }
         tg.setTransform(sx * k, 0, 0, sy * k, 0, 0);
         carry(g, tg);
-        tiles.push({ ctx: tg, parent: g, mat: m, xs, ys, sx: sx * k, sy: sy * k, depth });
+        tiles.push({ ctx: tg, parent: g, mat: m, xs, ys, sx: sx * k, sy: sy * k, tw, th, depth });
         g = tg;
         break;
       }
@@ -504,11 +524,20 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
           pat = null;
         }
         g.save();
-        // 무늬 좌표계로 옮긴 뒤, 한 판이 XStep×YStep 을 덮도록 되돌린다
+        // 무늬 좌표계로 옮긴 뒤, 한 판이 XStep×YStep 을 덮도록 되돌린다.
+        //
+        // 되돌릴 때 1/배율 로 나누면 안 된다. 판은 정수 화소로 올려 만드는데
+        // (ceil), 칸 크기가 정수가 아니면 올린 만큼이 그대로 칸 간격 오차가
+        // 된다 — 칸마다 조금씩 밀려 멀리 갈수록 무늬가 어긋난다. A4 쪽을
+        // 1.5배로 그리면 595*1.5 = 892.5 라 배율이 1.50084 가 되고, 10pt
+        // 칸이 15.0084 화소인데 판은 16 화소가 되어 칸마다 1화소씩 밀렸다.
+        //
+        // 판의 화소 수를 그대로 XStep×YStep 에 맞춘다. 그러면 올림을 하든
+        // 크기를 줄이든 간격은 정확하다.
         g.transform(top.mat[0], top.mat[1], top.mat[2], top.mat[3], top.mat[4], top.mat[5]);
-        g.scale(1 / top.sx, 1 / top.sy);
-        const bw = top.xs * top.sx;
-        const bh = top.ys * top.sy;
+        g.scale(top.xs / top.tw, top.ys / top.th);
+        const bw = top.tw;
+        const bh = top.th;
         if (pat) {
           g.fillStyle = pat;
           // 오려 낸 자리 안만 칠해진다 — 넉넉히 덮는다
@@ -790,6 +819,7 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
         const pick = asImage(slot > 0 ? input.bitmaps?.[slot - 1] : undefined, canvas);
         if (pick) {
           g.save();
+          smoothFor(g, pick);
           g.transform(1, 0, 0, -1, 0, 1);
           g.drawImage(pick, 0, 0, 1, 1);
           g.restore();
@@ -799,6 +829,7 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
         if (!one) break;
         // 그림은 현재 변환의 단위 정사각형에 놓인다. 위아래를 뒤집어 맞춘다.
         g.save();
+        smoothFor(g, one);
         g.transform(1, 0, 0, -1, 0, 1);
         g.drawImage(one, 0, 0, 1, 1);
         g.restore();
