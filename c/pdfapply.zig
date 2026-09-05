@@ -360,7 +360,7 @@ pub fn apply() usize {
     // 하나가 객체 여럿을 낳는다 — 주석은 겉모습 스트림까지 둘, 새 칸도
     // 마찬가지다. 넉넉히 잡지 않으면 뒤가 조용히 빠진다(주석 2000개 중
     // 1038개만 나갔다).
-    const xr = xrefTables(core.pick_n * 4 + @as(usize, core.edit_n) * 2 + core.note_n * 3 + core.newf_n * 3 + 128) orelse return 0;
+    const xr = xrefTables(core.pick_n * 4 + @as(usize, core.edit.n) * 2 + core.note.n * 3 + core.newf_n * 3 + 128) orelse return 0;
     const new_offsets = xr.offs;
     const new_nums = xr.nums;
     var new_n: usize = 0;
@@ -383,7 +383,7 @@ pub fn apply() usize {
 
     // 2) 쪽 위에 얹을 것 — 워터마크와 라벨. 둘 다 같은 길을 탄다.
     const overlay = core.wm_n > 0 or lab_n > 0;
-    const has_notes = core.note_n > 0;
+    const has_notes = core.note.n > 0;
     var wm_pre: u32 = 0;
     var wm_content: u32 = 0;
     var wm_font: u32 = 0;
@@ -589,7 +589,7 @@ pub fn apply() usize {
     // 새로 다는 주석 — 주석 객체와 겉모습을 함께 적는다
     if (has_notes) {
         var ni: u32 = 0;
-        while (ni < core.note_n and new_n + 3 < new_nums.len and core.outRoom(pos, 8192)) : (ni += 1) {
+        while (ni < core.note.n and new_n + 3 < new_nums.len and core.outRoom(pos, 8192)) : (ni += 1) {
             const t = &core.notes.all()[ni];
             const w = t.rect[2] - t.rect[0];
             const h = t.rect[3] - t.rect[1];
@@ -717,8 +717,8 @@ pub fn apply() usize {
                     pu(&bd, &bl, " RG 2 w 1 J 1 j ");
                     var k2: u32 = 0;
                     while (k2 < t.pts and bl + 40 < bd.len) : (k2 += 1) {
-                        const px = core.note_pts[t.off + k2 * 2] - t.rect[0];
-                        const py = core.note_pts[t.off + k2 * 2 + 1] - t.rect[1];
+                        const px = core.note.pts[t.off + k2 * 2] - t.rect[0];
+                        const py = core.note.pts[t.off + k2 * 2 + 1] - t.rect[1];
                         num3(&bd, &bl, px);
                         pu(&bd, &bl, " ");
                         num3(&bd, &bl, py);
@@ -790,15 +790,15 @@ pub fn apply() usize {
                 var k3: u32 = 0;
                 while (k3 < t.pts and core.outRoom(pos, 32)) : (k3 += 1) {
                     core.appendStr(&pos, " ");
-                    core.appendNum(&pos, @intFromFloat(@max(0, core.note_pts[t.off + k3 * 2])));
+                    core.appendNum(&pos, @intFromFloat(@max(0, core.note.pts[t.off + k3 * 2])));
                     core.appendStr(&pos, " ");
-                    core.appendNum(&pos, @intFromFloat(@max(0, core.note_pts[t.off + k3 * 2 + 1])));
+                    core.appendNum(&pos, @intFromFloat(@max(0, core.note.pts[t.off + k3 * 2 + 1])));
                 }
                 core.appendStr(&pos, " ]]");
             }
             if (t.kind != 6 and t.len > 0) {
                 // 메모 글 — 라틴 밖 글자가 있으면 UTF-16 으로
-                const val = core.note_buf[t.off..][0..t.len];
+                const val = core.note.buf[t.off..][0..t.len];
                 var wide = false;
                 var cz: usize = 0;
                 while (cz < val.len) {
@@ -1009,7 +1009,7 @@ pub fn apply() usize {
                     }
                 }
                 var nk: u32 = 0;
-                while (nk < core.note_n) : (nk += 1) {
+                while (nk < core.note.n) : (nk += 1) {
                     if (core.notes.all()[nk].page != core.pick.all()[i] or core.notes.all()[nk].obj == 0) continue;
                     core.appendStr(&pos, " ");
                     core.appendNum(&pos, core.notes.all()[nk].obj);
@@ -1098,12 +1098,12 @@ pub fn apply() usize {
     }
 
     // 3) 채운 입력 칸을 다시 쓴다
-    if (core.edit_n > 0 or core.newf_n > 0) {
+    if (core.edit.n > 0 or core.newf_n > 0) {
         const fld_font = mask_next;
         var ap_next = mask_next + 1;
         var wrote_font = false;
         var ei: u32 = 0;
-        while (ei < core.edit_n and new_n + 3 < new_nums.len and core.outRoom(pos, 4096)) : (ei += 1) {
+        while (ei < core.edit.n and new_n + 3 < new_nums.len and core.outRoom(pos, 4096)) : (ei += 1) {
             const e = core.edits.all()[ei];
             // 지울 칸은 다시 적지 않는다. 쪽의 /Annots 와 양식의 /Fields 에서
             // 이름이 빠지므로 아무도 가리키지 않는 객체가 된다.
@@ -1115,7 +1115,7 @@ pub fn apply() usize {
             if (ds2 >= oe) continue;
             const de2 = pdfenc.dictEnd(b, ds2, oe);
             if (de2 <= ds2 + 2) continue;
-            const val = core.edit_buf[e.off..][0..e.len];
+            const val = core.edit.buf[e.off..][0..e.len];
 
             // 글상자면 겉모습을 새로 그린다
             var ap_obj: u32 = 0;

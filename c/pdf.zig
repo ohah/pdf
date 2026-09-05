@@ -19,44 +19,52 @@ const PAGE: usize = 64 * 1024;
 pub var in_len: usize = 0;
 pub var out_len: usize = 0;
 var out_off: usize = 0;
-/// 객체 스트림(ObjStm)을 풀어 평문 객체로 펼쳐 두는 자리.
-/// 원본 뒤에 이어 두고, 객체를 찾을 때 원본과 이 영역을 모두 훑는다.
-var exp_off: usize = 0;
-var exp_len: usize = 0;
-var exp_cap: usize = 0;
+var exp: struct {
+    /// 원본 뒤에 이어 두고, 객체를 찾을 때 원본과 이 영역을 모두 훑는다.
+    off: usize = 0,
+    len: usize = 0,
+    cap: usize = 0,
+} = .{};
 /// 병합할 두 번째 문서
 pub var b2_off: usize = 0;
 pub var b2_len: usize = 0;
 pub var b2_cap: usize = 0;
 /// 이어 붙일 문서를 담으려면 이만큼은 있어야 한다 — 다음 reserve 에서 본다
 var b2_want: usize = 0;
-/// 페이지에서 꺼낸 그림 한 장을 두는 자리
-var img_off: usize = 0;
+var img: struct {
+    /// 페이지에서 꺼낸 그림 한 장을 두는 자리
+    off: usize = 0,
+    cap: usize = 0,
+    len: usize = 0,
+    w: u32 = 0,
+    h: u32 = 0,
+    /// 0=없음 1=RGB 2=흑백 3=JPEG(브라우저가 푼다)
+    kind: u32 = 0,
+    n: u32 = 0,
+    used: u32 = 0,
+    off_first: u32 = 0,
+} = .{};
 /// JBIG2 낱장 곳간 — 문서마다 한 번 잡는다
 var jb_pool_at: usize = 0;
-var img_cap: usize = 0;
 var font_off: usize = 0;
 pub var font_cap: usize = 0;
-var inl_off: usize = 0;
-var inl_cap: usize = 0;
-var inl_used: u32 = 0;
+var inl: struct {
+    off: usize = 0,
+    cap: usize = 0,
+    used: u32 = 0,
+} = .{};
 pub var sub_off: usize = 0;
 var sub_cap: usize = 0;
 var t1_off: usize = 0;
 pub var t1_cap: usize = 0;
 pub var t1_used: u32 = 0;
-var img_len: usize = 0;
-var img_w: u32 = 0;
-var img_h: u32 = 0;
-/// 0=없음 1=RGB 2=흑백 3=JPEG(브라우저가 푼다)
-var img_kind: u32 = 0;
 
 pub fn heapBase() usize { return @intFromPtr(&__heap_base); }
 
 /// 입력·출력에 쓸 자리를 확보한다. 모자라면 메모리를 늘린다.
 export fn reserve(want_in: usize, want_out: usize) u32 {
     // 원본 · 펼친 객체 · 출력 순으로 잡는다. 펼친 객체는 원본만큼 여유를 준다.
-    exp_cap = want_in + 1024 * 1024;
+    exp.cap = want_in + 1024 * 1024;
     // 여벌 자리.
     //
     // 이어 붙일 둘째 문서를 담기도 하고, 스트림 하나를 풀거나 푸는 동안
@@ -67,25 +75,25 @@ export fn reserve(want_in: usize, want_out: usize) u32 {
     // 아래 다섯은 여기서 안 잡는다. 글자만 있는 계약서를 열어도 그림 자리
     // 48MB 를, 글꼴이 안 박힌 문서도 글꼴 자리 8MB 를 들고 있었다 —
     // 문서가 실제로 그것을 쓸 때 잡는다(areaOf).
-    img_cap = 48 * 1024 * 1024;
+    img.cap = 48 * 1024 * 1024;
     font_cap = 8 * 1024 * 1024;
-    inl_cap = 8 * 1024 * 1024;
+    inl.cap = 8 * 1024 * 1024;
     sub_cap = 6 * 1024 * 1024; // 폼·글리프 그림용, 깊이마다 2MB
     t1_cap = 4 * 1024 * 1024; // Type1 글리프 프로그램
-    img_off = 0;
+    img.off = 0;
     jb_pool_at = 0;
     font_off = 0;
-    inl_off = 0;
+    inl.off = 0;
     sub_off = 0;
     t1_off = 0;
-    const need = heapBase() + want_in + exp_cap + b2_cap + want_out;
+    const need = heapBase() + want_in + exp.cap + b2_cap + want_out;
     const have = @wasmMemorySize(0) * PAGE;
     if (need > have) {
         const more = (need - have + PAGE - 1) / PAGE;
         if (@wasmMemoryGrow(0, more) < 0) return 0;
     }
-    exp_off = heapBase() + want_in;
-    b2_off = exp_off + exp_cap;
+    exp.off = heapBase() + want_in;
+    b2_off = exp.off + exp.cap;
     out_off = b2_off + b2_cap;
     out_cap = want_out;
     return 1;
@@ -103,9 +111,9 @@ fn areaOf(off: *usize, cap: usize) usize {
     off.* = zoneAlloc(cap) orelse 0;
     return off.*;
 }
-fn imgArea() usize { return areaOf(&img_off, img_cap); }
+fn imgArea() usize { return areaOf(&img.off, img.cap); }
 pub fn fontArea() usize { return areaOf(&font_off, font_cap); }
-fn inlArea() usize { return areaOf(&inl_off, inl_cap); }
+fn inlArea() usize { return areaOf(&inl.off, inl.cap); }
 fn subArea() usize { return areaOf(&sub_off, sub_cap); }
 pub fn t1Area() usize { return areaOf(&t1_off, t1_cap); }
 
@@ -165,11 +173,11 @@ export fn secondPtr() usize { return b2_off; }
 export fn setSecondRoom(n: usize) void { b2_want = n; }
 export fn maxSecond() usize { return b2_cap; }
 
-fn expBuf() [*]u8 { return @ptrFromInt(exp_off); }
+fn expBuf() [*]u8 { return @ptrFromInt(exp.off); }
 
 /// 원본과 펼친 객체를 한 덩어리로 본다. findObj 가 둘 다 훑도록.
 pub fn searchSlice() []u8 {
-    return @as([*]u8, @ptrFromInt(heapBase()))[0 .. in_len + exp_len];
+    return @as([*]u8, @ptrFromInt(heapBase()))[0 .. in_len + exp.len];
 }
 
 
@@ -774,37 +782,34 @@ pub fn dictInt(b: []const u8, start: usize, end: usize, key: []const u8) ?u32 {
     return readUint(b, &p);
 }
 
-/// 쪽을 담는 자리. 모자라면 늘린다.
-///
-/// 쪽 수는 걷어 봐야 안다. 객체 수로 미리 어림잡았더니, 같은 쪽을 여러 번
-/// 가리키는 문서(/Kids 에 같은 객체가 500번)가 열여섯 쪽으로 잘렸다 — 쪽
-/// 하나가 객체 하나라는 가정이 그런 문서에서는 깨진다. 지금 자리를 잡아 둔
-/// 것이 이 표뿐이므로 뒤로 이어 붙이면 옮길 일 없이 늘어난다.
-pub var walk_at: usize = 0;
-pub var walk_cap: u32 = 0;
-pub var walk_ceil: u32 = 0;
+pub var walk: struct {
+    /// 것이 이 표뿐이므로 뒤로 이어 붙이면 옮길 일 없이 늘어난다.
+    at: usize = 0,
+    cap: u32 = 0,
+    ceil: u32 = 0,
+} = .{};
 
 /// 걷어 담을 자리를 처음 잡는다. 천장은 파일 크기로 묶는다 — 고리처럼
 /// 얽힌 쪽 트리를 만나도 훑는 양이 파일 크기를 넘지 않게 한다.
 pub fn walkStart(total: usize) bool {
-    walk_ceil = @intCast(@max(@as(usize, 64), @min(total / 4 + 64, 1 << 22)));
-    walk_cap = 0;
-    walk_at = zoneAlloc(256 * 4) orelse return false;
-    walk_cap = 256;
+    walk.ceil = @intCast(@max(@as(usize, 64), @min(total / 4 + 64, 1 << 22)));
+    walk.cap = 0;
+    walk.at = zoneAlloc(256 * 4) orelse return false;
+    walk.cap = 256;
     return true;
 }
 
 fn walkPush(n: *u32, obj: u32) bool {
-    if (n.* >= walk_cap) {
-        if (walk_cap >= walk_ceil) { pages_cut = true; return false; }
+    if (n.* >= walk.cap) {
+        if (walk.cap >= walk.ceil) { pages_cut = true; return false; }
         // 두 배씩. 짝수로 잡아 다음 자리가 여덟 바이트에 맞게 둔다.
-        var want: u32 = @min(walk_ceil, walk_cap * 2);
+        var want: u32 = @min(walk.ceil, walk.cap * 2);
         want += want & 1;
-        if (want <= walk_cap) { pages_cut = true; return false; }
-        if (zoneAlloc(@as(usize, want - walk_cap) * 4) == null) { pages_cut = true; return false; }
-        walk_cap = want;
+        if (want <= walk.cap) { pages_cut = true; return false; }
+        if (zoneAlloc(@as(usize, want - walk.cap) * 4) == null) { pages_cut = true; return false; }
+        walk.cap = want;
     }
-    u32sAt(walk_at, walk_cap)[n.*] = obj;
+    u32sAt(walk.at, walk.cap)[n.*] = obj;
     n.* += 1;
     return true;
 }
@@ -931,7 +936,7 @@ pub fn intAfter(b: []const u8, from: usize, to: usize, key: []const u8) ?u32 {
 /// 그러면 파일을 아무리 뒤져도 "/Type /Pages" 가 보이지 않는다. 미리 풀어 원본
 /// 뒤에 이어 두면 이후 로직은 평문 PDF 를 다루듯 그대로 동작한다.
 fn expandObjectStreams() void {
-    exp_len = 0;
+    exp.len = 0;
     const b = @as([*]u8, @ptrFromInt(heapBase()))[0..in_len];
     var scan: usize = 0;
     while (scan < in_len) {
@@ -950,14 +955,14 @@ fn expandObjectStreams() void {
         if (data + length > in_len) continue;
 
         // 임시로 뒤쪽에 풀고, 앞쪽에 객체 형태로 다시 적는다.
-        if (exp_len + 1024 >= exp_cap) return;
-        const tmp_off = exp_len + (exp_cap - exp_len) / 2;
-        const room = exp_cap - tmp_off;
+        if (exp.len + 1024 >= exp.cap) return;
+        const tmp_off = exp.len + (exp.cap - exp.len) / 2;
+        const room = exp.cap - tmp_off;
         const got = pw_inflate(b[data..].ptr, @intCast(length), expBuf() + tmp_off, @intCast(room));
         if (got <= 0) continue;
         const dec = expBuf()[tmp_off .. tmp_off + @as(usize, @intCast(got))];
 
-        var write = exp_len;
+        var write = exp.len;
         var hp: usize = 0;
         var k: u32 = 0;
         while (k < n_obj) : (k += 1) {
@@ -989,7 +994,7 @@ fn expandObjectStreams() void {
             w += 8;
             write = w;
         }
-        exp_len = write;
+        exp.len = write;
     }
 }
 
@@ -1003,14 +1008,14 @@ pub export fn parse(len: usize) u32 {
     zoneReset();
     // 자리잡개를 비웠으니 거기서 떼어 쓰던 것들도 다시 잡아야 한다.
     // 안 그러면 앞 문서가 쓰던 자리를 가리킨 채 새 문서의 색인이 그 위에 얹힌다.
-    img_off = 0;
+    img.off = 0;
     font_off = 0;
-    inl_off = 0;
+    inl.off = 0;
     sub_off = 0;
     t1_off = 0;
     mask_at = 0;
     mask_used = 0;
-    att_at = 0;
+    att.at = 0;
     {
         const head = inputSlice2(len);
         if (!std_mem_eq(head[0..5], "%PDF-")) return 0;
@@ -1151,7 +1156,7 @@ pub export fn parse(len: usize) u32 {
     page_count = 0;
     collectPages(b, pages_obj, 0, &page_count);
     // 쓴 만큼만 남기고 나머지 표를 그 뒤에 잇는다
-    pg_at = walk_at;
+    pg_at = walk.at;
     pg_cap = page_count;
     zoneShrink(pg_at + @as(usize, page_count) * 4);
     {
@@ -1162,15 +1167,15 @@ pub export fn parse(len: usize) u32 {
         rot.at = zoneAlloc(@as(usize, page_count) * 2 + 2) orelse return 0;
         rot.cap = page_count;
         clearPageRotate();
-        lbl_off_at = zoneAlloc(@as(usize, page_count) * 4 + 4) orelse return 0;
-        lbl_len_at = zoneAlloc(@as(usize, page_count) + 4) orelse return 0;
+        lbl.off_at = zoneAlloc(@as(usize, page_count) * 4 + 4) orelse return 0;
+        lbl.len_at = zoneAlloc(@as(usize, page_count) + 4) orelse return 0;
         // 0 으로 채운다. 예전에는 .bss 라 저절로 0 이었지만 지금은 앞 문서가
         // 쓰던 자리를 물려받는다 — 라벨이 안 붙은 쪽에서 남의 자리·길이를
         // 읽어 엉뚱한 글자를 내놓거나 아예 열다 죽었다.
-        @memset(u32sAt(lbl_off_at, page_count + 1), 0);
-        @memset(@as([*]u8, @ptrFromInt(lbl_len_at))[0 .. page_count + 4], 0);
-        lbl_buf_cap = @max(@as(usize, 1024), @as(usize, page_count) * 16);
-        lbl_buf_at = zoneAlloc(lbl_buf_cap) orelse return 0;
+        @memset(u32sAt(lbl.off_at, page_count + 1), 0);
+        @memset(@as([*]u8, @ptrFromInt(lbl.len_at))[0 .. page_count + 4], 0);
+        lbl.buf_cap = @max(@as(usize, 1024), @as(usize, page_count) * 16);
+        lbl.buf_at = zoneAlloc(lbl.buf_cap) orelse return 0;
         label_n = 0;
     }
     if (root != 0) collectOutline(b, root);
@@ -1338,9 +1343,12 @@ var run_m: [4]f32 = .{ 1, 0, 0, 1 };
 var run_size: f32 = 0;
 var run_off: u32 = 0;
 var run_roff: u32 = 0;
-/// 지금 걸린 채우기 투명도와 섞기 방식. 투명 그룹을 겹칠 때 쓴다.
-var cur_alpha: f32 = 1;
-var cur_bm: i32 = 0;
+var cur: struct {
+    /// 지금 걸린 채우기 투명도와 섞기 방식. 투명 그룹을 겹칠 때 쓴다.
+    alpha: f32 = 1,
+    bm: i32 = 0,
+    font: i32 = -1,
+} = .{};
 var run_adv: f32 = 0;
 var run_font: i32 = -1;
 var run_mode: i32 = 0;
@@ -1359,22 +1367,24 @@ fn runFlush() void {
         @floatFromInt(run_roff), @floatFromInt(rtext_n - run_roff),
     });
 }
-/// 지금 그리는 경로가 차지하는 범위. 타일 무늬를 깔 자리를 정하는 데 쓴다.
-var path_x0: f32 = 1e30;
-var path_y0: f32 = 1e30;
-var path_x1: f32 = -1e30;
-var path_y1: f32 = -1e30;
+var path: struct {
+    /// 지금 그리는 경로가 차지하는 범위. 타일 무늬를 깔 자리를 정하는 데 쓴다.
+    x0: f32 = 1e30,
+    y0: f32 = 1e30,
+    x1: f32 = -1e30,
+    y1: f32 = -1e30,
+} = .{};
 fn pathTouch(x: f32, y: f32) void {
-    if (x < path_x0) path_x0 = x;
-    if (x > path_x1) path_x1 = x;
-    if (y < path_y0) path_y0 = y;
-    if (y > path_y1) path_y1 = y;
+    if (x < path.x0) path.x0 = x;
+    if (x > path.x1) path.x1 = x;
+    if (y < path.y0) path.y0 = y;
+    if (y > path.y1) path.y1 = y;
 }
 fn pathReset() void {
-    path_x0 = 1e30;
-    path_y0 = 1e30;
-    path_x1 = -1e30;
-    path_y1 = -1e30;
+    path.x0 = 1e30;
+    path.y0 = 1e30;
+    path.x1 = -1e30;
+    path.y1 = -1e30;
 }
 
 pub fn emitOp(code: f32, args: []const f32) void {
@@ -1492,7 +1502,6 @@ pub const FontMap = struct {
 /// 글꼴을 많이 쓰는 쪽에서 33번째부터 글자가 다른 글꼴로 찍혔다.
 pub var fonts: Table(FontMap) = .{};
 pub var font_n: u8 = 0;
-var cur_font: i32 = -1;
 /// 글꼴 영역에서 이번 쪽이 쓴 만큼
 pub var font_used: u32 = 0;
 
@@ -1521,7 +1530,7 @@ const Img = struct {
     kind: u32, // 1 RGB  2 회색  3 JPEG  4 1비트 스텐실
     w: u32,
     h: u32,
-    off: u32, // img_off 로부터
+    off: u32, // img.off 로부터
     len: u32,
     flip: u8, // /Decode [1 0] — 켜고 끄는 값이 뒤집혀 있다
     smask: u8, // 부드러운 마스크가 든 칸 번호 + 1
@@ -1698,25 +1707,23 @@ fn findForm(name: []const u8) i32 {
         if (txEq(forms.all()[i].name[0..forms.all()[i].name_len], name)) return @intCast(i);
     return -1;
 }
-var img_n: u32 = 0;
-var img_used: u32 = 0;
 
-export fn imageSlots() u32 { return img_n; }
+export fn imageSlots() u32 { return img.n; }
 export fn jbDbgN() u32 { return jbig2.dbg_n; }
 export fn jbDbg(i: u32, k: u32) i32 { return if (i < jbig2.dbg_n and k < 5) jbig2.dbg[i][k] else 0; }
 export fn jbSymN() u32 { return jbig2.sym_n; }
 export fn jbSymW(i: u32) u32 { return if (i < jbig2.sym_n) jbig2.syms[i].w else 0; }
-export fn slotKind(i: u32) u32 { return if (i < img_n) imgs.all()[i].kind else 0; }
-export fn slotWidth(i: u32) u32 { return if (i < img_n) imgs.all()[i].w else 0; }
-export fn slotHeight(i: u32) u32 { return if (i < img_n) imgs.all()[i].h else 0; }
-export fn slotOff(i: u32) u32 { return if (i < img_n) imgs.all()[i].off else 0; }
-export fn slotLen(i: u32) u32 { return if (i < img_n) imgs.all()[i].len else 0; }
-export fn slotFlip(i: u32) u32 { return if (i < img_n) imgs.all()[i].flip else 0; }
-export fn slotSMask(i: u32) u32 { return if (i < img_n) imgs.all()[i].smask else 0; }
+export fn slotKind(i: u32) u32 { return if (i < img.n) imgs.all()[i].kind else 0; }
+export fn slotWidth(i: u32) u32 { return if (i < img.n) imgs.all()[i].w else 0; }
+export fn slotHeight(i: u32) u32 { return if (i < img.n) imgs.all()[i].h else 0; }
+export fn slotOff(i: u32) u32 { return if (i < img.n) imgs.all()[i].off else 0; }
+export fn slotLen(i: u32) u32 { return if (i < img.n) imgs.all()[i].len else 0; }
+export fn slotFlip(i: u32) u32 { return if (i < img.n) imgs.all()[i].flip else 0; }
+export fn slotSMask(i: u32) u32 { return if (i < img.n) imgs.all()[i].smask else 0; }
 
 /// 그림 객체 하나를 풀어 그림 표에 담는다. 담은 칸 번호를 준다.
 fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
-    if (!imgs.room(img_n + 2, 16)) return null;
+    if (!imgs.room(img.n + 2, 16)) return null;
     const oe = objDictEnd(b, ob);
     if (find(b[ob..oe], "/Image", 0) == null) return null;
     const w = intAfter(b, ob, oe, "/Width") orelse 0;
@@ -1812,9 +1819,9 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
     if (data < b.len and b[data] == '\n') data += 1;
     if (data > b.len or length > b.len - data) return null; // 넘침 없이 견준다
 
-    const room = img_cap - img_used;
+    const room = img.cap - img.used;
     if (room < 4096) return null;
-    const dst = @as([*]u8, @ptrFromInt(imgArea() + img_used));
+    const dst = @as([*]u8, @ptrFromInt(imgArea() + img.used));
     var kind: u32 = 0;
     var got: u32 = 0;
     if (is_jbig2) {
@@ -1979,7 +1986,7 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
             } else if (bpc == 8 and pal_n >= 3) {
                 // 팔레트를 펴서 RGB 로 만든다
                 const n_px = @as(usize, w) * @as(usize, h);
-                if (img_used + got + n_px * 3 <= img_cap and got >= n_px) {
+                if (img.used + got + n_px * 3 <= img.cap and got >= n_px) {
                     const out3 = dst + got;
                     var k3: usize = 0;
                     while (k3 < n_px) : (k3 += 1) {
@@ -2018,7 +2025,7 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
                 // 2·4비트 회색은 8비트로 펴 둔다
                 const row_in = (w * bpc + 7) / 8;
                 const need2 = w * h;
-                if (img_used + got + need2 <= img_cap) {
+                if (img.used + got + need2 <= img.cap) {
                     const out2 = dst + got;
                     var yy: u32 = 0;
                     while (yy < h) : (yy += 1) {
@@ -2041,7 +2048,7 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
     }
     if (kind == 0) return null;
 
-    const im = &imgs.all()[img_n];
+    const im = &imgs.all()[img.n];
     const nl = @min(name.len, 24);
     var k: usize = 0;
     while (k < nl) : (k += 1) im.name[k] = name[k];
@@ -2049,14 +2056,14 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
     im.kind = kind;
     im.w = w;
     im.h = h;
-    im.off = img_used;
+    im.off = img.used;
     im.len = got;
     im.flip = if (flip) 1 else 0;
     im.smask = 0;
-    const slot = img_n;
-    if (slot == 0) { img_kind = kind; img_w = w; img_h = h; img_off_first = img_used; img_len = got; }
-    img_n += 1;
-    img_used += (got + 3) & ~@as(u32, 3);
+    const slot = img.n;
+    if (slot == 0) { img.kind = kind; img.w = w; img.h = h; img.off_first = img.used; img.len = got; }
+    img.n += 1;
+    img.used += (got + 3) & ~@as(u32, 3);
 
     // 부드러운 마스크 — 투명도가 여기 들어 있다
     if (find(b[ob..oe], "/SMask", 0)) |sa| {
@@ -2115,15 +2122,15 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
 /// 스텐실은 1 이 "가린다" 는 뜻이라 알파로는 0 이 된다. /Decode [1 0] 이
 /// 붙어 있으면 그 뜻이 뒤집힌다.
 fn stencilAlpha(mi: u32) ?u32 {
-    if (mi >= img_n or !imgs.room(img_n + 1, 16)) return null;
+    if (mi >= img.n or !imgs.room(img.n + 1, 16)) return null;
     const im = imgs.all()[mi];
     if (im.kind != 4 or im.w == 0 or im.h == 0) return null;
     const px = @as(usize, im.w) * im.h;
-    if (px == 0 or px + 4 > img_cap - img_used) return null;
+    if (px == 0 or px + 4 > img.cap - img.used) return null;
     const stride = (@as(usize, im.w) + 7) / 8;
     if (im.len < stride * im.h) return null;
     const src = @as([*]const u8, @ptrFromInt(imgArea() + im.off));
-    const dst = @as([*]u8, @ptrFromInt(imgArea() + img_used));
+    const dst = @as([*]u8, @ptrFromInt(imgArea() + img.used));
     var y: u32 = 0;
     while (y < im.h) : (y += 1) {
         var x: u32 = 0;
@@ -2133,26 +2140,26 @@ fn stencilAlpha(mi: u32) ?u32 {
             dst[@as(usize, y) * im.w + x] = if (masked) 0 else 255;
         }
     }
-    const slot2 = img_n;
+    const slot2 = img.n;
     imgs.all()[slot2] = .{
         .name_len = 0, .name = undefined, .kind = 2, .w = im.w, .h = im.h,
-        .off = img_used, .len = @intCast(px), .flip = 0, .smask = 0,
+        .off = img.used, .len = @intCast(px), .flip = 0, .smask = 0,
     };
-    img_n += 1;
-    img_used += @intCast((px + 3) & ~@as(usize, 3));
+    img.n += 1;
+    img.used += @intCast((px + 3) & ~@as(usize, 3));
     return slot2;
 }
 
 /// 색 키 가리개 — 범위에 든 화소를 투명으로 만드는 알파 판을 새 칸에 짓는다.
 fn colorKeyMask(slot: u32, lo: []const u32, hi: []const u32) void {
-    if (slot >= img_n or !imgs.room(img_n + 1, 16)) return;
+    if (slot >= img.n or !imgs.room(img.n + 1, 16)) return;
     const im = imgs.all()[slot];
     const px = @as(usize, im.w) * im.h;
-    if (px == 0 or px > img_cap - img_used) return;
+    if (px == 0 or px > img.cap - img.used) return;
     const comps: u32 = if (im.kind == 1) 3 else 1;
     if (lo.len < comps) return;
     const src = @as([*]const u8, @ptrFromInt(imgArea() + im.off));
-    const dst = @as([*]u8, @ptrFromInt(imgArea() + img_used));
+    const dst = @as([*]u8, @ptrFromInt(imgArea() + img.used));
     if (im.len < px * comps) return;
     var i: usize = 0;
     while (i < px) : (i += 1) {
@@ -2164,13 +2171,13 @@ fn colorKeyMask(slot: u32, lo: []const u32, hi: []const u32) void {
         }
         dst[i] = if (inside) 0 else 255;
     }
-    imgs.all()[img_n] = .{
+    imgs.all()[img.n] = .{
         .name_len = 0, .name = undefined, .kind = 2, .w = im.w, .h = im.h,
-        .off = img_used, .len = @intCast(px), .flip = 0, .smask = 0,
+        .off = img.used, .len = @intCast(px), .flip = 0, .smask = 0,
     };
-    imgs.all()[slot].smask = @intCast(img_n + 1);
-    img_n += 1;
-    img_used += @intCast((px + 3) & ~@as(usize, 3));
+    imgs.all()[slot].smask = @intCast(img.n + 1);
+    img.n += 1;
+    img.used += @intCast((px + 3) & ~@as(usize, 3));
 }
 
 /// JPEG 칸을 엔진 안에서 풀어 RGB 칸을 새로 만든다. 새 칸 번호, 못 풀면 -1.
@@ -2179,27 +2186,27 @@ fn colorKeyMask(slot: u32, lo: []const u32, hi: []const u32) void {
 /// Node 처럼 풀어 줄 사람이 없는 자리에서만 부른다 — 그러지 않으면 스캔
 /// 문서가 흰 종이로 나온다. 베이스라인과 프로그레시브를 다 푼다.
 export fn jpegToRgb(i: u32) i32 {
-    if (i >= img_n) return -1;
+    if (i >= img.n) return -1;
     const im = imgs.all()[i];
     if (im.kind != 3 or im.w == 0 or im.h == 0) return -1;
     const px = @as(usize, im.w) * im.h;
     const need = px * 3;
-    if (need + 4096 > img_cap - img_used) return -1;
-    if (!imgs.room(img_n + 1, 16)) return -1;
+    if (need + 4096 > img.cap - img.used) return -1;
+    if (!imgs.room(img.n + 1, 16)) return -1;
     const src = @as([*]const u8, @ptrFromInt(imgArea() + im.off))[0..im.len];
-    const dst = @as([*]u8, @ptrFromInt(imgArea() + img_used))[0..need];
+    const dst = @as([*]u8, @ptrFromInt(imgArea() + img.used))[0..need];
     // 성분마다 부표본 화소를 담을 자리. 프로그레시브는 계수를 다 들고
     // 있어야 해서 더 든다 — 화소당 여섯에 여유를 얹는다.
     const tmp = bigScratch(px * 6 + 4 * 1024 * 1024) orelse return -1;
     const got = jpeg.decodeAny(src, dst, tmp);
     if (got == 0) return -1;
-    const slot = img_n;
+    const slot = img.n;
     imgs.all()[slot] = .{
         .name_len = 0, .name = undefined, .kind = 1, .w = im.w, .h = im.h,
-        .off = img_used, .len = @intCast(need), .flip = 0, .smask = im.smask,
+        .off = img.used, .len = @intCast(need), .flip = 0, .smask = im.smask,
     };
-    img_n += 1;
-    img_used += @intCast((need + 3) & ~@as(usize, 3));
+    img.n += 1;
+    img.used += @intCast((need + 3) & ~@as(usize, 3));
     return @intCast(slot);
 }
 
@@ -2362,7 +2369,7 @@ fn lutLookup(t: []const u8, g: usize, c: f32, m: f32, y: f32, k: f32, out: *[3]f
 
 fn findImg(name: []const u8) i32 {
     var i: u32 = 0;
-    while (i < img_n) : (i += 1)
+    while (i < img.n) : (i += 1)
         if (txEq(imgs.all()[i].name[0..imgs.all()[i].name_len], name)) return @intCast(i);
     return -1;
 }
@@ -2370,13 +2377,12 @@ fn findImg(name: []const u8) i32 {
 export fn itemCount() u32 { return item_n; }
 export fn imageCount() u32 { return draw_count; }
 export fn formCount() u32 { return form_n; }
-export fn imageWidth() u32 { return img_w; }
-export fn imageHeight() u32 { return img_h; }
-export fn imageKind() u32 { return img_kind; }
-export fn imagePtr() usize { return (if (img_off == 0) heapBase() else img_off) + img_off_first; }
-export fn imageAreaPtr() usize { return if (img_off == 0) heapBase() else img_off; }
-var img_off_first: u32 = 0;
-export fn imageLen() usize { return img_len; }
+export fn imageWidth() u32 { return img.w; }
+export fn imageHeight() u32 { return img.h; }
+export fn imageKind() u32 { return img.kind; }
+export fn imagePtr() usize { return (if (img.off == 0) heapBase() else img.off) + img.off_first; }
+export fn imageAreaPtr() usize { return if (img.off == 0) heapBase() else img.off; }
+export fn imageLen() usize { return img.len; }
 export fn itemX(i: u32) f32 { return items.all()[i].x; }
 export fn itemY(i: u32) f32 { return items.all()[i].y; }
 export fn itemSize(i: u32) f32 { return items.all()[i].size; }
@@ -2415,7 +2421,7 @@ export fn fontCount() u32 { return font_n; }
 export fn fontFileOff(i: u32) u32 { return if (i < font_n) fonts.all()[i].file_off else 0; }
 export fn fontFileLen(i: u32) u32 { return if (i < font_n) fonts.all()[i].file_len else 0; }
 export fn fontAreaPtr() usize { return if (font_off == 0) heapBase() else font_off; }
-export fn inlinePtr() usize { return if (inl_off == 0) heapBase() else inl_off; }
+export fn inlinePtr() usize { return if (inl.off == 0) heapBase() else inl.off; }
 export fn pageOriginX() f32 { return page_x0; }
 export fn pageOriginY() f32 { return page_y0; }
 export fn pageRotate() i32 { return page_rotate; }
@@ -2612,12 +2618,12 @@ fn parseCMap(f: *FontMap, cm: []const u8) void {
 }
 
 fn mapCode(byte: u8) u32 {
-    if (cur_font >= 0 and fonts.all()[@intCast(cur_font)].n > 0)
-        return lookup(&fonts.all()[@intCast(cur_font)], byte);
+    if (cur.font >= 0 and fonts.all()[@intCast(cur.font)].n > 0)
+        return lookup(&fonts.all()[@intCast(cur.font)], byte);
     return byte;
 }
 fn mapCode2(code: u32) u32 {
-    if (cur_font >= 0) return lookup(&fonts.all()[@intCast(cur_font)], code);
+    if (cur.font >= 0) return lookup(&fonts.all()[@intCast(cur.font)], code);
     return code;
 }
 
@@ -2635,8 +2641,8 @@ export fn resetPage(w: f32, h: f32) void {
     text_n = 0;
     dtext_n = 0;
     rtext_n = 0;
-    cur_alpha = 1;
-    cur_bm = 0;
+    cur.alpha = 1;
+    cur.bm = 0;
     draw_count = 0;
     form_n = 0;
     form_n2 = 0;
@@ -2645,7 +2651,7 @@ export fn resetPage(w: f32, h: f32) void {
     shade_n = 0;
     tile_n = 0;
     prop_n = 0;
-    img_n = 0;
+    img.n = 0;
     emit_mute = false;
     run_on = false;
     pdfform.field_n = 0;
@@ -2653,14 +2659,14 @@ export fn resetPage(w: f32, h: f32) void {
     icc_n = 0;
     icc_data_used = 0;
     lut_for = -1;
-    img_used = 0;
-    inl_used = 0;
+    img.used = 0;
+    inl.used = 0;
     ops_n = 0;
     font_n = 0;
     font_used = 0;
     c2g_used = 0;
     fnReset();
-    cur_font = -1;
+    cur.font = -1;
     page_w = w;
     page_h = h;
 }
@@ -2719,11 +2725,11 @@ fn selectFont(name: []const u8) void {
     var i: u8 = 0;
     while (i < font_n) : (i += 1) {
         if (txEq(fonts.all()[i].name[0..fonts.all()[i].name_len], name)) {
-            cur_font = i;
+            cur.font = i;
             return;
         }
     }
-    cur_font = -1;
+    cur.font = -1;
 }
 
 /// 문자열 하나를 항목으로 남긴다.
@@ -2734,8 +2740,8 @@ fn emit(x: f32, y: f32, size: f32, start: u32) void {
     const cy = if (y > page_h or y < 0) y else page_h - y;
     items.all()[item_n] = .{
         .x = x, .y = cy, .size = size, .off = start, .len = text_n - start,
-        .font = cur_font,
-        .vert = cur_font >= 0 and fonts.all()[@intCast(cur_font)].vertical,
+        .font = cur.font,
+        .vert = cur.font >= 0 and fonts.all()[@intCast(cur.font)].vertical,
     };
     item_n += 1;
 }
@@ -2847,9 +2853,9 @@ fn inlineImage(b: []const u8, p: *usize) void {
     if (w == 0 or h == 0 or w > 8192 or h > 8192) return;
     const row = (w * bpc * comps + 7) / 8;
     const need = row * h;
-    if (need == 0 or inl_used + need > inl_cap) return;
+    if (need == 0 or inl.used + need > inl.cap) return;
 
-    const dst = @as([*]u8, @ptrFromInt(inlArea() + inl_used))[0..(inl_cap - inl_used)];
+    const dst = @as([*]u8, @ptrFromInt(inlArea() + inl.used))[0..(inl.cap - inl.used)];
     var got: u32 = 0;
     if (flate) {
         const r = pw_inflate(raw.ptr, @intCast(raw.len), dst.ptr, @intCast(dst.len));
@@ -2865,10 +2871,10 @@ fn inlineImage(b: []const u8, p: *usize) void {
     emitOp(22, &[_]f32{
         @floatFromInt(w), @floatFromInt(h), @floatFromInt(bpc),
         if (mask) 1 else 0,
-        @floatFromInt(inl_used), @floatFromInt(need),
+        @floatFromInt(inl.used), @floatFromInt(need),
         if (flip) 1 else 0, @floatFromInt(comps),
     });
-    inl_used += need;
+    inl.used += need;
 }
 
 /// 문서 전체 (폼·글리프 그림을 꺼내려면 필요하다)
@@ -2892,50 +2898,52 @@ const SUBC_N = 4096;
 /// 한 칸에 담을 수 있는 크기. 글리프 그림은 이보다 훨씬 작다.
 const SUBC_MAX = 4096;
 const SUBC_POOL = 2 * 1024 * 1024;
-var subc_num: [SUBC_N]u32 = undefined;
-var subc_off: [SUBC_N]u32 = undefined;
-var subc_len: [SUBC_N]u32 = undefined;
-var subc_n: u32 = 0;
-var subc_used: u32 = 0;
-var subc_at: usize = 0;
+var subc: struct {
+    num: [SUBC_N]u32 = undefined,
+    off: [SUBC_N]u32 = undefined,
+    len: [SUBC_N]u32 = undefined,
+    n: u32 = 0,
+    used: u32 = 0,
+    at: usize = 0,
+} = .{};
 
 fn subcPool() []u8 {
-    if (subc_at == 0) {
-        subc_at = zoneAlloc(SUBC_POOL) orelse 0;
-        if (subc_at == 0) return &[_]u8{};
+    if (subc.at == 0) {
+        subc.at = zoneAlloc(SUBC_POOL) orelse 0;
+        if (subc.at == 0) return &[_]u8{};
     }
-    return @as([*]u8, @ptrFromInt(subc_at))[0..SUBC_POOL];
+    return @as([*]u8, @ptrFromInt(subc.at))[0..SUBC_POOL];
 }
 
 /// 쪽을 새로 그릴 때 비운다. 구역이 되감겼으면 곳간도 남의 자리다.
 fn subcReset() void {
-    subc_n = 0;
-    subc_used = 0;
-    if (subc_at != 0 and subc_at + SUBC_POOL > zoneTop()) subc_at = 0;
+    subc.n = 0;
+    subc.used = 0;
+    if (subc.at != 0 and subc.at + SUBC_POOL > zoneTop()) subc.at = 0;
 }
 
 fn subcFind(num: u32) ?[]const u8 {
     var i: u32 = 0;
-    while (i < subc_n) : (i += 1) {
-        if (subc_num[i] == num) {
+    while (i < subc.n) : (i += 1) {
+        if (subc.num[i] == num) {
             const pool = subcPool();
             if (pool.len == 0) return null;
-            return pool[subc_off[i]..][0..subc_len[i]];
+            return pool[subc.off[i]..][0..subc.len[i]];
         }
     }
     return null;
 }
 
 fn subcPut(num: u32, data: []const u8) void {
-    if (subc_n >= SUBC_N or data.len > SUBC_MAX) return;
+    if (subc.n >= SUBC_N or data.len > SUBC_MAX) return;
     const pool = subcPool();
-    if (pool.len == 0 or subc_used + data.len > pool.len) return;
-    @memcpy(pool[subc_used..][0..data.len], data);
-    subc_num[subc_n] = num;
-    subc_off[subc_n] = subc_used;
-    subc_len[subc_n] = @intCast(data.len);
-    subc_n += 1;
-    subc_used += @intCast(data.len);
+    if (pool.len == 0 or subc.used + data.len > pool.len) return;
+    @memcpy(pool[subc.used..][0..data.len], data);
+    subc.num[subc.n] = num;
+    subc.off[subc.n] = subc.used;
+    subc.len[subc.n] = @intCast(data.len);
+    subc.n += 1;
+    subc.used += @intCast(data.len);
 }
 
 /// 글리프가 낸 그리기 명령을 받아 적어 두고 그대로 다시 쓴다.
@@ -2953,27 +2961,29 @@ const T3C_N = 1024;
 /// 글리프 하나가 낼 수 있는 명령 수. 넘으면 받아 적지 않는다.
 const T3C_MAX = 1024;
 const T3C_POOL = 1024 * 1024;
-var t3c_num: [T3C_N]u32 = undefined;
-var t3c_off: [T3C_N]u32 = undefined;
-var t3c_len: [T3C_N]u32 = undefined;
-/// 받아 적을 수 없다고 판가름 난 글리프
-var t3c_ban: [T3C_N]bool = undefined;
-var t3c_n: u32 = 0;
-var t3c_used: u32 = 0;
-var t3c_at: usize = 0;
+var t3c: struct {
+    num: [T3C_N]u32 = undefined,
+    off: [T3C_N]u32 = undefined,
+    len: [T3C_N]u32 = undefined,
+    /// 받아 적을 수 없다고 판가름 난 글리프
+    ban: [T3C_N]bool = undefined,
+    n: u32 = 0,
+    used: u32 = 0,
+    at: usize = 0,
+} = .{};
 
 fn t3cPool() []f32 {
-    if (t3c_at == 0) {
-        t3c_at = zoneAlloc(T3C_POOL) orelse 0;
-        if (t3c_at == 0) return &[_]f32{};
+    if (t3c.at == 0) {
+        t3c.at = zoneAlloc(T3C_POOL) orelse 0;
+        if (t3c.at == 0) return &[_]f32{};
     }
-    return @as([*]f32, @ptrFromInt(t3c_at))[0 .. T3C_POOL / 4];
+    return @as([*]f32, @ptrFromInt(t3c.at))[0 .. T3C_POOL / 4];
 }
 
 fn t3cReset() void {
-    t3c_n = 0;
-    t3c_used = 0;
-    if (t3c_at != 0 and t3c_at + T3C_POOL > zoneTop()) t3c_at = 0;
+    t3c.n = 0;
+    t3c.used = 0;
+    if (t3c.at != 0 and t3c.at + T3C_POOL > zoneTop()) t3c.at = 0;
 }
 
 /// 글리프를 그리는 동안 움직이면 안 되는 셈들.
@@ -2987,7 +2997,7 @@ fn t3Snap() T3Snap {
     return .{
         .item = item_n, .text = text_n, .dtext = dtext_n, .rtext = rtext_n,
         .draw = draw_count, .form = form_n, .form2 = form_n2, .gs = gs_n,
-        .font = cur_font, .alpha = cur_alpha, .bm = cur_bm, .run = run_on,
+        .font = cur.font, .alpha = cur.alpha, .bm = cur.bm, .run = run_on,
     };
 }
 
@@ -3002,51 +3012,51 @@ fn t3SnapEq(a: T3Snap) bool {
 /// 받아 적어 둔 자리를 찾는다. 못 적는다고 판가름 난 것은 null 을 준다.
 fn t3Find(num: u32) ?u32 {
     var i: u32 = 0;
-    while (i < t3c_n) : (i += 1) {
-        if (t3c_num[i] == num) return if (t3c_ban[i] or t3c_len[i] == 0) null else i;
+    while (i < t3c.n) : (i += 1) {
+        if (t3c.num[i] == num) return if (t3c.ban[i] or t3c.len[i] == 0) null else i;
     }
     return null;
 }
 
 fn t3Slot(num: u32) ?u32 {
     var i: u32 = 0;
-    while (i < t3c_n) : (i += 1) if (t3c_num[i] == num) return i;
-    if (t3c_n >= T3C_N) return null;
-    t3c_num[t3c_n] = num;
-    t3c_off[t3c_n] = 0;
-    t3c_len[t3c_n] = 0;
-    t3c_ban[t3c_n] = false;
-    t3c_n += 1;
-    return t3c_n - 1;
+    while (i < t3c.n) : (i += 1) if (t3c.num[i] == num) return i;
+    if (t3c.n >= T3C_N) return null;
+    t3c.num[t3c.n] = num;
+    t3c.off[t3c.n] = 0;
+    t3c.len[t3c.n] = 0;
+    t3c.ban[t3c.n] = false;
+    t3c.n += 1;
+    return t3c.n - 1;
 }
 
 fn t3Replay(i: u32) void {
     const pool = t3cPool();
-    const n = t3c_len[i];
+    const n = t3c.len[i];
     if (pool.len == 0 or n == 0) return;
     if (!ops.room(ops_n + n, 65536)) return;
-    @memcpy(ops.all()[ops_n..][0..n], pool[t3c_off[i]..][0..n]);
+    @memcpy(ops.all()[ops_n..][0..n], pool[t3c.off[i]..][0..n]);
     ops_n += n;
 }
 
 /// 방금 낸 명령을 받아 적는다. 셈이 움직였으면 못 적는 것으로 표시한다.
 fn t3Record(num: u32, start: u32, snap: T3Snap) void {
     const i = t3Slot(num) orelse return;
-    if (t3c_ban[i] or t3c_len[i] != 0) return;
+    if (t3c.ban[i] or t3c.len[i] != 0) return;
     if (emit_mute or ops_n <= start or !t3SnapEq(snap)) {
-        t3c_ban[i] = true;
+        t3c.ban[i] = true;
         return;
     }
     const n = ops_n - start;
     const pool = t3cPool();
-    if (n > T3C_MAX or pool.len == 0 or t3c_used + n > pool.len) {
-        t3c_ban[i] = true;
+    if (n > T3C_MAX or pool.len == 0 or t3c.used + n > pool.len) {
+        t3c.ban[i] = true;
         return;
     }
-    @memcpy(pool[t3c_used..][0..n], ops.all()[start..][0..n]);
-    t3c_off[i] = t3c_used;
-    t3c_len[i] = n;
-    t3c_used += n;
+    @memcpy(pool[t3c.used..][0..n], ops.all()[start..][0..n]);
+    t3c.off[i] = t3c.used;
+    t3c.len[i] = n;
+    t3c.used += n;
 }
 
 pub fn subStream(num: u32, depth: u32) ?[]const u8 {
@@ -3172,7 +3182,7 @@ pub fn runOps(b: []const u8, depth: u32) void {
                     tm = tlm;
                 }
             }
-            const fp: ?*const FontMap = if (cur_font >= 0) &fonts.all()[@intCast(cur_font)] else null;
+            const fp: ?*const FontMap = if (cur.font >= 0) &fonts.all()[@intCast(cur.font)] else null;
             const start_text = text_n;
             const x0 = tm.e;
             const y0 = tm.f;
@@ -3336,7 +3346,7 @@ pub fn runOps(b: []const u8, depth: u32) void {
                     if (uni == code) {
                         if (cidUni(fp, cid)) |uv| uni = uv;
                     }
-                    emitGlyph(fp, cid, uni, tf_size, &tm, cur_font, tc, tw, th, depth, t_render, t_rise);
+                    emitGlyph(fp, cid, uni, tf_size, &tm, cur.font, tc, tw, th, depth, t_render, t_rise);
                     k += w;
                 }
             }
@@ -3347,8 +3357,8 @@ pub fn runOps(b: []const u8, depth: u32) void {
                     .x = x0, .y = y0, .size = tf_size,
                     .off = start_text, .len = text_n - start_text,
                     // 어떤 글꼴로 그렸는지·세로쓰기인지도 함께 남긴다
-                    .font = cur_font,
-                    .vert = cur_font >= 0 and fonts.all()[@intCast(cur_font)].vertical,
+                    .font = cur.font,
+                    .vert = cur.font >= 0 and fonts.all()[@intCast(cur.font)].vertical,
                 };
                 item_n += 1;
             }
@@ -3584,10 +3594,10 @@ pub fn runOps(b: []const u8, depth: u32) void {
             const gi = findGs(name_buf[0..name_len]);
             if (gi >= 0) {
                 const g2 = &gstates.all()[@intCast(gi)];
-                if (g2.ca >= 0) { emitOp(21, &[_]f32{g2.ca}); cur_alpha = g2.ca; }
+                if (g2.ca >= 0) { emitOp(21, &[_]f32{g2.ca}); cur.alpha = g2.ca; }
                 if (g2.CA >= 0) emitOp(23, &[_]f32{g2.CA});
                 if (g2.lw >= 0) emitOp(13, &[_]f32{g2.lw});
-                if (g2.bm >= 0) { emitOp(26, &[_]f32{@floatFromInt(g2.bm)}); cur_bm = g2.bm; }
+                if (g2.bm >= 0) { emitOp(26, &[_]f32{@floatFromInt(g2.bm)}); cur.bm = g2.bm; }
                 if (g2.sm_off) emitOp(32, &[_]f32{});
                 if (g2.sm_obj != 0 and depth < 2) emitSMask(doc, g2, depth);
             }
@@ -3613,8 +3623,8 @@ pub fn runOps(b: []const u8, depth: u32) void {
                 const fo = &forms.all()[@intCast(fi)];
                 // 투명 그룹은 통째로 딴 판에 그려 한 번에 겹친다. 안 그러면
                 // 겹친 것끼리 각자 투명해져 겹친 데가 더 진해진다.
-                const grp = fo.group and (cur_alpha < 0.999 or cur_bm > 0);
-                if (grp) emitOp(33, &[_]f32{ cur_alpha, @floatFromInt(cur_bm) });
+                const grp = fo.group and (cur.alpha < 0.999 or cur.bm > 0);
+                if (grp) emitOp(33, &[_]f32{ cur.alpha, @floatFromInt(cur.bm) });
                 emitOp(14, &[_]f32{});
                 emitOp(16, &[_]f32{ fo.mat[0], fo.mat[1], fo.mat[2], fo.mat[3], fo.mat[4], fo.mat[5] });
                 if (fo.has_bbox) {
@@ -4091,10 +4101,10 @@ pub fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
 
     // 그림 한 장을 꺼낸다. 스캔 문서는 쪽마다 큰 그림 하나가 전부라,
     // 그것만 그려도 미리보기로는 충분하다.
-    img_kind = 0;
-    img_len = 0;
-    img_w = 0;
-    img_h = 0;
+    img.kind = 0;
+    img.len = 0;
+    img.w = 0;
+    img.h = 0;
     if (find(b[rs..re_], "/XObject", 0)) |xa| {
         var xp = rs + xa + 8;
         while (xp < re_ and isSpace(b[xp])) xp += 1;
@@ -4316,63 +4326,65 @@ const NoteT = struct {
 };
 /// 사용자가 더한 것 — 세는 상한은 없다(자리잡개에서 늘어난다)
 pub var notes: Table(NoteT) = .{};
-pub var note_n: u32 = 0;
-pub var note_buf: [64 * 1024]u8 = undefined;
-var note_used: u32 = 0;
-pub var note_pts: [8192]f32 = undefined;
-var note_pt_n: u32 = 0;
+pub var note: struct {
+    n: u32 = 0,
+    buf: [64 * 1024]u8 = undefined,
+    used: u32 = 0,
+    pts: [8192]f32 = undefined,
+    pt_n: u32 = 0,
+} = .{};
 
-export fn clearNotes() void { note_n = 0; note_used = 0; note_pt_n = 0; }
+export fn clearNotes() void { note.n = 0; note.used = 0; note.pt_n = 0; }
 export fn addNote(kind: u32, page: u32, x0: f32, y0: f32, x1: f32, y1: f32,
     r: f32, g: f32, b: f32) u32
 {
-    if (!growTable(&notes.at, &notes.cap, note_n, @sizeOf(NoteT), 64)) return 0;
-    notes.all()[note_n] = .{
+    if (!growTable(&notes.at, &notes.cap, note.n, @sizeOf(NoteT), 64)) return 0;
+    notes.all()[note.n] = .{
         .kind = @intCast(@min(kind, 6)), .page = page,
         .rect = .{ @min(x0, x1), @min(y0, y1), @max(x0, x1), @max(y0, y1) },
         .col = .{ @max(0, @min(1, r)), @max(0, @min(1, g)), @max(0, @min(1, b)) },
-        .off = note_used, .len = 0, .pts = 0, .obj = 0,
+        .off = note.used, .len = 0, .pts = 0, .obj = 0,
     };
-    if (notes.all()[note_n].kind == 6) notes.all()[note_n].off = note_pt_n;
-    note_n += 1;
+    if (notes.all()[note.n].kind == 6) notes.all()[note.n].off = note.pt_n;
+    note.n += 1;
     return 1;
 }
 /// 메모 글 한 글자 (utf-8 로 담는다)
 export fn addNoteChar(c: u32) void {
-    if (note_n == 0) return;
-    const t = &notes.all()[note_n - 1];
+    if (note.n == 0) return;
+    const t = &notes.all()[note.n - 1];
     if (c < 0x80) {
-        if (note_used + 1 > note_buf.len) return;
-        note_buf[note_used] = @intCast(c);
-        note_used += 1;
+        if (note.used + 1 > note.buf.len) return;
+        note.buf[note.used] = @intCast(c);
+        note.used += 1;
         t.len += 1;
     } else if (c < 0x800) {
-        if (note_used + 2 > note_buf.len) return;
-        note_buf[note_used] = @intCast(0xC0 | (c >> 6));
-        note_buf[note_used + 1] = @intCast(0x80 | (c & 63));
-        note_used += 2;
+        if (note.used + 2 > note.buf.len) return;
+        note.buf[note.used] = @intCast(0xC0 | (c >> 6));
+        note.buf[note.used + 1] = @intCast(0x80 | (c & 63));
+        note.used += 2;
         t.len += 2;
     } else {
-        if (note_used + 3 > note_buf.len) return;
-        note_buf[note_used] = @intCast(0xE0 | (c >> 12));
-        note_buf[note_used + 1] = @intCast(0x80 | ((c >> 6) & 63));
-        note_buf[note_used + 2] = @intCast(0x80 | (c & 63));
-        note_used += 3;
+        if (note.used + 3 > note.buf.len) return;
+        note.buf[note.used] = @intCast(0xE0 | (c >> 12));
+        note.buf[note.used + 1] = @intCast(0x80 | ((c >> 6) & 63));
+        note.buf[note.used + 2] = @intCast(0x80 | (c & 63));
+        note.used += 3;
         t.len += 3;
     }
 }
 /// 자유선의 점 하나
 export fn addNotePoint(x: f32, y: f32) void {
-    if (note_n == 0 or note_pt_n + 2 > note_pts.len) return;
-    note_pts[note_pt_n] = x;
-    note_pts[note_pt_n + 1] = y;
-    note_pt_n += 2;
-    notes.all()[note_n - 1].pts += 1;
+    if (note.n == 0 or note.pt_n + 2 > note.pts.len) return;
+    note.pts[note.pt_n] = x;
+    note.pts[note.pt_n + 1] = y;
+    note.pt_n += 2;
+    notes.all()[note.n - 1].pts += 1;
 }
 
 pub fn notesOnPage(page: u32) bool {
     var i: u32 = 0;
-    while (i < note_n) : (i += 1) if (notes.all()[i].page == page) return true;
+    while (i < note.n) : (i += 1) if (notes.all()[i].page == page) return true;
     return false;
 }
 
@@ -4428,9 +4440,9 @@ pub fn maskAlloc(len: u32, w: u32, h: u32) ?u32 {
 }
 
 export fn setFieldEditMask(w: u32, h: u32, len: u32) u32 {
-    if (edit_n == 0) return 0;
+    if (edit.n == 0) return 0;
     const at = maskAlloc(len, w, h) orelse return 0;
-    const e = &edits.all()[edit_n - 1];
+    const e = &edits.all()[edit.n - 1];
     e.mw = w;
     e.mh = h;
     e.moff = at;
@@ -4439,40 +4451,42 @@ export fn setFieldEditMask(w: u32, h: u32, len: u32) u32 {
 }
 /// 사용자가 고친 입력 칸. 필요한 만큼 늘어난다(세는 상한 없음).
 pub var edits: Table(EditT) = .{};
-pub var edit_n: u32 = 0;
-pub var edit_buf: [96 * 1024]u8 = undefined;
-var edit_used: u32 = 0;
+pub var edit: struct {
+    n: u32 = 0,
+    buf: [96 * 1024]u8 = undefined,
+    used: u32 = 0,
+} = .{};
 
-export fn clearFieldEdits() void { edit_n = 0; edit_used = 0; mask_used = 0; }
+export fn clearFieldEdits() void { edit.n = 0; edit.used = 0; mask_used = 0; }
 /// kind 0 글상자 · 1 확인란 켜기 · 2 확인란 끄기 · 3 이름 바꾸기 · 4 지우기
 export fn addFieldEdit(obj: u32, kind: u32) u32 {
-    if (!edits.room(edit_n + 1, 64)) return 0;
-    edits.all()[edit_n] = .{ .obj = obj, .kind = @intCast(@min(kind, 4)), .off = edit_used, .len = 0,
+    if (!edits.room(edit.n + 1, 64)) return 0;
+    edits.all()[edit.n] = .{ .obj = obj, .kind = @intCast(@min(kind, 4)), .off = edit.used, .len = 0,
         .mw = 0, .mh = 0, .moff = 0, .mlen = 0 };
-    edit_n += 1;
+    edit.n += 1;
     return 1;
 }
 /// 방금 만든 항목의 값에 글자 하나를 잇는다 (utf-8 로 담는다).
 export fn addFieldEditChar(c: u32) void {
-    if (edit_n == 0) return;
-    const e = &edits.all()[edit_n - 1];
+    if (edit.n == 0) return;
+    const e = &edits.all()[edit.n - 1];
     if (c < 0x80) {
-        if (edit_used + 1 > edit_buf.len) return;
-        edit_buf[edit_used] = @intCast(c);
-        edit_used += 1;
+        if (edit.used + 1 > edit.buf.len) return;
+        edit.buf[edit.used] = @intCast(c);
+        edit.used += 1;
         e.len += 1;
     } else if (c < 0x800) {
-        if (edit_used + 2 > edit_buf.len) return;
-        edit_buf[edit_used] = @intCast(0xC0 | (c >> 6));
-        edit_buf[edit_used + 1] = @intCast(0x80 | (c & 63));
-        edit_used += 2;
+        if (edit.used + 2 > edit.buf.len) return;
+        edit.buf[edit.used] = @intCast(0xC0 | (c >> 6));
+        edit.buf[edit.used + 1] = @intCast(0x80 | (c & 63));
+        edit.used += 2;
         e.len += 2;
     } else {
-        if (edit_used + 3 > edit_buf.len) return;
-        edit_buf[edit_used] = @intCast(0xE0 | (c >> 12));
-        edit_buf[edit_used + 1] = @intCast(0x80 | ((c >> 6) & 63));
-        edit_buf[edit_used + 2] = @intCast(0x80 | (c & 63));
-        edit_used += 3;
+        if (edit.used + 3 > edit.buf.len) return;
+        edit.buf[edit.used] = @intCast(0xE0 | (c >> 12));
+        edit.buf[edit.used + 1] = @intCast(0x80 | ((c >> 6) & 63));
+        edit.buf[edit.used + 2] = @intCast(0x80 | (c & 63));
+        edit.used += 3;
         e.len += 3;
     }
 }
@@ -4566,7 +4580,7 @@ export fn addNewFieldChar(c: u32) void {
 /// 이 객체가 지울 칸인가
 fn fieldDeleted(obj: u32) bool {
     var i: u32 = 0;
-    while (i < edit_n) : (i += 1) if (edits.all()[i].kind == 4 and edits.all()[i].obj == obj) return true;
+    while (i < edit.n) : (i += 1) if (edits.all()[i].kind == 4 and edits.all()[i].obj == obj) return true;
     return false;
 }
 
@@ -4574,7 +4588,7 @@ fn fieldDeleted(obj: u32) bool {
 pub fn anyFieldStruct() bool {
     if (newf_n > 0) return true;
     var i: u32 = 0;
-    while (i < edit_n) : (i += 1) if (edits.all()[i].kind == 4) return true;
+    while (i < edit.n) : (i += 1) if (edits.all()[i].kind == 4) return true;
     return false;
 }
 
@@ -5409,20 +5423,22 @@ pub fn catalogRange(b: []const u8) ?struct { s: usize, e: usize } {
 //   2 파일 지문       (/ID 첫 문자열, 16진수)              — 문서별 상태 저장 열쇠
 //   3 태그 PDF 인가   ("1"·"0", /MarkInfo /Marked)
 //   4 문서 언어       (/Lang)
-var meta_buf: [512]u8 = undefined;
-var meta_off: [5]u32 = undefined;
-var meta_len: [5]u32 = undefined;
-var meta_n: u32 = 0;
-export fn metaCount() u32 { return meta_n; }
-export fn metaOff(i: u32) u32 { return if (i < meta_n) meta_off[i] else 0; }
-export fn metaLen(i: u32) u32 { return if (i < meta_n) meta_len[i] else 0; }
-export fn metaTextPtr() [*]u8 { return &meta_buf; }
+var meta: struct {
+    buf: [512]u8 = undefined,
+    off: [5]u32 = undefined,
+    len: [5]u32 = undefined,
+    n: u32 = 0,
+} = .{};
+export fn metaCount() u32 { return meta.n; }
+export fn metaOff(i: u32) u32 { return if (i < meta.n) meta.off[i] else 0; }
+export fn metaLen(i: u32) u32 { return if (i < meta.n) meta.len[i] else 0; }
+export fn metaTextPtr() [*]u8 { return &meta.buf; }
 
 fn metaPut(used: *u32, i: usize, txt: []const u8) void {
-    if (used.* + txt.len > meta_buf.len) return;
-    meta_off[i] = used.*;
-    meta_len[i] = @intCast(txt.len);
-    @memcpy(meta_buf[used.*..][0..txt.len], txt);
+    if (used.* + txt.len > meta.buf.len) return;
+    meta.off[i] = used.*;
+    meta.len[i] = @intCast(txt.len);
+    @memcpy(meta.buf[used.*..][0..txt.len], txt);
     used.* += @intCast(txt.len);
 }
 
@@ -5462,24 +5478,26 @@ pub fn nameAfter(b: []const u8, from: usize, to: usize, key: []const u8, out: []
 // 쪽 라벨 — 표지가 i, ii, iii 이고 본문이 1 부터인 문서가 흔하다.
 // /PageLabels 는 번호 나무다: [ 0 << /S /r >> 4 << /S /D /St 1 >> ] 처럼
 // "이 쪽부터 이 방식" 을 적어 둔다.
-var lbl_off_at: usize = 0;
-var lbl_len_at: usize = 0;
-var lbl_buf_at: usize = 0;
-var lbl_buf_cap: usize = 0;
+var lbl: struct {
+    off_at: usize = 0,
+    len_at: usize = 0,
+    buf_at: usize = 0,
+    buf_cap: usize = 0,
+} = .{};
 var label_n: u32 = 0;
-fn label_off() []u32 { return u32sAt(lbl_off_at, if (pg_cap == 0) 0 else pg_cap); }
+fn label_off() []u32 { return u32sAt(lbl.off_at, if (pg_cap == 0) 0 else pg_cap); }
 fn label_len() []u8 {
-    if (lbl_len_at == 0 or pg_cap == 0) return &[_]u8{};
-    return @as([*]u8, @ptrFromInt(lbl_len_at))[0..pg_cap];
+    if (lbl.len_at == 0 or pg_cap == 0) return &[_]u8{};
+    return @as([*]u8, @ptrFromInt(lbl.len_at))[0..pg_cap];
 }
 fn label_buf() []u8 {
-    if (lbl_buf_at == 0 or lbl_buf_cap == 0) return &[_]u8{};
-    return @as([*]u8, @ptrFromInt(lbl_buf_at))[0..lbl_buf_cap];
+    if (lbl.buf_at == 0 or lbl.buf_cap == 0) return &[_]u8{};
+    return @as([*]u8, @ptrFromInt(lbl.buf_at))[0..lbl.buf_cap];
 }
 export fn pageLabelCount() u32 { return label_n; }
 export fn pageLabelOff(i: u32) u32 { return if (i < label_n) label_off()[i] else 0; }
 export fn pageLabelLen(i: u32) u32 { return if (i < label_n) label_len()[i] else 0; }
-export fn pageLabelPtr() [*]u8 { return @ptrFromInt(if (lbl_buf_at == 0) heapBase() else lbl_buf_at); }
+export fn pageLabelPtr() [*]u8 { return @ptrFromInt(if (lbl.buf_at == 0) heapBase() else lbl.buf_at); }
 
 /// 로마 숫자. 1~3999 만 다룬다(그 밖은 십진수로 떨어뜨린다).
 fn roman(n0: u32, upper: bool, out: []u8) u32 {
@@ -5633,11 +5651,11 @@ fn collectLabels(b: []const u8) void {
 }
 
 fn collectMeta(b: []const u8) void {
-    meta_n = 0;
+    meta.n = 0;
     var used: u32 = 0;
     var i: usize = 0;
-    while (i < 5) : (i += 1) { meta_off[i] = 0; meta_len[i] = 0; }
-    meta_n = 5;
+    while (i < 5) : (i += 1) { meta.off[i] = 0; meta.len[i] = 0; }
+    meta.n = 5;
 
     var tmp: [64]u8 = undefined;
     if (catalogRange(b)) |cat| {
@@ -5689,20 +5707,22 @@ fn collectMeta(b: []const u8) void {
 }
 
 
-var info_buf: [2048]u8 = undefined;
-var info_off: [8]u32 = undefined;
-var info_len: [8]u32 = undefined;
-var info_n: u32 = 0;
+var info: struct {
+    buf: [2048]u8 = undefined,
+    off: [8]u32 = undefined,
+    len: [8]u32 = undefined,
+    n: u32 = 0,
+} = .{};
 
-export fn infoCount() u32 { return info_n; }
-export fn infoOff(i: u32) u32 { return if (i < info_n) info_off[i] else 0; }
-export fn infoLen(i: u32) u32 { return if (i < info_n) info_len[i] else 0; }
-export fn infoTextPtr() [*]u8 { return &info_buf; }
+export fn infoCount() u32 { return info.n; }
+export fn infoOff(i: u32) u32 { return if (i < info.n) info.off[i] else 0; }
+export fn infoLen(i: u32) u32 { return if (i < info.n) info.len[i] else 0; }
+export fn infoTextPtr() [*]u8 { return &info.buf; }
 
 /// 트레일러의 /Info 를 읽는다. 차례는 제목·지은이·주제·만든 프로그램·
 /// 만든 도구·만든 날짜·고친 날짜 이다. 없으면 길이 0.
 fn collectInfo(b: []const u8) void {
-    info_n = 0;
+    info.n = 0;
     var used: u32 = 0;
     const keys = [_][]const u8{ "/Title", "/Author", "/Subject", "/Creator", "/Producer", "/CreationDate", "/ModDate" };
     var is: usize = 0;
@@ -5720,14 +5740,14 @@ fn collectInfo(b: []const u8) void {
         var len: u32 = 0;
         if (ie > is) {
             if (find(b[is..ie], k, 0)) |at| {
-                len = copyPdfText(b, is + at + k.len, ie, &info_buf, used);
+                len = copyPdfText(b, is + at + k.len, ie, &info.buf, used);
                 used += len;
             }
         }
-        info_off[info_n] = off;
-        info_len[info_n] = len;
-        info_n += 1;
-        if (info_n >= info_off.len) break;
+        info.off[info.n] = off;
+        info.len[info.n] = len;
+        info.n += 1;
+        if (info.n >= info.off.len) break;
     }
 }
 
@@ -6121,17 +6141,19 @@ export fn xmpPtr() [*]const u8 { return pdfdest.xmpPtr(); }
 //   /OpenAction 9 0 R                        — 그 둘 중 하나를 가리키는 참조
 //
 // /S 가 /GoTo 가 아니면(자바스크립트·소리·영화…) 갈 자리가 없다는 뜻이다.
-/// 0 없음 · 1 XYZ · 2 Fit · 3 FitH · 4 FitV · 5 FitR · 6 FitB · 7 FitBH · 8 FitBV
-var open_kind: u32 = 0;
-var open_page: i32 = -1;
-var open_x: f32 = 0;
-var open_y: f32 = 0;
-var open_zoom: f32 = 0;
-export fn openPage() i32 { return open_page; }
-export fn openKind() u32 { return open_kind; }
-export fn openX() f32 { return open_x; }
-export fn openY() f32 { return open_y; }
-export fn openZoom() f32 { return open_zoom; }
+var open: struct {
+    /// 0 없음 · 1 XYZ · 2 Fit · 3 FitH · 4 FitV · 5 FitR · 6 FitB · 7 FitBH · 8 FitBV
+    kind: u32 = 0,
+    page: i32 = -1,
+    x: f32 = 0,
+    y: f32 = 0,
+    zoom: f32 = 0,
+} = .{};
+export fn openPage() i32 { return open.page; }
+export fn openKind() u32 { return open.kind; }
+export fn openX() f32 { return open.x; }
+export fn openY() f32 { return open.y; }
+export fn openZoom() f32 { return open.zoom; }
 
 fn nan() f32 {
     return @bitCast(@as(u32, 0x7FC00000));
@@ -6145,11 +6167,11 @@ fn readDestFull(b: []const u8, at: usize, to: usize) void {
     if (p >= to or !isDigit(b[p])) return;
     const pg = pageIndexOf(readUint(b, &p));
     if (pg < 0) return;
-    open_page = pg;
-    open_kind = 2; // 이름이 없으면 쪽 맞춤으로 본다
-    open_x = nan();
-    open_y = nan();
-    open_zoom = nan();
+    open.page = pg;
+    open.kind = 2; // 이름이 없으면 쪽 맞춤으로 본다
+    open.x = nan();
+    open.y = nan();
+    open.zoom = nan();
     // "0 R" 을 건너뛰고 이름을 찾는다
     while (p < to and b[p] != '/' and b[p] != ']') p += 1;
     if (p >= to or b[p] != '/') return;
@@ -6158,10 +6180,10 @@ fn readDestFull(b: []const u8, at: usize, to: usize) void {
     while (p < to and !isSpace(b[p]) and b[p] != ']' and b[p] != '/') p += 1;
     const name = b[ns..p];
     const names = [_][]const u8{ "XYZ", "Fit", "FitH", "FitV", "FitR", "FitB", "FitBH", "FitBV" };
-    open_kind = 2;
+    open.kind = 2;
     for (names, 0..) |nm, i| {
         if (txEq(name, nm)) {
-            open_kind = @intCast(i + 1);
+            open.kind = @intCast(i + 1);
             break;
         }
     }
@@ -6180,11 +6202,11 @@ fn readDestFull(b: []const u8, at: usize, to: usize) void {
             while (p < to and !isSpace(b[p]) and b[p] != ']') p += 1;
         }
     }
-    switch (open_kind) {
-        1 => { open_x = got[0]; open_y = got[1]; open_zoom = got[2]; },
-        3, 7 => open_y = got[0],
-        4, 8 => open_x = got[0],
-        5 => { open_x = got[0]; open_y = got[1]; },
+    switch (open.kind) {
+        1 => { open.x = got[0]; open.y = got[1]; open.zoom = got[2]; },
+        3, 7 => open.y = got[0],
+        4, 8 => open.x = got[0],
+        5 => { open.x = got[0]; open.y = got[1]; },
         else => {},
     }
 }
@@ -6199,11 +6221,11 @@ fn openByName(name: []const u8) void {
         const buf = pdfdest.dest_buf.all();
         if (off + len > buf.len) continue;
         if (!std_mem_eq(buf[off..][0..len], name)) continue;
-        open_page = pdfdest.dest_page.all()[i];
-        open_kind = 2;
-        open_x = nan();
-        open_y = nan();
-        open_zoom = nan();
+        open.page = pdfdest.dest_page.all()[i];
+        open.kind = 2;
+        open.x = nan();
+        open.y = nan();
+        open.zoom = nan();
         return;
     }
 }
@@ -6248,11 +6270,11 @@ fn readOpenDict(b: []const u8, ds: usize, de: usize) void {
 }
 
 fn collectOpenAction(b: []const u8) void {
-    open_kind = 0;
-    open_page = -1;
-    open_x = 0;
-    open_y = 0;
-    open_zoom = 0;
+    open.kind = 0;
+    open.page = -1;
+    open.x = 0;
+    open.y = 0;
+    open.zoom = 0;
     const cat = catalogRange(b) orelse return;
     const oa = keyPos(b, cat.s, cat.e, "/OpenAction") orelse return;
     var p = oa + 11;
@@ -6282,29 +6304,32 @@ fn collectOpenAction(b: []const u8) void {
 /// 딸린 파일. 32 이던 것을 올렸다.
 /// 딸린 파일 표 셋을 함께 늘린다.
 fn attRoom(want: u32) bool {
-    return att_obj.room(want, 64) and att_name_off.room(want, 64) and att_name_len.room(want, 64);
+    return att.obj.room(want, 64) and att.name_off.room(want, 64) and att.name_len.room(want, 64);
 }
-/// 딸린 파일의 객체 번호. 필요한 만큼 늘어난다(세는 상한 없음).
-var att_obj: Table(u32) = .{};
-/// 그 이름 위치. 필요한 만큼 늘어난다(세는 상한 없음).
-var att_name_off: Table(u32) = .{};
-/// 그 이름 길이. 필요한 만큼 늘어난다(세는 상한 없음).
-var att_name_len: Table(u32) = .{};
-var att_n: u32 = 0;
-/// att_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
-var att_buf: Table(u8) = .{};
-var att_used: u32 = 0;
+var att: struct {
+    /// 딸린 파일의 객체 번호. 필요한 만큼 늘어난다(세는 상한 없음).
+    obj: Table(u32) = .{},
+    /// 그 이름 위치. 필요한 만큼 늘어난다(세는 상한 없음).
+    name_off: Table(u32) = .{},
+    /// 그 이름 길이. 필요한 만큼 늘어난다(세는 상한 없음).
+    name_len: Table(u32) = .{},
+    n: u32 = 0,
+    /// att.buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
+    buf: Table(u8) = .{},
+    used: u32 = 0,
+    at: usize = 0,
+} = .{};
 
-export fn attCount() u32 { return att_n; }
-export fn attTextPtr() usize { return (if (att_buf.at == 0) heapBase() else att_buf.at); }
-export fn attNameOff(i: u32) u32 { return if (i < att_n) att_name_off.all()[i] else 0; }
-export fn attNameLen(i: u32) u32 { return if (i < att_n) att_name_len.all()[i] else 0; }
+export fn attCount() u32 { return att.n; }
+export fn attTextPtr() usize { return (if (att.buf.at == 0) heapBase() else att.buf.at); }
+export fn attNameOff(i: u32) u32 { return if (i < att.n) att.name_off.all()[i] else 0; }
+export fn attNameLen(i: u32) u32 { return if (i < att.n) att.name_len.all()[i] else 0; }
 
 /// 첨부 하나를 풀어 임시 자리에 놓는다. 길이를 준다(0 이면 못 꺼냄).
 export fn attLoad(i: u32) u32 {
-    if (i >= att_n) return 0;
+    if (i >= att.n) return 0;
     const b = searchSlice();
-    const ob = findObj(b, att_obj.all()[i]) orelse return 0;
+    const ob = findObj(b, att.obj.all()[i]) orelse return 0;
     const oe = objDictEnd(b, ob);
     // /EF << /F 12 0 R >> 가 진짜 파일 스트림이다
     const ea = find(b[ob..oe], "/EF", 0) orelse return 0;
@@ -6323,12 +6348,11 @@ export fn attLoad(i: u32) u32 {
     // 파일이 없는 문서에서도 늘 32MB 를 들고 있었고 그보다 큰 붙임은
     // 아예 못 꺼냈다.
     const room = bigScratch(data.len) orelse return 0;
-    att_at = @intFromPtr(room.ptr);
+    att.at = @intFromPtr(room.ptr);
     @memcpy(room[0..data.len], data);
     return @intCast(data.len);
 }
-var att_at: usize = 0;
-export fn attPtr() usize { return if (att_at == 0) heapBase() else att_at; }
+export fn attPtr() usize { return if (att.at == 0) heapBase() else att.at; }
 
 /// 이름나무를 훑어 딸린 파일을 걷는다.
 fn walkAttTree(b: []const u8, num: u32, depth: u8) void {
@@ -6338,26 +6362,26 @@ fn walkAttTree(b: []const u8, num: u32, depth: u8) void {
 
 /// 이름나무 한 마디. 딴 객체로 가리키든 그 자리에 적혀 있든 여기로 온다.
 fn walkAttAt(b: []const u8, ob: usize, oe: usize, depth: u8) void {
-    if (depth > 8 or !attRoom(att_n + 1)) return;
+    if (depth > 8 or !attRoom(att.n + 1)) return;
     if (find(b[ob..oe], "/Names", 0)) |na| {
         var q = ob + na + 6;
         while (q < oe and b[q] != '[') q += 1;
         const end = arrayEnd(b, q, oe);
         var guard: u32 = 0;
-        while (q < end and attRoom(att_n + 1) and guard < 4096) : (guard += 1) {
+        while (q < end and attRoom(att.n + 1) and guard < 4096) : (guard += 1) {
             while (q < end and b[q] != '(' and b[q] != '<') q += 1;
             if (q >= end) break;
-            _ = att_buf.room(att_used + 4096, 8192);
-            const nm = sigPutStrTo(b, q, end, att_buf.all(), &att_used);
+            _ = att.buf.room(att.used + 4096, 8192);
+            const nm = sigPutStrTo(b, q, end, att.buf.all(), &att.used);
             // 이름 뒤의 값이 파일 명세다
             q = skipVal(b, q, end);
             while (q < end and isSpace(b[q])) q += 1;
             if (q < end and isDigit(b[q])) {
                 const fnum = readUint(b, &q);
-                att_obj.all()[att_n] = fnum;
-                att_name_off.all()[att_n] = nm[0];
-                att_name_len.all()[att_n] = nm[1];
-                att_n += 1;
+                att.obj.all()[att.n] = fnum;
+                att.name_off.all()[att.n] = nm[0];
+                att.name_len.all()[att.n] = nm[1];
+                att.n += 1;
                 while (q < end and isSpace(b[q])) q += 1;
                 if (q < end and isDigit(b[q])) _ = readUint(b, &q);
                 while (q < end and isSpace(b[q])) q += 1;
@@ -6471,8 +6495,8 @@ fn collectXfa(b: []const u8, as2: usize, ae: usize) void {
 }
 
 fn collectAttach(b: []const u8) void {
-    att_n = 0;
-    att_used = 0;
+    att.n = 0;
+    att.used = 0;
     if (doc_root == 0) return;
     const rb = findObj(b, doc_root) orelse return;
     const re = objDictEnd(b, rb);
@@ -6712,36 +6736,38 @@ pub fn readArr(b: []const u8, ds: usize, de: usize, key: []const u8, dst: []f32)
 /// 담아 두고 돌려 쓴다.
 const FN_SLOTS = 4;
 const FN_POOL = 512 * 1024;
-var fn_key: [FN_SLOTS]usize = .{0} ** FN_SLOTS;
-var fn_at: [FN_SLOTS]u32 = .{0} ** FN_SLOTS;
-var fn_ln: [FN_SLOTS]u32 = .{0} ** FN_SLOTS;
-var fn_pool: [FN_POOL]u8 = undefined;
-var fn_used: u32 = 0;
-var fn_rr: u32 = 0;
+var fnc: struct {
+    key: [FN_SLOTS]usize = .{0} ** FN_SLOTS,
+    at: [FN_SLOTS]u32 = .{0} ** FN_SLOTS,
+    ln: [FN_SLOTS]u32 = .{0} ** FN_SLOTS,
+    pool: [FN_POOL]u8 = undefined,
+    used: u32 = 0,
+    rr: u32 = 0,
+} = .{};
 
 fn fnReset() void {
-    fn_used = 0;
-    fn_rr = 0;
+    fnc.used = 0;
+    fnc.rr = 0;
     var i: u32 = 0;
-    while (i < FN_SLOTS) : (i += 1) { fn_key[i] = 0; fn_ln[i] = 0; }
+    while (i < FN_SLOTS) : (i += 1) { fnc.key[i] = 0; fnc.ln[i] = 0; }
 }
 
 pub fn sampleData(b: []const u8, fs: usize) ?[]const u8 {
     var i: u32 = 0;
     while (i < FN_SLOTS) : (i += 1) {
-        if (fn_key[i] == fs and fn_ln[i] > 0) return fn_pool[fn_at[i]..][0..fn_ln[i]];
+        if (fnc.key[i] == fs and fnc.ln[i] > 0) return fnc.pool[fnc.at[i]..][0..fnc.ln[i]];
     }
     const d = streamFrom(b, fs) orelse return null;
-    const n = @min(d.len, FN_POOL - fn_used);
+    const n = @min(d.len, FN_POOL - fnc.used);
     if (n == 0) return null;
-    const slot = fn_rr % FN_SLOTS;
-    fn_rr += 1;
-    @memcpy(fn_pool[fn_used..][0..n], d[0..n]);
-    fn_key[slot] = fs;
-    fn_at[slot] = fn_used;
-    fn_ln[slot] = @intCast(n);
-    fn_used += @intCast(n);
-    return fn_pool[fn_at[slot]..][0..n];
+    const slot = fnc.rr % FN_SLOTS;
+    fnc.rr += 1;
+    @memcpy(fnc.pool[fnc.used..][0..n], d[0..n]);
+    fnc.key[slot] = fs;
+    fnc.at[slot] = fnc.used;
+    fnc.ln[slot] = @intCast(n);
+    fnc.used += @intCast(n);
+    return fnc.pool[fnc.at[slot]..][0..n];
 }
 
 /// 자료에서 bit 자리부터 n 비트를 읽는다 (큰 자리가 앞).

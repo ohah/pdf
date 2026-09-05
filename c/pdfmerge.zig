@@ -76,19 +76,19 @@ pub fn parseSecond(len: usize) u32 {
     // 둘째 문서의 번호로 덮인 채 남았다.
     // 둘째 문서를 걷는 동안 첫 문서의 "잘렸다" 표시를 건드리지 않는다
     const cut_keep = core.pages_cut;
-    const keep_at = core.walk_at;
-    const keep_cap = core.walk_cap;
-    const keep_ceil = core.walk_ceil;
+    const keep_at = core.walk.at;
+    const keep_cap = core.walk.cap;
+    const keep_ceil = core.walk.ceil;
     if (!core.walkStart(b.len)) return 0;
     b2_page_n = 0;
     core.collectPages(b, pgs, 0, &b2_page_n);
-    b2_at = core.walk_at;
+    b2_at = core.walk.at;
     b2_cap_n = b2_page_n;
     core.zoneShrink(b2_at + @as(usize, b2_page_n) * 4);
     core.pages_cut = cut_keep;
-    core.walk_at = keep_at;
-    core.walk_cap = keep_cap;
-    core.walk_ceil = keep_ceil;
+    core.walk.at = keep_at;
+    core.walk.cap = keep_cap;
+    core.walk.ceil = keep_ceil;
     return if (b2_page_n > 0) 1 else 0;
 }
 
