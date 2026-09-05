@@ -13239,6 +13239,26 @@ fn attachType3(b: []const u8, fbody: usize) void {
     f.type3 = true;
     f.kind |= 32;
 
+    // 글꼴 제 /Resources 도 훑는다.
+    //
+    // 자원은 쪽 단위로 미리 훑어 표에 담는데, Type3 글꼴은 제 자원을 따로
+    // 들고 있다. 그걸 안 훑으면 글리프 프로그램 안의 /Im0 Do 나 /GS0 gs 가
+    // 아무것도 못 찾아 조용히 지나간다 — 그림을 품은 글리프는 아예 안
+    // 그려졌고, 투명도를 건 글리프는 불투명하게 나왔다(pdf.js 와 맞대 보고
+    // 알았다).
+    if (find(b[fbody..fend], "/Resources", 0)) |ra| {
+        var rp = fbody + ra + 10;
+        while (rp < fend and isSpace(b[rp])) rp += 1;
+        if (rp < fend and b[rp] == '<') {
+            scanResources(b, rp, dictEnd(b, rp, fend), 1);
+        } else if (rp < fend and isDigit(b[rp])) {
+            const rn = readUint(b, &rp);
+            if (findObj(b, rn)) |rb| {
+                scanResources(b, rb, find(b, "endobj", rb) orelse b.len, 1);
+            }
+        }
+    }
+
     if (find(b[fbody..fend], "/FontMatrix", 0)) |ma| {
         var p = fbody + ma + 11;
         while (p < fend and b[p] != '[') p += 1;
