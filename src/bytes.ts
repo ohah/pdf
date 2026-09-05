@@ -38,3 +38,26 @@ export async function loadBytes(where: string): Promise<Uint8Array<ArrayBuffer> 
     return null;
   }
 }
+
+/**
+ * 글꼴 바이트에서 캐시 열쇠를 만든다.
+ *
+ * 예전에는 512바이트만 골라 봤다. 50KB 글꼴이면 99%를 안 보는 셈이라,
+ * 길이가 같고 표본 밖만 다른 부분집합 글꼴이 같은 열쇠가 됐다 — 한 바이트만
+ * 비켜 바꿔도 열쇠가 같은 것을 확인했다. 이 캐시는 문서를 넘나들므로 남의
+ * 문서 글꼴이 그려질 수 있었다(스텐실 캐시에서 실제로 겪은 그 사고다).
+ *
+ * 전부 본다. 4바이트씩 묶어 5MB 글꼴도 한 자릿수 ms 다. 곱은 Math.imul 로
+ * 한다 — `(h * 16777619) >>> 0` 은 2^53 을 넘겨 아랫자리를 잃는다.
+ */
+export function fontKey(bytes: Uint8Array): string {
+  let h = 2166136261;
+  const n = bytes.length;
+  const words = n >> 2;
+  if (words > 0) {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, words * 4);
+    for (let w = 0; w < words; w++) h = Math.imul(h ^ dv.getUint32(w * 4, true), 16777619) >>> 0;
+  }
+  for (let i = words * 4; i < n; i++) h = Math.imul(h ^ bytes[i], 16777619) >>> 0;
+  return `${n}-${h.toString(36)}`;
+}

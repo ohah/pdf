@@ -4,7 +4,7 @@
 // 결과만 받아 canvas 에 얹는다 — 큰 문서를 열어도 화면이 멎지 않는다.
 //
 //   import { PDFDocument } from "@ohah/pdf";
-import { loadBytes } from "./bytes.js";
+import { fontKey, loadBytes } from "./bytes.js";
 //
 //   const pdf = await PDFDocument.open(bytes, { wasm: "/pdf.wasm", cmaps: "/cmaps" });
 //   await pdf.render(1, canvas, { scale: 1.5 });
@@ -255,10 +255,7 @@ async function loadFont(bytes: Uint8Array): Promise<string | undefined> {
   // FontFace 는 문서에 다는 것이라 브라우저에만 있다. Node 에서는 건너뛴다 —
   // 글자 뽑기에는 필요 없고, 그리기는 어차피 캔버스가 있어야 한다.
   if (typeof FontFace === "undefined" || typeof document === "undefined") return undefined;
-  let h = 2166136261;
-  const step = Math.max(1, Math.floor(bytes.length / 512));
-  for (let i = 0; i < bytes.length; i += step) h = ((h ^ bytes[i]) * 16777619) >>> 0;
-  const key = `${bytes.length}-${h.toString(36)}`;
+  const key = fontKey(bytes);
   const hit = fontCache.get(key);
   if (hit) return hit;
   const fam = `ohahpdf${fontSeq++}`;
