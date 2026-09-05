@@ -3186,10 +3186,14 @@ var page_y0: f32 = 0;
 var page_rotate: i32 = 0;
 var page_w: f32 = 612;
 var page_h: f32 = 792;
-/// 이 페이지가 그린 외부 객체(대개 이미지)의 수.
+/// 이 쪽이 그린 외부 객체(Do)의 수 — 그림과 폼을 함께 센다.
 /// 글자가 없는데 이것이 있으면 스캔 문서다.
 var draw_count: u32 = 0;
-/// 이 쪽이 가진 폼 XObject 의 수. 아직 그리지 않는다.
+/// 이 쪽이 가진 폼 XObject 의 수. 화면의 "문서 정보"가 보여 준다.
+///
+/// 그리기는 한다 — Do 를 만나면 제 /Matrix 를 걸고 /BBox 로 자른 뒤 안을
+/// 펼쳐 그리고, 투명 그룹이면 딴 판에 그려 한 번에 겹친다. 이 값은 그와
+/// 별개로 "이 쪽에 폼이 몇 개 있나" 를 알려 주는 셈이다.
 var form_n: u32 = 0;
 
 /// 쪽이 쓰는 그림들.
@@ -5818,8 +5822,11 @@ fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
                 xe = find(b, "endobj", xb) orelse b.len;
             }
         }
-        // "/이름 N 0 R" 을 모두 걷어 그림을 담는다.
-        // 폼 XObject 는 아직 그리지 않으므로 개수만 세어 화면에 알린다.
+        // "/이름 N 0 R" 을 모두 걷어 그림과 폼을 담는다.
+        //
+        // 폼 XObject 는 이름으로 찾아 쓸 수 있게 따로 담는다(formsBuf). Do 가
+        // 그 이름을 만나면 제 /Matrix·/BBox·투명 그룹을 걸고 안을 펼쳐 그린다.
+        // form_n 은 그와 별개로 개수만 세어 화면에 알린다.
         var q = xs;
         while (q < xe) {
             if (b[q] != '/') { q += 1; continue; }
