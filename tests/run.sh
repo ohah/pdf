@@ -52,14 +52,20 @@ for pass in $(seq 1 "$N"); do
   ty=$(npx tsc --noEmit --ignoreConfig --strict --target ES2022 --module ESNext \
         --moduleResolution bundler --lib ES2022,DOM,DOM.Iterable tests/types.ts 2>&1 \
         && echo "타입 이름 다 나감" || echo "타입 실패 1")
+  # 위는 src 를 직접 부른다. 아래는 소비자처럼 꾸러미 이름으로 부르고
+  # React·Vue·Svelte 어댑터의 *추론*까지 못 박는다 — exports 지도와 .d.ts 가
+  # 제대로 걸렸는지는 이쪽에서만 걸린다.
+  tc=$(npx tsc -p tests/types/tsconfig.json 2>&1 \
+        && echo "쓰는 쪽 추론 통과" || echo "쓰는 쪽 추론 실패 1")
   printf "%s회차  적대적 %s개 · 예외 %s · 느림 %s | %s | %s\n" \
     "$pass" "$n" "$ex" "$slow" "$(echo "$fn" | head -1 | sed 's/^ *//')" "$(echo "$ln" | head -1 | sed 's/^ *//')"
-  echo "        ${pl# } | ${sg# } | ${nd# } | ${ty# }"
+  echo "        ${pl# } | ${sg# } | ${nd# } | ${ty# } | ${tc# }"
   echo "        API ${ap# } | ${rg# } | ${fj# } | ${xf# } | ${jm# }"
   if [ "$ex" != 0 ] || [ "$slow" != 0 ]; then echo "$adv" | grep -E '예외|⚠'; fail=1; fi
   if echo "$fn" | grep -qE '실패 [1-9]'; then echo "$fn"; fail=1; fi
   if echo "$ln$pl$sg" | grep -qE '실패 [1-9]'; then echo "$ln"; echo "$pl"; echo "$sg"; fail=1; fi
   if echo "$nd" | grep -qE '실패 [1-9]'; then echo "$nd"; fail=1; fi
+  if echo "$tc" | grep -qE '실패 [1-9]'; then npx tsc -p tests/types/tsconfig.json 2>&1 | head -5; fail=1; fi
   if echo "$ty" | grep -qE '실패 [1-9]'; then echo "$ty"; fail=1; fi
   if echo "$ap" | grep -q '✗'; then echo "$ap"; fail=1; fi
 done
