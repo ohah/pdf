@@ -122,3 +122,15 @@ node tests/mksig.mjs   tests/fixtures   # 전자 서명 (openssl 이 필요하�
 쪽1 은 허프만·MMR 로, 쪽2 는 산술 부호로 담아 두어 서로 맞대 볼 수 있다.
 `fixtures/jpx/` 의 `p0_*.j2k` 는 JPEG2000 적합성 시험 자료(openjpeg-data)이고,
 나머지 `.jp2` 는 macOS 인코더로 만든 것이다.
+
+## tests/mkfeat.mjs — 규격의 빈 곳을 겨눈 견본
+
+    node tests/mkfeat.mjs tests/fixtures
+
+있던 견본 113개가 넓게 덮고 있었지만, 세 뷰어(우리·pdf.js·poppler)로 맞대
+보니 안 덮인 자리가 있었다. 여기서 만든 열둘로 결함 다섯을 잡았다 —
+`/Decode` 무시, 2·4비트 회색 그림 안 그림, Separation 이 잉크 변환 함수를
+안 탐, 무색 무늬가 준 색 무시, `/ColorDodge`·`/ColorBurn` 이 이름 앞머리
+때문에 죽음.
+
+맞았던 일곱도 남겨 둔다. 되돌림을 잡는 그물이다.
