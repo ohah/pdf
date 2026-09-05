@@ -3919,6 +3919,41 @@ export fn jpegToRgb(i: u32) i32 {
 /// 프로파일이 있으면 그걸로 옮긴다. 화소마다 곡선·격자표를 다 타면 느리므로
 /// (300만 화소면 억 단위 셈이다) 17^4 짜리 표를 한 번 만들어 두고 그 표에서
 /// 사이값을 읽는다 — 비싼 일은 83,521 번만 하고 화소마다는 값만 섞는다.
+/// CMYK 하나를 RGB 로 옮긴다 (0~1).
+///
+/// 규격(§8.6.4.4)이 적어 둔 셈은 R = 1 - min(1, C+K) 인데, 그대로 쓰면 시안이
+/// (0,255,255) 네온으로 나온다. 잉크로 찍은 시안은 그런 색이 아니다 — 실제
+/// 뷰어는 다들 코팅지 인쇄를 맞춘 근사를 쓴다.
+///
+/// 여기 쓴 이차식은 pdf.js 것이다(Apache-2.0, THIRD-PARTY-NOTICES.md 참고).
+/// 박힌 ICC 프로파일이 있으면 그쪽이 먼저다 — 이건 프로파일이 없을 때다.
+fn cmykRgb(c: f32, m: f32, y: f32, k: f32, out: *[3]f32) void {
+    const r = 255 +
+        c * (-4.387332384609988 * c + 54.48615194189176 * m + 18.82290502165302 * y +
+            212.25662451639585 * k - 285.2331026137004) +
+        m * (1.7149763477362134 * m - 5.6096736904047315 * y - 17.873870861415444 * k -
+            5.497006427196366) +
+        y * (-2.5217340131683033 * y - 21.248923337353073 * k + 17.5119270841813) +
+        k * (-21.86122147463605 * k - 189.48180835922747);
+    const g = 255 +
+        c * (8.841041422036149 * c + 60.118027045597366 * m + 6.871425592049007 * y +
+            31.159100130055922 * k - 79.2970844816548) +
+        m * (-15.310361306967817 * m + 17.575251261109482 * y + 131.35250912493976 * k -
+            190.9453302588951) +
+        y * (4.444339102852739 * y + 9.8632861493405 * k - 24.86741582555878) +
+        k * (-20.737325471181034 * k - 187.80453709719578);
+    const b = 255 +
+        c * (0.8842522430003296 * c + 8.078677503112928 * m + 30.89978309703729 * y -
+            0.23883238689178934 * k - 14.183576799673286) +
+        m * (10.49593273432072 * m + 63.02378494754052 * y + 50.606957656360734 * k -
+            112.23884253719248) +
+        y * (0.03296041114873217 * y + 115.60384449646641 * k - 193.58209356861505) +
+        k * (-22.33816807309886 * k - 180.12613974708367);
+    out[0] = @max(0, @min(1, r / 255));
+    out[1] = @max(0, @min(1, g / 255));
+    out[2] = @max(0, @min(1, b / 255));
+}
+
 fn cmykToRgb(dst: [*]u8, n_px: usize, ix: i32, invert: bool) u32 {
     const G: usize = 17;
     var lut: []u8 = &[_]u8{};
@@ -3943,9 +3978,11 @@ fn cmykToRgb(dst: [*]u8, n_px: usize, ix: i32, invert: bool) u32 {
             g = @intFromFloat(@max(0, @min(255, rgb[1] * 255)));
             b2 = @intFromFloat(@max(0, @min(255, rgb[2] * 255)));
         } else {
-            r = @intFromFloat(@max(0, @min(255, (1 - @min(@as(f32, 1), c + k)) * 255)));
-            g = @intFromFloat(@max(0, @min(255, (1 - @min(@as(f32, 1), m + k)) * 255)));
-            b2 = @intFromFloat(@max(0, @min(255, (1 - @min(@as(f32, 1), y + k)) * 255)));
+            var rgb2: [3]f32 = .{ 0, 0, 0 };
+            cmykRgb(c, m, y, k, &rgb2);
+            r = @intFromFloat(@max(0, @min(255, rgb2[0] * 255)));
+            g = @intFromFloat(@max(0, @min(255, rgb2[1] * 255)));
+            b2 = @intFromFloat(@max(0, @min(255, rgb2[2] * 255)));
         }
         const d0 = i * 3;
         dst[d0] = r;
@@ -5105,18 +5142,14 @@ fn runOps(b: []const u8, depth: u32) void {
         else if (eqs(op, "g") and sp >= 1) { pending_tile = -1; emitOp(11, &[_]f32{ st[0], st[0], st[0] }); }
         else if (eqs(op, "G") and sp >= 1) emitOp(12, &[_]f32{ st[0], st[0], st[0] })
         else if (eqs(op, "k") and sp >= 4) {
-            // CMYK → RGB. 정확한 변환은 색 프로파일이 필요하지만 화면용으로는
-            // 이 근사로 충분하다.
-            const r = (1 - @min(st[0] + st[3], 1));
-            const g2 = (1 - @min(st[1] + st[3], 1));
-            const bl = (1 - @min(st[2] + st[3], 1));
-            emitOp(11, &[_]f32{ r, g2, bl });
+            var rgb4: [3]f32 = .{ 0, 0, 0 };
+            cmykRgb(st[0], st[1], st[2], st[3], &rgb4);
+            emitOp(11, &[_]f32{ rgb4[0], rgb4[1], rgb4[2] });
         }
         else if (eqs(op, "K") and sp >= 4) {
-            const r = (1 - @min(st[0] + st[3], 1));
-            const g2 = (1 - @min(st[1] + st[3], 1));
-            const bl = (1 - @min(st[2] + st[3], 1));
-            emitOp(12, &[_]f32{ r, g2, bl });
+            var rgb4: [3]f32 = .{ 0, 0, 0 };
+            cmykRgb(st[0], st[1], st[2], st[3], &rgb4);
+            emitOp(12, &[_]f32{ rgb4[0], rgb4[1], rgb4[2] });
         }
         else if (eqs(op, "w") and sp >= 1) emitOp(13, &[_]f32{st[0]})
         else if (eqs(op, "J") and sp >= 1) emitOp(19, &[_]f32{st[0]})
@@ -5235,9 +5268,11 @@ fn runOps(b: []const u8, depth: u32) void {
                 const m = st[sp - 3];
                 const y2 = st[sp - 2];
                 const k2 = st[sp - 1];
-                r = (1 - @min(@as(f32, 1), cy + k2));
-                g2 = (1 - @min(@as(f32, 1), m + k2));
-                b3 = (1 - @min(@as(f32, 1), y2 + k2));
+                var rgb5: [3]f32 = .{ 0, 0, 0 };
+                cmykRgb(cy, m, y2, k2, &rgb5);
+                r = rgb5[0];
+                g2 = rgb5[1];
+                b3 = rgb5[2];
             } else if (kind == CS_LAB and sp >= 3) {
                 const v = labToRgb(st[sp - 3], st[sp - 2], st[sp - 1]);
                 r = v[0];
@@ -9942,11 +9977,9 @@ fn collectAnnots(b: []const u8, body: usize, end: usize) void {
                     if (n2 == 1) { a.color = .{ vals[0], vals[0], vals[0] }; a.has_color = true; }
                     if (n2 == 3) { a.color = .{ vals[0], vals[1], vals[2] }; a.has_color = true; }
                     if (n2 == 4) {
-                        a.color = .{
-                            (1 - @min(1, vals[0] + vals[3])),
-                            (1 - @min(1, vals[1] + vals[3])),
-                            (1 - @min(1, vals[2] + vals[3])),
-                        };
+                        var rgb6: [3]f32 = .{ 0, 0, 0 };
+                        cmykRgb(vals[0], vals[1], vals[2], vals[3], &rgb6);
+                        a.color = rgb6;
                         a.has_color = true;
                     }
                 }
@@ -10721,10 +10754,15 @@ fn evalFnN(b: []const u8, fs: usize, fe: usize, in: []const f32, out: *[4]f32) u
         const nd = readArr(b, fs, fe, "/Decode", &dec);
         const d = sampleData(b, fs) orelse return 0;
 
-        // 들어온 값을 격자 자리로 옮긴다
+        // 들어온 값을 격자 자리로 옮긴다.
+        //
+        // 규격이 정한 기본은 사이값을 잇는 것이다(/Order 1). 예전에는 첫 축만
+        // 이었고, 축이 둘이면 그것마저 껐다 — 축 넷을 그물처럼 잇는 대신 가장
+        // 가까운 칸을 집었다. 그래서 Size [4 4] 짜리 셰이딩이 네 단으로
+        // 뭉쳐 나왔다(pdf.js 는 매끄러운데 우리만 띠가 졌다).
         var idx: [2]u32 = .{ 0, 0 };
-        var frac0: f32 = 0;
-        var gi: u32 = 0;
+        var frac: [2]f32 = .{ 0, 0 };
+        var lim: [2]u32 = .{ 1, 1 };
         var k: u32 = 0;
         while (k < nin) : (k += 1) {
             const sz = @max(1, size[k]);
@@ -10733,21 +10771,29 @@ fn evalFnN(b: []const u8, fs: usize, fe: usize, in: []const f32, out: *[4]f32) u
             const x = if (k < in.len) in[k] else 0;
             var e = lerp(x, dom[k * 2], dom[k * 2 + 1], e0, e1);
             e = @max(0, @min(sz - 1, e));
-            // 첫 축은 사이값을 이으므로 내림, 둘째 축은 가장 가까운 칸을 쓴다.
-            // 내림으로 두면 마지막 칸에 영영 닿지 못해 색이 한 단 모자란다.
-            idx[k] = if (k == 0) @intFromFloat(e) else @intFromFloat(@min(sz - 1, e + 0.5));
-            if (k == 0) { gi = idx[0]; frac0 = e - @as(f32, @floatFromInt(idx[0])); }
+            idx[k] = @intFromFloat(e);
+            frac[k] = e - @as(f32, @floatFromInt(idx[k]));
+            lim[k] = @intFromFloat(sz);
         }
-        const w0: u32 = @intFromFloat(@max(1, size[0]));
-        const base: u64 = @as(u64, idx[0]) + @as(u64, idx[1]) * w0;
-        // 첫 축만 사이값을 잇는다. 두 축짜리는 가장 가까운 칸을 쓴다.
-        const nxt: u64 = if (nin == 1 and gi + 1 < w0) base + 1 else base;
+        const w0: u64 = lim[0];
+        // 네 귀퉁이. 격자 끝에서는 제자리를 다시 집어 밖으로 안 나간다.
+        const gx0: u64 = idx[0];
+        const gx1: u64 = if (idx[0] + 1 < lim[0]) idx[0] + 1 else idx[0];
+        const gy0: u64 = idx[1];
+        const gy1: u64 = if (nin >= 2 and idx[1] + 1 < lim[1]) idx[1] + 1 else idx[1];
+        const corner: [4]u64 = .{ gx0 + gy0 * w0, gx1 + gy0 * w0, gx0 + gy1 * w0, gx1 + gy1 * w0 };
+        const fx = frac[0];
+        const fy = if (nin >= 2) frac[1] else 0;
         const maxv: f32 = @floatFromInt((@as(u64, 1) << @intCast(bps)) - 1);
         var c: u32 = 0;
         while (c < nout) : (c += 1) {
-            const a = @as(f32, @floatFromInt(bitsAt(d, (base * nout + c) * bps, bps)));
-            const bb = @as(f32, @floatFromInt(bitsAt(d, (nxt * nout + c) * bps, bps)));
-            const raw = (a + (bb - a) * frac0) / maxv;
+            var v: [4]f32 = undefined;
+            var q: usize = 0;
+            while (q < 4) : (q += 1)
+                v[q] = @floatFromInt(bitsAt(d, (corner[q] * nout + c) * bps, bps));
+            const top = v[0] + (v[1] - v[0]) * fx;
+            const bot = v[2] + (v[3] - v[2]) * fx;
+            const raw = (top + (bot - top) * fy) / maxv;
             const lo: f32 = if (nd >= (c + 1) * 2) dec[c * 2] else rng[c * 2];
             const hi: f32 = if (nd >= (c + 1) * 2) dec[c * 2 + 1] else rng[c * 2 + 1];
             out[c] = lo + raw * (hi - lo);
@@ -10780,9 +10826,7 @@ fn evalFnN(b: []const u8, fs: usize, fe: usize, in: []const f32, out: *[4]f32) u
 
 fn rgbFrom(comps: u32, v: [4]f32, out: *[3]f32) void {
     if (comps >= 4) {
-        out[0] = 1 - @min(@as(f32, 1), v[0] + v[3]);
-        out[1] = 1 - @min(@as(f32, 1), v[1] + v[3]);
-        out[2] = 1 - @min(@as(f32, 1), v[2] + v[3]);
+        cmykRgb(v[0], v[1], v[2], v[3], out);
     } else if (comps == 3) {
         out[0] = v[0];
         out[1] = v[1];

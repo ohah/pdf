@@ -32,6 +32,22 @@
 > modification, are permitted provided that the following conditions are
 > met: … (BSD 3-Clause)
 
+### pdf.js — DeviceCMYK 근사식 (Apache-2.0)
+
+`c/pdf.zig` 의 `cmykRgb` 에 쓴 이차식 세 줄은
+[mozilla/pdf.js](https://github.com/mozilla/pdf.js) 의
+`src/core/colorspace.js`(`DeviceCmykCS`)에서 가져왔다. 규격이 적어 둔
+R = 1 − min(1, C+K) 는 화면에서 시안이 네온으로 나와, 실제 인쇄를 맞춘
+근사가 필요했다. `dist/pdf.wasm` 안에 들어 있다.
+
+> Copyright 2012 Mozilla Foundation
+>
+> Licensed under the Apache License, Version 2.0 (the "License");
+> you may not use this file except in compliance with the License.
+> You may obtain a copy of the License at
+>
+>     http://www.apache.org/licenses/LICENSE-2.0
+
 ### 규격 문서에서 옮긴 표
 
 부호표·상태표를 규격 그대로 옮긴 자리가 있다. 구현을 위한 통상적 사용이지만

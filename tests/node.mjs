@@ -291,9 +291,13 @@ const t = (name, cond, got) => {
         return [at6(10), at6(30), at6(50), at6(70)];
       };
       const near = (a, b, tol) => a.every((v, i) => Math.abs(v - b[i]) <= tol);
+      // 프로파일이 없는 DeviceCMYK. 규격이 적어 둔 1-min(1,C+K) 를 그대로
+      // 쓰면 시안이 (0,255,255) 네온으로 나온다 — 잉크로 찍은 시안은 그런
+      // 색이 아니고, 실제 뷰어는 다들 인쇄를 맞춘 근사를 쓴다. 예전에는 이
+      // 시험이 네온값을 지키고 있어서 결함이 통과로 굳어 있었다.
       const plain = await pick("img-cmyk");
-      t("CMYK 그림: 시안이 시안이다", near(plain[0], [0, 255, 255], 10), plain[0]);
-      t("CMYK 그림: 검정이 검정이다", near(plain[3], [0, 0, 0], 10), plain[3]);
+      t("CMYK 그림: 시안이 인쇄한 시안 색이다", near(plain[0], [0, 184, 241], 10), plain[0]);
+      t("CMYK 그림: 검정이 인쇄한 검정 색이다", near(plain[3], [43, 46, 52], 10), plain[3]);
       const iccImg = await pick("img-icc");
       t("CMYK 그림 + ICC: 마젠타", near(iccImg[1], [215, 21, 126], 10), iccImg[1]);
       t("CMYK 그림 + ICC: 검정", near(iccImg[3], [26, 26, 26], 10), iccImg[3]);
