@@ -266,6 +266,9 @@ fn walkOutline(b: []const u8, first: u32, depth: u8) void {
             }
         }
         if (len > 0) {
+            // 자리를 잡고 쓴다. 잡지 않고 쓰고 있었다 — marks() 가 늘 빈
+            // 슬라이스라 목차 제목 자리에 PDF 원문 조각이 나왔다.
+            if (!core.growTable(&core.mark.items.at, &core.mark.items.cap, core.mark.n, @sizeOf(core.Bookmark), 64)) return;
             core.mark.items.all()[core.mark.n] = .{ .depth = depth, .off = off, .len = len, .page = pg };
             core.mark.n += 1;
         }

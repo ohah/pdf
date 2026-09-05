@@ -5834,7 +5834,7 @@ pub var mark: struct {
     buf: Table(u8) = .{},
     buf_n: u32 = 0,
 } = .{};
-const Bookmark = struct { depth: u8, off: u32, len: u32, page: i32 };
+pub const Bookmark = struct { depth: u8, off: u32, len: u32, page: i32 };
 
 export fn outlineCount() u32 { return mark.n; }
 export fn outlineDepth(i: u32) u32 { return if (i < mark.n) mark.items.all()[i].depth else 0; }

@@ -1515,6 +1515,28 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   ok('구조 검사를 실제로 돌렸다', 검사 >= 25, 검사);
 }
 
+// ── 목차를 담을 자리를 잡고 쓰는가
+//
+// mark.items 는 선언만 있고 어디서도 자리를 잡지 않았다. 그래서 all() 이
+// 늘 빈 슬라이스였고, 거기에 쓰니 wasm 메모리 8번지부터 밟았다 — 목차
+// 400개짜리 문서에서 6392번지까지 1192바이트가 바뀌었다. 지금은 아무
+// 데도 안 사는 자리라 티가 안 났을 뿐이다.
+{
+  const m = await WebAssembly.instantiate(wasm, { wasi_snapshot_preview1: new Proxy({}, { get: () => () => 0 }) });
+  const ex = m.instance.exports;
+  const buf = fs.readFileSync(`${S}/many-outline.pdf`);
+  ex.reserve(buf.length, buf.length * 3 + 201326592);
+  const N = 32768;
+  const before = Buffer.from(new Uint8Array(ex.memory.buffer, 0, N));
+  new Uint8Array(ex.memory.buffer, ex.inputPtr(), buf.length).set(buf);
+  ex.parse(buf.length);
+  const after = Buffer.from(new Uint8Array(ex.memory.buffer, 0, N));
+  let diff = 0;
+  for (let i = 0; i < N; i++) if (before[i] !== after[i]) diff++;
+  ok('목차 400개를 읽는다', ex.outlineCount() === 400, ex.outlineCount());
+  ok('목차를 읽어도 메모리 앞자리를 안 밟는다', diff === 0, `${diff}바이트 바뀜`);
+}
+
 console.log(`  기능 단언 ${pass + fail}개 중 통과 ${pass}, 실패 ${fail}`);
 if (bad.length) bad.forEach((b3) => console.log('    ✗ ' + b3));
 process.exit(fail ? 1 : 0);
