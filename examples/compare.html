@@ -1,0 +1,90 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>@ohah/pdf ↔ pdf.js 그림 맞대기</title>
+<body style="font:13px system-ui;padding:16px">
+<pre id="out">재는 중…</pre>
+<canvas id="a" style="display:none"></canvas>
+<canvas id="b" style="display:none"></canvas>
+<script type="module">
+// 같은 쪽을 우리 엔진과 pdf.js 로 각각 그려 화소를 맞댄다.
+//
+// 두 그림이 똑같을 수는 없다 — 글자 뭉개기(안티에일리어싱)와 글리프 래스터가
+// 서로 달라 글자 가장자리 한두 화소는 늘 어긋난다. 그래서 "얼마나 다른가"
+// 대신 "크게 다른 화소가 몇이나 되는가" 를 본다. 그림·색·자리가 틀어지면
+// 그 값이 확 뛰지만, 글자 가장자리 차이로는 잘 안 뛴다.
+import { PDFDocument } from "@ohah/pdf";
+import * as pdfjs from "pdfjs-dist";
+import workerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+
+const SCALE = 1.5;
+const bytesOf = async (u) => new Uint8Array(await (await fetch(u)).arrayBuffer());
+
+function stats(A, B, w, h) {
+  let tot = 0, mx = 0, bad = 0, inkA = 0, inkB = 0;
+  const n = w * h;
+  for (let i = 0; i < n; i++) {
+    const o = i * 4;
+    let d = 0;
+    for (let c = 0; c < 3; c++) {
+      const e = Math.abs(A[o + c] - B[o + c]);
+      if (e > d) d = e;
+      tot += e;
+    }
+    if (d > mx) mx = d;
+    if (d > 32) bad++;
+    if (A[o] < 200) inkA++;
+    if (B[o] < 200) inkB++;
+  }
+  return { mean: tot / (n * 3), max: mx, bad: (bad / n) * 100, inkA: (inkA / n) * 100, inkB: (inkB / n) * 100 };
+}
+
+async function ours(bytes, pageNo, cv) {
+  const pdf = await PDFDocument.open(bytes.slice(), { wasm: "/pdf.wasm", cmaps: "/cmaps" });
+  const n = pdf.pages;
+  await pdf.render(pageNo, cv, { scale: SCALE, dpr: 1 });
+  pdf.close();
+  return n;
+}
+
+async function theirs(bytes, pageNo, cv) {
+  const task = pdfjs.getDocument({ data: bytes.slice(), cMapUrl: "/cmaps/", cMapPacked: true });
+  const doc = await task.promise;
+  const pg = await doc.getPage(pageNo);
+  const vp = pg.getViewport({ scale: SCALE });
+  cv.width = Math.round(vp.width);
+  cv.height = Math.round(vp.height);
+  const g = cv.getContext("2d");
+  g.fillStyle = "#fff";
+  g.fillRect(0, 0, cv.width, cv.height);
+  await pg.render({ canvasContext: g, viewport: vp, canvas: cv }).promise;
+  const n = doc.numPages;
+  await task.destroy();
+  return n;
+}
+
+const DOCS = (new URLSearchParams(location.search).get("docs") || "").split(",").filter(Boolean);
+const rows = [];
+const A = document.getElementById("a"), B = document.getElementById("b");
+for (const name of DOCS) {
+  const row = { name };
+  try {
+    const bytes = await bytesOf(`/fixtures/${name}`);
+    row.pages = await ours(bytes, 1, A);
+    await theirs(bytes, 1, B);
+    if (A.width !== B.width || A.height !== B.height) {
+      row.err = `크기 다름 우리 ${A.width}x${A.height} / pdfjs ${B.width}x${B.height}`;
+    } else {
+      const ga = A.getContext("2d").getImageData(0, 0, A.width, A.height).data;
+      const gb = B.getContext("2d").getImageData(0, 0, B.width, B.height).data;
+      Object.assign(row, stats(ga, gb, A.width, A.height), { w: A.width, h: A.height });
+    }
+  } catch (e) {
+    row.err = String(e?.message ?? e).slice(0, 90);
+  }
+  rows.push(row);
+  document.getElementById("out").textContent = JSON.stringify(rows, null, 1);
+}
+window.__cmp = rows;
+document.title = "done";
+</script>

@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8"><title>samp</title><body>
+<canvas id="a" style="display:none"></canvas><canvas id="b" style="display:none"></canvas>
+<script type="module">
+import { PDFDocument } from "@ohah/pdf";
+import * as pdfjs from "pdfjs-dist";
+import workerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+const q = new URLSearchParams(location.search);
+const name = q.get("doc"), pts = (q.get("pts") || "").split(";").map((s) => s.split(",").map(Number));
+const bytes = new Uint8Array(await (await fetch(`/fixtures/${name}`)).arrayBuffer());
+const A = document.getElementById("a"), B = document.getElementById("b");
+const pdf = await PDFDocument.open(bytes.slice(), { wasm: "/pdf.wasm", cmaps: "/cmaps" });
+await pdf.render(1, A, { scale: 1.5, dpr: 1 }); pdf.close();
+const task = pdfjs.getDocument({ data: bytes.slice(), cMapUrl: "/cmaps/", cMapPacked: true });
+const doc = await task.promise; const pg = await doc.getPage(1);
+const vp = pg.getViewport({ scale: 1.5 });
+B.width = Math.round(vp.width); B.height = Math.round(vp.height);
+const g = B.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, B.width, B.height);
+await pg.render({ canvasContext: g, viewport: vp, canvas: B }).promise; await task.destroy();
+const ga = A.getContext("2d").getImageData(0, 0, A.width, A.height).data;
+const gb = B.getContext("2d").getImageData(0, 0, B.width, B.height).data;
+const at = (d, w, x, y) => { const i = (y * w + x) * 4; return [d[i], d[i+1], d[i+2]]; };
+window.__s = pts.map(([x, y]) => ({ x, y, ours: at(ga, A.width, x, y), pdfjs: at(gb, B.width, x, y) }));
+document.title = "done";
+</script>

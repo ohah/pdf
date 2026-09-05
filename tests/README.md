@@ -14,6 +14,24 @@ bash tests/run.sh 5 # 5회
 돌릴 때마다 다른 파일이 된다. 넘어지면 씨앗을 찍어 두므로 그 값으로 다시
 만들어 볼 수 있다(`node tests/r8.mjs tests/fixtures 12345`).
 
+**pdf.js 와 그림 맞대기** (`tests/compare-pdfjs.mjs`) — 같은 쪽을 우리 엔진과
+pdf.js 로 각각 그려 화소를 견준다. 우리 판끼리 맞대는 `ab.mjs` 는 "어제와 같은가"
+만 볼 수 있어서, 둘 다 처음부터 틀렸으면 잡지 못한다. 바깥 눈이 하나 필요하다.
+
+```
+npx vite examples --port 4277 &
+node tests/compare-pdfjs.mjs            # 견본 전부
+node tests/compare-pdfjs.mjs icc.pdf    # 몇 개만
+node tests/sample-px.mjs icc.pdf "60,60;150,110"  # 자리를 짚어 색을 뽑아 본다
+```
+
+두 그림이 똑같을 수는 없다 — 글자 뭉개기와 글리프 래스터가 서로 다르다.
+그래서 "크게 다른 화소"(채널 하나라도 32 넘게 어긋난 화소)의 비율을 본다.
+글자 가장자리 차이로는 잘 안 뛰고, 그림이 빠지거나 색이 뒤집히면 확 뛴다.
+
+한쪽이 아예 안 그린 쪽은 갈라 놓는다. **우리가 못 그린 쪽이 있으면 실패**로
+친다. pdf.js 가 못 그린 쪽(JPX·JBIG2 견본 26개)은 세어만 둔다.
+
 **브라우저** (`tests/e2e.spec.ts` 20개, `tests/worker.spec.ts` 6개) — 화면과
 워커 경계를 본다. 워커는 이번에 새로 생긴 자리라 따로 두들긴다 — 답이 오기 전에
 다음 파일을 넣기, 망가진 파일 잇달아 넣기, 미리보기가 흐르는 중에 만지기.
