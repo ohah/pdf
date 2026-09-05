@@ -29,6 +29,10 @@ if [ ! -f dist/pdf.wasm ]; then
   exit 1
 fi
 
+# dist/ 는 git 밖이라 낡은 채로 남아 있기 쉽다. 그러면 Node 갈래가 옛 JS 를
+# 시험하고도 통과한다 — scan4 기대치가 낡은 것을 여섯 달 못 봤다. 매번 굽는다.
+bash scripts/build-js.sh >/dev/null
+
 fail=0
 for pass in $(seq 1 "$N"); do
   # r8 은 무작위 퍼저다. 회차마다 씨앗을 바꿔 매번 다른 파일을 만든다 —

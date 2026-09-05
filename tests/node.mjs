@@ -172,6 +172,33 @@ const t = (name, cond, got) => {
     t("그리며 글자 자리도 준다", Array.isArray(r.runs), typeof r.runs);
     pdf.close();
 
+    // 문서를 잇달아 열어도 앞 문서의 그림이 안 나오는가.
+    //
+    // 엔진 인스턴스는 문서끼리 나눠 쓴다(Node 에서는 모듈 하나). 스텐실
+    // (1비트 마스크) 캔버스 열쇠가 `s{쪽}-{칸}` 뿐이라, 크기가 같은 두
+    // 문서의 같은 자리가 같은 열쇠가 되어 앞 문서 그림이 그려졌다.
+    // jb-arith 를 열고 jb-half 를 열면 jb-arith 가 나왔다.
+    {
+      const inkOf = async (name) => {
+        const d2 = await PDFDocument.open(`${FX}/${name}`);
+        const c2 = createCanvas(10, 10);
+        await d2.render(1, c2, { scale: 1, dpr: 1 });
+        const px = c2.getContext("2d").getImageData(0, 0, c2.width, c2.height).data;
+        let n = 0;
+        for (let i = 0; i < px.length; i += 4) if (px[i] < 128) n++;
+        d2.close();
+        return n * 100 / (c2.width * c2.height);
+      };
+      const a1 = await inkOf("jb-arith.pdf");
+      const h1 = await inkOf("jb-half.pdf");
+      const p1 = await inkOf("jb-page1.pdf");
+      const a2 = await inkOf("jb-arith.pdf");
+      t("잇달아 열어도 앞 문서 그림이 안 섞인다",
+        Math.abs(a1 - 10.5) < 0.6 && Math.abs(h1 - 15.8) < 0.6
+        && Math.abs(p1 - 28.2) < 0.6 && Math.abs(a2 - 10.5) < 0.6,
+        `arith ${a1.toFixed(1)} · half ${h1.toFixed(1)} · page1 ${p1.toFixed(1)} · arith ${a2.toFixed(1)}`);
+    }
+
     // 그림도 그린다.
     //
     // 예전에는 Node 에 createImageBitmap 이 없다는 이유로 그림 자리를 통째로
@@ -180,7 +207,12 @@ const t = (name, cond, got) => {
     // 얹고, JPEG 은 엔진이 푼다.
     // 기대치는 브라우저에서 같은 크기로 그려 나온 값이다. 작은 것(가리개
     // 견본 32칸)까지 그대로여야 "브라우저와 같다" 고 말할 수 있다.
-    for (const [name, least] of [["scan4.pdf", 50000], ["cmyk.pdf", 6900],
+    //
+    // scan4 는 50000 이었다. 그림 키울 때 뭉개기를 고치면서(11ad2b4) 값이
+    // 바뀌었는데 dist/ 가 git 밖이라 낡은 빌드로 시험이 돌아 여태 안 걸렸다.
+    // 다시 재니 브라우저 34568, Node 34568 로 같다 — 둘이 어긋난 게 아니라
+    // 기대치가 낡았던 것이다.
+    for (const [name, least] of [["scan4.pdf", 34000], ["cmyk.pdf", 6900],
                                  ["indexed.pdf", 14000], ["jpx-53.pdf", 16000],
                                  ["mask-stencil.pdf", 30], ["bpc16.pdf", 26]]) {
       const p2 = await PDFDocument.open(`${FX}/${name}`);

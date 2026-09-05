@@ -274,6 +274,17 @@ const wasi = {
 
 let wasmPath = DEFAULTS.wasm;
 
+/**
+ * 문서를 열 때마다 하나씩 오른다.
+ *
+ * 스텐실(1비트 마스크) 캔버스는 열쇠로 캐시하는데, 그 열쇠가 `s{쪽}-{칸}`
+ * 뿐이었다. 엔진 인스턴스는 문서끼리 나눠 쓰므로(Node 에서는 모듈 하나),
+ * 크기가 같은 두 문서의 같은 자리가 같은 열쇠가 되어 **앞 문서의 그림이
+ * 나왔다**. jb-arith 를 열고 jb-half 를 열면 jb-arith 가 그려졌다.
+ * 열쇠에 이 번호를 넣어 문서를 가른다.
+ */
+let openSeq = 0;
+
 
 
 async function engine() {
@@ -500,6 +511,7 @@ async function open(bytes: Uint8Array, pw: string) {
   new Uint8Array(e.memory.buffer, e.inputPtr(), bytes.byteLength).set(bytes);
   e.clearPassword?.();
   chars(e, pw, (c) => e.addPasswordChar?.(c));
+  openSeq += 1;
   const ok = e.parse(bytes.byteLength);
   if (e.needPassword?.()) return { needPw: true };
   if (!ok) return { err: "no-page-tree" };
@@ -698,7 +710,7 @@ async function page(i: number, formOn: boolean, light = false) {
       continue;
     }
     if (k === 4) {
-      stencils.push({ w: iw, h: ih, flip: (e.slotFlip?.(si) ?? 0) === 1, bytes: rawAt(si), key: `s${i}-${si}:` });
+      stencils.push({ w: iw, h: ih, flip: (e.slotFlip?.(si) ?? 0) === 1, bytes: rawAt(si), key: `d${openSeq}-s${i}-${si}:` });
       bitmaps.push(undefined);
       continue;
     }
