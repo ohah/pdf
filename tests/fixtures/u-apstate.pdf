@@ -1,0 +1,51 @@
+%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources <<  >> /Annots [5 0 R 6 0 R] /Contents 4 0 R >>
+endobj
+4 0 obj
+<<  /Length 32 >>
+stream
+0.9 0.9 0.9 rg 0 0 200 200 re f
+
+endstream
+endobj
+5 0 obj
+<< /Type /Annot /Subtype /Widget /FT /Btn /T (on) /Rect [30 120 70 160] /F 4 /AS /Yes /AP << /N << /Yes 7 0 R /Off 8 0 R >> >> >>
+endobj
+6 0 obj
+<< /Type /Annot /Subtype /Widget /FT /Btn /T (off) /Rect [110 120 150 160] /F 4 /AS /Off /AP << /N << /Yes 7 0 R /Off 8 0 R >> >> >>
+endobj
+7 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 40 40] /Length 67 >>
+stream
+0.1 0.6 0.1 rg 0 0 40 40 re f 0 0 0 RG 3 w 8 20 m 18 10 l 32 30 l S
+endstream
+endobj
+8 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 40 40] /Length 55 >>
+stream
+1 1 1 rg 0 0 40 40 re f 0 0 0 RG 1 w 0.5 0.5 39 39 re S
+endstream
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000242 00000 n 
+0000000325 00000 n 
+0000000470 00000 n 
+0000000618 00000 n 
+0000000783 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R >>
+startxref
+936
+%%EOF

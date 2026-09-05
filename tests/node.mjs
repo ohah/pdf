@@ -209,6 +209,19 @@ const t = (name, cond, got) => {
       const burn = await px("t-blend.pdf", 174, 62);
       t("ColorDodge 가 섞인다", near(dodge, [0, 191, 84], 20), dodge.join(","));
       t("ColorBurn 이 섞인다", near(burn, [0, 0, 0], 20), burn.join(","));
+      // 그림자의 /Extend — 늘이지 말라면 축 밖은 안 칠해야 한다.
+      // 엔진이 ext0·ext1 을 보내는데도 그리는 쪽이 안 읽어 늘 늘였다.
+      const exOut = await px("u-axial.pdf", 30, 90);
+      const exIn = await px("u-axial.pdf", 80, 90);
+      t("/Extend false 면 축 밖을 안 칠한다", near(exOut, [255, 255, 255]), exOut.join(","));
+      t("/Extend false 라도 축 안은 칠한다", exIn[0] > 120 && exIn[2] > 40, exIn.join(","));
+
+      // 인라인 그림의 줄임 필터 — /AHx 를 안 풀어 글자 코드가 화소가 됐다
+      const ah = await px("u-inline.pdf", 30, 30);
+      const ah2 = await px("u-inline.pdf", 70, 50);
+      t("인라인 /AHx 를 푼다", near(ah, [0, 0, 0], 20) && near(ah2, [191, 191, 191], 20),
+        `${ah.join(",")} / ${ah2.join(",")}`);
+
       const s1 = await px("t-sep.pdf", 50, 50);
       const s2 = await px("t-sep.pdf", 150, 50);
       t("Separation 이 잉크 변환 함수를 탄다", near(s1, [209, 224, 245]) && near(s2, [48, 117, 209]),

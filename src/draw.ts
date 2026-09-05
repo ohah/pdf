@@ -33,14 +33,26 @@ function gradientFrom(g: CanvasRenderingContext2D, ops: Float32Array, a: number)
       ? g.createLinearGradient(c[0], c[1], c[2], c[3])
       : g.createRadialGradient(c[0], c[1], Math.max(0, c[2]), c[3], c[4], Math.max(0, c[5]));
   } catch { return null; }
+  // /Extend — 축(원) 밖까지 늘일 것인가. 캔버스 그라데이션은 늘 늘이므로
+  // (양 끝 색으로 클램프), 늘이지 말라면 그 끝에 투명 마디를 박는다.
+  // 여태 이 값을 엔진이 보내는데도 안 읽어, 늘이지 말라는 문서까지 끝 색으로
+  // 온 쪽을 덮었다.
+  const ext0 = ops[a + 7] !== 0;
+  const ext1 = ops[a + 8] !== 0;
+  const EPS = 1e-4;
+  const lo = ext0 ? 0 : EPS;
+  const hi = ext1 ? 1 : 1 - EPS;
+  if (!ext0) { try { grad.addColorStop(0, "rgba(0,0,0,0)"); } catch { /* 무시 */ } }
   for (let k = 0; k < n; k++) {
-    const t = Math.min(1, Math.max(0, ops[a + 10 + k * 4]));
+    const raw = Math.min(1, Math.max(0, ops[a + 10 + k * 4]));
+    const t = lo + raw * (hi - lo);
     try {
       grad.addColorStop(t, rgb(ops[a + 11 + k * 4], ops[a + 12 + k * 4], ops[a + 13 + k * 4]));
     } catch {
       // 마디가 겹치면 건너뛴다
     }
   }
+  if (!ext1) { try { grad.addColorStop(1, "rgba(0,0,0,0)"); } catch { /* 무시 */ } }
   return grad;
 }
 

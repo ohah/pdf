@@ -2964,7 +2964,8 @@ fn inlineImage(b: []const u8, p: *usize) void {
     var h: u32 = 0;
     var bpc: u32 = 8;
     var mask = false;
-    var flate = false;
+    // 0 없음 · 1 Flate · 2 AHx · 3 A85 · 4 RL · 5 LZW
+    var inl_filt: u32 = 0;
     var flip = false;
     var comps: u32 = 1;
 
@@ -2990,14 +2991,21 @@ fn inlineImage(b: []const u8, p: *usize) void {
         } else if (txEq(key, "IM") or txEq(key, "ImageMask")) {
             mask = b[p.*] == 't';
         } else if (txEq(key, "F") or txEq(key, "Filter")) {
-            const fs2 = p.*;
-            var fq = p.*;
-            while (fq < b.len and b[fq] != '/' and !isSpace(b[fq])) fq += 1;
-            _ = fs2;
+            // 인라인 그림은 이름을 줄여 쓴다 (표 93). /Fl 만 알아듣고 나머지는
+            // 안 풀어, 16진으로 담긴 그림이 글자 코드 그대로 화소가 됐다 —
+            // '0'(48) 'f'(102) 이 회색 값으로 찍혔다.
             var scan = p.*;
             while (scan < b.len and b[scan] != '/') scan += 1;
-            if (scan + 3 <= b.len and (std_mem_eq(b[scan .. scan + 3], "/Fl") or
-                std_mem_eq(b[scan .. scan + 3], "/FD"))) flate = true;
+            const eq3 = struct {
+                fn f(bb: []const u8, at: usize, lit: []const u8) bool {
+                    return at + lit.len <= bb.len and std_mem_eq(bb[at .. at + lit.len], lit);
+                }
+            }.f;
+            if (eq3(b, scan, "/Fl") or eq3(b, scan, "/FD")) inl_filt = 1
+            else if (eq3(b, scan, "/AHx") or eq3(b, scan, "/ASCIIHexDecode")) inl_filt = 2
+            else if (eq3(b, scan, "/A85") or eq3(b, scan, "/ASCII85Decode")) inl_filt = 3
+            else if (eq3(b, scan, "/RL") or eq3(b, scan, "/RunLengthDecode")) inl_filt = 4
+            else if (eq3(b, scan, "/LZW")) inl_filt = 5;
         } else if (txEq(key, "D") or txEq(key, "Decode")) {
             // [1 0] 이면 켜고 끄는 값이 뒤집혀 있다
             var q = p.*;
@@ -3041,15 +3049,23 @@ fn inlineImage(b: []const u8, p: *usize) void {
 
     const dst = @as([*]u8, @ptrFromInt(inlArea() + inl.used))[0..(inl.cap - inl.used)];
     var got: u32 = 0;
-    if (flate) {
-        const r = pw_inflate(raw.ptr, @intCast(raw.len), dst.ptr, @intCast(dst.len));
-        if (r <= 0) return;
-        got = @intCast(r);
-    } else {
-        if (raw.len > dst.len) return;
-        @memcpy(dst[0..raw.len], raw);
-        got = @intCast(raw.len);
+    switch (inl_filt) {
+        1 => {
+            const r = pw_inflate(raw.ptr, @intCast(raw.len), dst.ptr, @intCast(dst.len));
+            if (r <= 0) return;
+            got = @intCast(r);
+        },
+        2 => got = filt.asciiHex(raw, dst),
+        3 => got = filt.ascii85(raw, dst),
+        4 => got = filt.runLength(raw, dst),
+        5 => got = filt.lzw(raw, dst, 1),
+        else => {
+            if (raw.len > dst.len) return;
+            @memcpy(dst[0..raw.len], raw);
+            got = @intCast(raw.len);
+        },
     }
+    if (got == 0) return;
     if (got < need) return;
 
     emitOp(22, &[_]f32{
