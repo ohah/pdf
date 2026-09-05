@@ -1,0 +1,100 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>우리가 만든 PDF 를 pdf.js 로 열어 본다</title>
+<body style="font:13px system-ui;padding:16px">
+<pre id="out">재는 중…</pre>
+<canvas id="a" style="display:none"></canvas>
+<canvas id="b" style="display:none"></canvas>
+<script type="module">
+// 우리가 고쳐 내보낸 PDF 를 pdf.js 로 다시 열어 본다.
+//
+// 지금까지의 시험은 우리가 쓴 것을 우리만 읽어 봤다. 그래서 겉모습 폼의
+// /Subtype 이 규격에 없는 이름으로 나가도 아무도 몰랐다 — 우리 읽기 쪽은
+// /AP → /N 만 따라가고 /Subtype 을 보지 않기 때문이다. 남이 읽을 때 무슨
+// 일이 나는지 보는 눈이 필요하다.
+import { PDFClient, PDFDocument } from "@ohah/pdf";
+import * as pdfjs from "pdfjs-dist";
+import workerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+
+const SCALE = 1.5;
+const PATHS = { wasm: "/pdf.wasm", cmaps: "/cmaps" };
+const bytesOf = async (u) => new Uint8Array(await (await fetch(u)).arrayBuffer());
+
+/** 원본에 주석·라벨·워터마크를 얹어 새 PDF 를 만든다 */
+async function edit(bytes, pages) {
+  const cl = new PDFClient(PATHS);
+  const r = await cl.open(bytes.slice(), "");
+  const n = r?.pages ?? 0;
+  if (!n) { cl.close?.(); return null; }
+  const pg = await cl.page(0, true);
+  const w = pg.w || 612, h = pg.h || 792;
+  const spec = {
+    pick: Array.from({ length: n }, (_, i) => i),
+    rotate: 0, pageRot: [], watermark: "CONFIDENTIAL",
+    fields: [], newFields: [],
+    // 주석과 라벨은 겉모습(appearance) 폼을 만든다 — 그 자리를 밟는다
+    notes: [{ kind: 1, page: 0, rect: [w * 0.1, h * 0.6, w * 0.6, h * 0.75],
+              rgb: [1, 0, 0], text: "note", pts: [] }],
+    labels: [{ page: 0, x: w * 0.1, y: h * 0.3, size: h * 0.04,
+               rgb: [0, 0, 1], text: "LABEL" }],
+    shrink: false,
+  };
+  const out = await cl.build(spec);
+  cl.close?.();
+  return out ? new Uint8Array(out) : null;
+}
+
+async function drawOurs(bytes, cv) {
+  const pdf = await PDFDocument.open(bytes.slice(), PATHS);
+  await pdf.render(1, cv, { scale: SCALE, dpr: 1 });
+  const n = pdf.pages;
+  pdf.close();
+  return n;
+}
+
+async function drawTheirs(bytes, cv) {
+  const task = pdfjs.getDocument({ data: bytes.slice(), cMapUrl: "/cmaps/", cMapPacked: true });
+  const doc = await task.promise;
+  const pg = await doc.getPage(1);
+  const vp = pg.getViewport({ scale: SCALE });
+  cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+  const g = cv.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
+  // 주석 겉모습까지 그리게 한다 — 이 시험의 핵심이다
+  await pg.render({ canvasContext: g, viewport: vp, canvas: cv, annotationMode: 2 }).promise;
+  const n = doc.numPages;
+  await task.destroy();
+  return n;
+}
+
+const inkOf = (cv) => {
+  const d = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) if (d[i] < 250 || d[i + 1] < 250 || d[i + 2] < 250) n++;
+  return (n / (cv.width * cv.height)) * 100;
+};
+
+const DOCS = (new URLSearchParams(location.search).get("docs") || "").split(",").filter(Boolean);
+const A = document.getElementById("a"), B = document.getElementById("b");
+const rows = [];
+for (const name of DOCS) {
+  const row = { name };
+  try {
+    const src = await bytesOf(`/fixtures/${name}`);
+    const made = await edit(src);
+    if (!made) { row.err = "우리가 못 만들었다"; rows.push(row); continue; }
+    row.bytes = made.length;
+    row.oursPages = await drawOurs(made, A);
+    row.oursInk = inkOf(A);
+    row.theirsPages = await drawTheirs(made, B);
+    row.theirsInk = inkOf(B);
+  } catch (e) {
+    row.err = String(e?.message ?? e).slice(0, 100);
+  }
+  rows.push(row);
+  document.getElementById("out").textContent = JSON.stringify(rows, null, 1);
+}
+window.__rt = rows;
+document.title = "done";
+</script>
