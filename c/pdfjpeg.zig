@@ -222,75 +222,132 @@ const ZIGZAG = [64]u8{
 /// 곱셈이 열몇 번이면 된다. 세로로 한 번 더 돌려 8x8 을 끝낸다.
 /// 상수는 규격의 코사인 값에서 나온 것으로, libjpeg·stb_image 가 쓰는 것과
 /// 같다. 결과는 예전 판과 화소 단위로 맞춰 확인했다.
-fn idct1d(s0: f32, s1: f32, s2: f32, s3: f32, s4: f32, s5: f32, s6: f32, s7: f32, out: *[8]f32) void {
+/// 8점 IDCT 한 줄 — 고정소수 12비트.
+///
+/// 예전에는 f32 로 했다. 칸마다 열여섯 번 도는 자리라 실수↔정수 오가는 값이
+/// 그대로 쌓인다(사진 한 장 푸는 26ms 중 6.9ms). 계수도 화소도 정수인데
+/// 가운데만 실수로 다닐 까닭이 없다.
+///
+/// 곱하는 상수는 x*4096 을 반올림해 박아 둔다. 곱하면 12비트가 늘어나므로
+/// 부르는 쪽에서 줄 지날 때 10비트, 칸 지날 때 17비트를 도로 내린다.
+fn f2f(comptime x: f32) i32 {
+    return @intFromFloat(x * 4096 + 0.5);
+}
+
+fn fsh(x: i32) i32 {
+    return x * 4096;
+}
+
+fn idct1d(
+    s0: i32, s1: i32, s2: i32, s3: i32, s4: i32, s5: i32, s6: i32, s7: i32,
+    x: *[4]i32, t: *[4]i32,
+) void {
     // 짝수 쪽
     var p2 = s2;
     var p3 = s6;
-    var p1 = (p2 + p3) * 0.5411961;
-    const t2 = p1 + p3 * -1.847759;
-    const t3e = p1 + p2 * 0.765367;
+    var p1 = (p2 + p3) * f2f(0.5411961);
+    const e2 = p1 + p3 * f2f(-1.847759065);
+    const e3 = p1 + p2 * f2f(0.765366865);
     p2 = s0;
     p3 = s4;
-    const t0e = p2 + p3;
-    const t1e = p2 - p3;
-    const x0 = t0e + t3e;
-    const x3 = t0e - t3e;
-    const x1 = t1e + t2;
-    const x2 = t1e - t2;
+    const e0 = fsh(p2 + p3);
+    const e1 = fsh(p2 - p3);
+    x[0] = e0 + e3;
+    x[3] = e0 - e3;
+    x[1] = e1 + e2;
+    x[2] = e1 - e2;
     // 홀수 쪽
     var t0 = s7;
     var t1 = s5;
-    var t2o = s3;
+    var t2 = s3;
     var t3 = s1;
-    p3 = t0 + t2o;
+    p3 = t0 + t2;
     var p4 = t1 + t3;
     p1 = t0 + t3;
-    p2 = t1 + t2o;
-    const p5 = (p3 + p4) * 1.175876;
-    t0 *= 0.298631;
-    t1 *= 2.053120;
-    t2o *= 3.072711;
-    t3 *= 1.501321;
-    p1 = p5 + p1 * -0.899976;
-    p2 = p5 + p2 * -2.562915;
-    p3 *= -1.961571;
-    p4 *= -0.390181;
+    p2 = t1 + t2;
+    const p5 = (p3 + p4) * f2f(1.175875602);
+    t0 *= f2f(0.298631336);
+    t1 *= f2f(2.053119869);
+    t2 *= f2f(3.072711026);
+    t3 *= f2f(1.501321110);
+    p1 = p5 + p1 * f2f(-0.899976223);
+    p2 = p5 + p2 * f2f(-2.562915447);
+    p3 *= f2f(-1.961570560);
+    p4 *= f2f(-0.390180644);
     t3 += p1 + p4;
-    t2o += p2 + p3;
+    t2 += p2 + p3;
     t1 += p2 + p4;
     t0 += p1 + p3;
-    out[0] = x0 + t3;
-    out[7] = x0 - t3;
-    out[1] = x1 + t2o;
-    out[6] = x1 - t2o;
-    out[2] = x2 + t1;
-    out[5] = x2 - t1;
-    out[3] = x3 + t0;
-    out[4] = x3 - t0;
+    t[0] = t0;
+    t[1] = t1;
+    t[2] = t2;
+    t[3] = t3;
 }
 
-fn idct(blk: *[64]f32, out: *[64]u8) void {
-    var tmp: [64]f32 = undefined;
-    var row: [8]f32 = undefined;
-    // 가로
+fn clamp8(v: i32) u8 {
+    return @intCast(@max(0, @min(255, v)));
+}
+
+fn idct(blk: *[64]i32, out: *[64]u8) void {
+    // DC 만 남은 칸은 통째로 한 색이다. 양자화가 잔무늬를 0 으로 뭉개 놓아서
+    // 하늘·살결처럼 고른 자리에서는 이게 흔하다.
+    //
+    // 어림이 아니라 정확히 같은 값이다 — 아래 길을 그대로 따라가면 가로에서
+    // 첫 줄만 dc*4 가 되고 나머지 줄은 0 이 되며, 세로에서도 첫 칸만 남아
+    // 여덟 화소가 모두 이 값이 된다.
+    {
+        var z: usize = 1;
+        while (z < 64) : (z += 1) {
+            if (blk[z] != 0) break;
+        } else {
+            @memset(out, clamp8((blk[0] * 4 * 4096 + 65536 + (128 << 17)) >> 17));
+            return;
+        }
+    }
+    var tmp: [64]i32 = undefined;
+    var x: [4]i32 = undefined;
+    var t: [4]i32 = undefined;
+    // 가로. 줄에 AC 가 하나도 없으면 DC 를 펴는 것으로 끝난다 —
+    // 양자화가 잔무늬를 0 으로 뭉개 놓아서 흔한 일이다.
     var u: usize = 0;
     while (u < 8) : (u += 1) {
         const b = blk[u * 8 ..][0..8];
-        idct1d(b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], &row);
-        var x: usize = 0;
-        // 두 겹을 합쳐 1/8 이면 된다 — 가로에서는 그대로 두고 세로에서 나눈다
-        while (x < 8) : (x += 1) tmp[u * 8 + x] = row[x];
-    }
-    // 세로
-    var x2: usize = 0;
-    while (x2 < 8) : (x2 += 1) {
-        idct1d(tmp[x2], tmp[8 + x2], tmp[16 + x2], tmp[24 + x2],
-            tmp[32 + x2], tmp[40 + x2], tmp[48 + x2], tmp[56 + x2], &row);
-        var y: usize = 0;
-        while (y < 8) : (y += 1) {
-            const v = row[y] * 0.125 + 128;
-            out[y * 8 + x2] = @intFromFloat(@max(0, @min(255, v)));
+        if (b[1] == 0 and b[2] == 0 and b[3] == 0 and b[4] == 0 and
+            b[5] == 0 and b[6] == 0 and b[7] == 0)
+        {
+            const dc = b[0] * 4;
+            var k: usize = 0;
+            while (k < 8) : (k += 1) tmp[u * 8 + k] = dc;
+            continue;
         }
+        idct1d(b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], &x, &t);
+        // 반올림하고 12비트 중 10비트를 내린다 (둘 다 지나면 딱 맞는다)
+        var k: usize = 0;
+        while (k < 4) : (k += 1) x[k] += 512;
+        tmp[u * 8 + 0] = (x[0] + t[3]) >> 10;
+        tmp[u * 8 + 7] = (x[0] - t[3]) >> 10;
+        tmp[u * 8 + 1] = (x[1] + t[2]) >> 10;
+        tmp[u * 8 + 6] = (x[1] - t[2]) >> 10;
+        tmp[u * 8 + 2] = (x[2] + t[1]) >> 10;
+        tmp[u * 8 + 5] = (x[2] - t[1]) >> 10;
+        tmp[u * 8 + 3] = (x[3] + t[0]) >> 10;
+        tmp[u * 8 + 4] = (x[3] - t[0]) >> 10;
+    }
+    // 세로. 여기서 128 을 얹고 나머지 17비트를 내린다.
+    var c: usize = 0;
+    while (c < 8) : (c += 1) {
+        idct1d(tmp[c], tmp[8 + c], tmp[16 + c], tmp[24 + c],
+            tmp[32 + c], tmp[40 + c], tmp[48 + c], tmp[56 + c], &x, &t);
+        var k: usize = 0;
+        while (k < 4) : (k += 1) x[k] += 65536 + (128 << 17);
+        out[0 * 8 + c] = clamp8((x[0] + t[3]) >> 17);
+        out[7 * 8 + c] = clamp8((x[0] - t[3]) >> 17);
+        out[1 * 8 + c] = clamp8((x[1] + t[2]) >> 17);
+        out[6 * 8 + c] = clamp8((x[1] - t[2]) >> 17);
+        out[2 * 8 + c] = clamp8((x[2] + t[1]) >> 17);
+        out[5 * 8 + c] = clamp8((x[2] - t[1]) >> 17);
+        out[3 * 8 + c] = clamp8((x[3] + t[0]) >> 17);
+        out[4 * 8 + c] = clamp8((x[3] - t[0]) >> 17);
     }
 }
 
@@ -535,11 +592,11 @@ fn decode(d: []const u8, dst: []u8, scratch: []u8, invert: bool) u32 {
                 while (bx < cbw) : (bx += 1) {
                     const at = coff[q] + (@as(usize, by) * bw[q] + bx) * 64;
                     if (at + 64 > coef.len) continue;
-                    var blk: [64]f32 = undefined;
+                    var blk: [64]i32 = undefined;
                     var px: [64]u8 = undefined;
                     var z: usize = 0;
                     while (z < 64) : (z += 1)
-                        blk[z] = @floatFromInt(@as(i32, coef[at + z]) * @as(i32, qnat[z]));
+                        blk[z] = @as(i32, coef[at + z]) * @as(i32, qnat[z]);
                     idct(&blk, &px);
                     var yy: u32 = 0;
                     while (yy < 8) : (yy += 1) {
@@ -768,7 +825,7 @@ fn scan(
     if (@as(usize, w) * h * 3 > dst.len) return 0;
 
     var bs = Bits{ .d = d, .p = start };
-    var blk: [64]f32 = undefined;
+    var blk: [64]i32 = undefined;
     var px: [64]u8 = undefined;
     var mcu: u32 = 0;
     const total = mcux * mcuy;
@@ -796,7 +853,7 @@ fn scan(
                     const t = decodeHuff(&bs, &hdc[c.td & 3]);
                     const diff = if (t == 0) 0 else extend(bs.bits(@intCast(@min(t, 16))), @intCast(@min(t, 16)));
                     c.dc += diff;
-                    blk[0] = @floatFromInt(c.dc * @as(i32, qt[c.tq][0]));
+                    blk[0] = c.dc * @as(i32, qt[c.tq][0]);
                     // AC
                     var k: u32 = 1;
                     while (k < 64) {
@@ -812,7 +869,7 @@ fn scan(
                         if (k > 63) break;
                         const v = extend(bs.bits(@intCast(sz)), @intCast(sz));
                         const z = ZIGZAG[k];
-                        blk[z] = @floatFromInt(v * @as(i32, qt[c.tq][k]));
+                        blk[z] = v * @as(i32, qt[c.tq][k]);
                         k += 1;
                     }
                     idct(&blk, &px);
