@@ -19,6 +19,7 @@ const PAGE: usize = 64 * 1024;
 pub var in_len: usize = 0;
 pub var out_len: usize = 0;
 var out_off: usize = 0;
+/// 객체 스트림(ObjStm)을 풀어 평문 객체로 펼쳐 두는 자리.
 var exp: struct {
     /// 원본 뒤에 이어 두고, 객체를 찾을 때 원본과 이 영역을 모두 훑는다.
     off: usize = 0,
@@ -782,6 +783,12 @@ pub fn dictInt(b: []const u8, start: usize, end: usize, key: []const u8) ?u32 {
     return readUint(b, &p);
 }
 
+/// 쪽을 담는 자리. 모자라면 늘린다.
+///
+/// 쪽 수는 걷어 봐야 안다. 객체 수로 미리 어림잡았더니, 같은 쪽을 여러 번
+/// 가리키는 문서(/Kids 에 같은 객체가 500번)가 열여섯 쪽으로 잘렸다 — 쪽
+/// 하나가 객체 하나라는 가정이 그런 문서에서는 깨진다. 지금 자리를 잡아 둔
+/// 것이 이 표뿐이므로 뒤로 이어 붙이면 옮길 일 없이 늘어난다.
 pub var walk: struct {
     /// 것이 이 표뿐이므로 뒤로 이어 붙이면 옮길 일 없이 늘어난다.
     at: usize = 0,
