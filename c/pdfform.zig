@@ -845,7 +845,7 @@ pub fn decodeChain(b: []const u8, ds: usize, de: usize, data: usize, length: usi
     }
 
     // 사슬을 돌린다. 중간 결과는 병합용 자리를 빌린다.
-    const tmp = @as([*]u8, @ptrFromInt(core.b2_off))[0..core.b2_cap];
+    const tmp = @as([*]u8, @ptrFromInt(core.bin2.off))[0..core.bin2.cap];
     var cur_src: []const u8 = b[data..][0..length];
     var out_n: u32 = 0;
     var i: usize = 0;

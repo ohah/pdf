@@ -144,8 +144,8 @@ fn t1Entry(d: []const u8, p: *usize) ?struct { name: []const u8, off: usize, len
 
 /// Type1 프로그램을 읽어 글리프 프로그램을 풀어 둔다.
 pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) void {
-    if (root.font_n == 0 or root.t1Area() == 0) return;
-    const f = &root.fonts.all()[root.font_n - 1];
+    if (root.fontarea.n == 0 or root.t1Area() == 0) return;
+    const f = &root.fonts.all()[root.fontarea.n - 1];
     if (data.len < 64) return;
 
     // 평문 구간에서 eexec 자리를 찾는다
@@ -154,9 +154,9 @@ pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) v
     while (es < data.len and (data[es] == '\r' or data[es] == '\n' or data[es] == ' ' or data[es] == '\t')) es += 1;
     if (es >= data.len) return;
 
-    const room = root.t1_cap - root.t1_used;
+    const room = root.t1s.cap - root.t1s.used;
     if (room < 65536) return;
-    const area = @as([*]u8, @ptrFromInt(root.t1Area() + root.t1_used))[0..room];
+    const area = @as([*]u8, @ptrFromInt(root.t1Area() + root.t1s.used))[0..room];
 
     // 16진으로 적힌 것도 있다
     var enc_src = data[es..];
@@ -349,7 +349,7 @@ pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) v
         }
     }
     if (got == 0) return;
-    root.t1_used += (w_at + 3) & ~@as(u32, 3);
+    root.t1s.used += (w_at + 3) & ~@as(u32, 3);
     f.t1 = true;
     f.kind |= 1024;
     if (root.find(b[fbody..fend], "/FontMatrix", 0)) |ma| {

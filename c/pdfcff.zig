@@ -354,9 +354,9 @@ fn buildOtto(cff: []const u8, f: *root.FontMap, dst: []u8) u32 {
 
 /// 방금 등록한 글꼴에 파일을 붙인다.
 pub fn attachFontFile(data: []const u8, is_cff: bool) void {
-    if (root.font_n == 0 or root.fontArea() == 0) return;
-    const f = &root.fonts.all()[root.font_n - 1];
-    const room = root.font_cap - root.font_used;
+    if (root.fontarea.n == 0 or root.fontArea() == 0) return;
+    const f = &root.fonts.all()[root.fontarea.n - 1];
+    const room = root.fontarea.cap - root.fontarea.used;
     if (room < 4096) return;
     // 필요한 만큼만 떼어 준다.
     //
@@ -369,15 +369,15 @@ pub fn attachFontFile(data: []const u8, is_cff: bool) void {
     // 원본의 네 배에 여유를 얹으면 넉넉하다 — 표를 다시 짜고 cmap 을
     // 새로 붙여도 그 안에 든다.
     const want = @min(room, @max(@as(usize, 256 * 1024), data.len * 4 + 128 * 1024));
-    const area = @as([*]u8, @ptrFromInt(root.fontArea() + root.font_used))[0..want];
+    const area = @as([*]u8, @ptrFromInt(root.fontArea() + root.fontarea.used))[0..want];
     var n: u32 = 0;
     if (is_cff) {
         n = buildOtto(data, f, area);
         if (n == 0) return; // 껍데기를 못 지으면 싣지 않는다
         f.kind |= 512;
-        f.file_off = root.font_used;
+        f.file_off = root.fontarea.used;
         f.file_len = n;
-        root.font_used += (n + 3) & ~@as(u32, 3);
+        root.fontarea.used += (n + 3) & ~@as(u32, 3);
         return;
     }
     if (f.n > 0 or f.identity) n = pdfsynth.patchFont(data, f, area);
@@ -393,9 +393,9 @@ pub fn attachFontFile(data: []const u8, is_cff: bool) void {
         @memcpy(area[0..data.len], data);
         n = @intCast(data.len);
     }
-    f.file_off = root.font_used;
+    f.file_off = root.fontarea.used;
     f.file_len = n;
-    root.font_used += (n + 3) & ~@as(u32, 3);
+    root.fontarea.used += (n + 3) & ~@as(u32, 3);
 }
 
 /// 글자 하나만큼 자리를 옮긴다. 세로쓰기는 아래로 흐른다.

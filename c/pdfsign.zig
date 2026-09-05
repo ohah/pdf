@@ -172,7 +172,7 @@ pub fn collectSigs(b: []const u8) void {
     // 덮는 훑기라, 여기서 못 찾으면 아래 고리도 못 찾는다.
     if (core.find(b, "/ByteRange", 0) == null) return;
     var num: u32 = 1;
-    while (num < core.obj_cap and sigs.room(sig_n + 1, 8)) : (num += 1) {
+    while (num < core.objix.cap and sigs.room(sig_n + 1, 8)) : (num += 1) {
         if (core.objRankTable()[num] == 0) continue;
         const body = core.objOff()[num];
         if (body >= b.len) continue;

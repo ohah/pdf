@@ -156,7 +156,7 @@ fn buildLabelStream(page: u32) usize {
         var use_doc = false;
         var doc_font: u8 = 0;
         var fi: u8 = 0;
-        outer: while (fi < core.font_n) : (fi += 1) {
+        outer: while (fi < core.fontarea.n) : (fi += 1) {
             if (core.fonts.all()[fi].n == 0 or core.fonts.all()[fi].name_len == 0) continue;
             var ci: u32 = 0;
             while (ci < L.n) : (ci += 1) {
@@ -341,7 +341,7 @@ pub fn stripEncryptOut(len: usize) void {
 
 
 pub fn apply() usize {
-    core.out_len = 0;
+    core.outbuf.len = 0;
     if (core.pick_n == 0 or core.pages_obj == 0) return 0;
     // 페이지 객체가 ObjStm 안에 있을 수 있으므로 펼친 영역까지 훑는다.
     // 출력에 옮기는 원본은 core.in_len 까지다.
@@ -360,7 +360,7 @@ pub fn apply() usize {
     // 하나가 객체 여럿을 낳는다 — 주석은 겉모습 스트림까지 둘, 새 칸도
     // 마찬가지다. 넉넉히 잡지 않으면 뒤가 조용히 빠진다(주석 2000개 중
     // 1038개만 나갔다).
-    const xr = xrefTables(core.pick_n * 4 + @as(usize, core.edit.n) * 2 + core.note.n * 3 + core.newf_n * 3 + 128) orelse return 0;
+    const xr = xrefTables(core.pick_n * 4 + @as(usize, core.edit.n) * 2 + core.note.n * 3 + core.newf.n * 3 + 128) orelse return 0;
     const new_offsets = xr.offs;
     const new_nums = xr.nums;
     var new_n: usize = 0;
@@ -382,7 +382,7 @@ pub fn apply() usize {
     core.appendStr(&pos, " ] >>\nendobj\n");
 
     // 2) 쪽 위에 얹을 것 — 워터마크와 라벨. 둘 다 같은 길을 탄다.
-    const overlay = core.wm_n > 0 or lab_n > 0;
+    const overlay = core.wm.n > 0 or lab_n > 0;
     const has_notes = core.note.n > 0;
     var wm_pre: u32 = 0;
     var wm_content: u32 = 0;
@@ -460,7 +460,7 @@ pub fn apply() usize {
     }
 
     var wm_done = false;
-    if (core.wm_n > 0) {
+    if (core.wm.n > 0) {
         // 문서에 박힌 글꼴 중 이 글자들을 다 가진 것을 찾는다.
         // 한글 워터마크는 그래야 나온다 — 표준 14종에는 한글이 없다.
         var use_doc = false;
@@ -468,11 +468,11 @@ pub fn apply() usize {
         if (!core.wmIsAscii()) {
             _ = core.renderPage(core.pick.all()[0]);
             var fi: u8 = 0;
-            outer: while (fi < core.font_n) : (fi += 1) {
+            outer: while (fi < core.fontarea.n) : (fi += 1) {
                 if (core.fonts.all()[fi].n == 0 or core.fonts.all()[fi].name_len == 0) continue;
                 var ci: usize = 0;
-                while (ci < core.wm_n) : (ci += 1) {
-                    if (core.wmCode(&core.fonts.all()[fi], core.wm_cp[ci]) == null) continue :outer;
+                while (ci < core.wm.n) : (ci += 1) {
+                    if (core.wmCode(&core.fonts.all()[fi], core.wm.cp[ci]) == null) continue :outer;
                 }
                 use_doc = true;
                 doc_font = fi;
@@ -483,9 +483,9 @@ pub fn apply() usize {
         }
 
         // 쪽 한가운데에 비스듬히, 쪽 크기에 맞춰 얹는다
-        const pw2 = if (core.page_w > 1) core.page_w else 612;
-        const ph2 = if (core.page_h > 1) core.page_h else 792;
-        const nch: f32 = @floatFromInt(@max(core.wm_n, 1));
+        const pw2 = if (core.cpage.w > 1) core.cpage.w else 612;
+        const ph2 = if (core.cpage.h > 1) core.cpage.h else 792;
+        const nch: f32 = @floatFromInt(@max(core.wm.n, 1));
         const kw: f32 = if (use_doc and core.fonts.all()[doc_font].two_byte) 1.0 else 0.55;
         const diag = @sqrt(pw2 * pw2 + ph2 * ph2);
         var fsize = 0.62 * diag / (nch * kw);
@@ -560,8 +560,8 @@ pub fn apply() usize {
             bl += 1;
             const two = core.fonts.all()[doc_font].two_byte;
             var ci: usize = 0;
-            while (ci < core.wm_n and bl + 8 < body.len) : (ci += 1) {
-                const code = core.wmCode(&core.fonts.all()[doc_font], core.wm_cp[ci]) orelse 0;
+            while (ci < core.wm.n and bl + 8 < body.len) : (ci += 1) {
+                const code = core.wmCode(&core.fonts.all()[doc_font], core.wm.cp[ci]) orelse 0;
                 const digits: u32 = if (two) 4 else 2;
                 var d: u32 = 0;
                 while (d < digits) : (d += 1) {
@@ -575,8 +575,8 @@ pub fn apply() usize {
         } else {
             body[bl] = '(';
             bl += 1;
-            @memcpy(body[bl..][0..core.wm_len], core.wm[0..core.wm_len]);
-            bl += core.wm_len;
+            @memcpy(body[bl..][0..core.wm.len], core.wm.items[0..core.wm.len]);
+            bl += core.wm.len;
             body[bl] = ')';
             bl += 1;
         }
@@ -854,7 +854,7 @@ pub fn apply() usize {
     // 새로 만드는 입력 칸 — 위젯 객체를 적고 번호를 기억해 둔다.
     // 쪽의 /Annots 에 걸어야 하므로 쪽을 다시 쓰기 전에 끝내야 한다.
     var newf_font: u32 = 0;
-    if (core.newf_n > 0) {
+    if (core.newf.n > 0) {
         newf_font = mask_next;
         mask_next += 1;
         new_offsets[new_n] = pos;
@@ -863,9 +863,9 @@ pub fn apply() usize {
         core.appendNum(&pos, newf_font);
         core.appendStr(&pos, " 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\nendobj\n");
         var fi: u32 = 0;
-        while (fi < core.newf_n and new_n + 2 < new_nums.len and core.outRoom(pos, 2048)) : (fi += 1) {
-            const f = &core.newf.all()[fi];
-            if (f.page >= core.page_count) continue;
+        while (fi < core.newf.n and new_n + 2 < new_nums.len and core.outRoom(pos, 2048)) : (fi += 1) {
+            const f = &core.newf.items.all()[fi];
+            if (f.page >= core.cpage.count) continue;
             f.obj = mask_next;
             mask_next += 1;
             new_offsets[new_n] = pos;
@@ -875,7 +875,7 @@ pub fn apply() usize {
             core.appendStr(&pos, " 0 obj\n<< /Type /Annot /Subtype /Widget /FT ");
             core.appendStr(&pos, if (f.kind == 1) "/Btn" else "/Tx");
             core.appendStr(&pos, " /T ");
-            core.appendTextStr(&pos, core.newf_buf[f.off..][0..f.len]);
+            core.appendTextStr(&pos, core.newf.buf[f.off..][0..f.len]);
             core.appendStr(&pos, " /Rect [");
             var k: u32 = 0;
             while (k < 4) : (k += 1) {
@@ -1016,10 +1016,10 @@ pub fn apply() usize {
                     core.appendStr(&pos, " 0 R");
                 }
                 var nf: u32 = 0;
-                while (nf < core.newf_n) : (nf += 1) {
-                    if (core.newf.all()[nf].page != core.pick.all()[i] or core.newf.all()[nf].obj == 0) continue;
+                while (nf < core.newf.n) : (nf += 1) {
+                    if (core.newf.items.all()[nf].page != core.pick.all()[i] or core.newf.items.all()[nf].obj == 0) continue;
                     core.appendStr(&pos, " ");
-                    core.appendNum(&pos, core.newf.all()[nf].obj);
+                    core.appendNum(&pos, core.newf.items.all()[nf].obj);
                     core.appendStr(&pos, " 0 R");
                 }
                 core.appendStr(&pos, " ]");
@@ -1069,7 +1069,7 @@ pub fn apply() usize {
                         core.appendStr(&pos, " 0 R");
                     }
                 }
-                if (core.wm_n > 0) {
+                if (core.wm.n > 0) {
                     core.appendStr(&pos, " ");
                     core.appendNum(&pos, wm_content);
                     core.appendStr(&pos, " 0 R");
@@ -1098,7 +1098,7 @@ pub fn apply() usize {
     }
 
     // 3) 채운 입력 칸을 다시 쓴다
-    if (core.edit.n > 0 or core.newf_n > 0) {
+    if (core.edit.n > 0 or core.newf.n > 0) {
         const fld_font = mask_next;
         var ap_next = mask_next + 1;
         var wrote_font = false;
@@ -1413,7 +1413,7 @@ pub fn apply() usize {
                 const re3 = core.objDictEnd(b, rb3);
                 const has_acro = core.find(b[rb3..re3], "/AcroForm", 0) != null;
                 // 양식이 아예 없는 문서에 칸을 만들면 카탈로그에 양식을 새로 단다
-                if (!has_acro and core.newf_n > 0 and new_n + 1 < new_nums.len) {
+                if (!has_acro and core.newf.n > 0 and new_n + 1 < new_nums.len) {
                     var ix0 = rb3;
                     while (ix0 < re3 and b[ix0] != '<') ix0 += 1;
                     const hx0 = pdfenc.dictEnd(b, ix0, re3);
@@ -1430,10 +1430,10 @@ pub fn apply() usize {
                         }
                         core.appendStr(&pos, " /AcroForm << /Fields [");
                         var nf0: u32 = 0;
-                        while (nf0 < core.newf_n) : (nf0 += 1) {
-                            if (core.newf.all()[nf0].obj == 0) continue;
+                        while (nf0 < core.newf.n) : (nf0 += 1) {
+                            if (core.newf.items.all()[nf0].obj == 0) continue;
                             core.appendStr(&pos, " ");
-                            core.appendNum(&pos, core.newf.all()[nf0].obj);
+                            core.appendNum(&pos, core.newf.items.all()[nf0].obj);
                             core.appendStr(&pos, " 0 R");
                         }
                         core.appendStr(&pos, " ] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv ");
@@ -1498,10 +1498,10 @@ pub fn apply() usize {
                                         core.copyRefsKeeping(b, fs2, fe2, &pos);
                                     }
                                     var nf2: u32 = 0;
-                                    while (nf2 < core.newf_n) : (nf2 += 1) {
-                                        if (core.newf.all()[nf2].obj == 0) continue;
+                                    while (nf2 < core.newf.n) : (nf2 += 1) {
+                                        if (core.newf.items.all()[nf2].obj == 0) continue;
                                         core.appendStr(&pos, " ");
-                                        core.appendNum(&pos, core.newf.all()[nf2].obj);
+                                        core.appendNum(&pos, core.newf.items.all()[nf2].obj);
                                         core.appendStr(&pos, " 0 R");
                                     }
                                     core.appendStr(&pos, " ]");
@@ -1684,7 +1684,7 @@ pub fn apply() usize {
     core.appendStr(&pos, "\n%%EOF\n");
 
     stripEncryptOut(pos);
-    core.out_len = pos;
+    core.outbuf.len = pos;
     return pos;
 }
 

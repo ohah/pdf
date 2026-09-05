@@ -27,12 +27,12 @@ var b2_page_n: u32 = 0;
 var b2_max_obj: u32 = 0;
 
 fn b2Slice() []u8 {
-    return @as([*]u8, @ptrFromInt(core.b2_off))[0..core.b2_len];
+    return @as([*]u8, @ptrFromInt(core.bin2.off))[0..core.bin2.len];
 }
 
 /// 두 번째 문서를 읽어 페이지 목록과 최대 객체 번호를 센다.
 pub fn parseSecond(len: usize) u32 {
-    core.b2_len = len;
+    core.bin2.len = len;
     b2_page_n = 0;
     b2_max_obj = 0;
     const b = b2Slice();
@@ -94,7 +94,7 @@ pub fn parseSecond(len: usize) u32 {
 
 pub fn secondPageCount() u32 { return b2_page_n; }
 /// 지금 잡아 둔 출력 자리와 원본 길이 — 이어 붙이기 전에 모자란지 보라고 준다
-pub fn outCapacity() usize { return core.out_cap; }
+pub fn outCapacity() usize { return core.outbuf.cap; }
 pub fn inputLen() usize { return core.in_len; }
 
 /// 숫자를 output 에 적는다.
@@ -102,8 +102,8 @@ fn writeNum(pos: *usize, v: u32) void { core.appendNum(pos, v); }
 
 /// 두 문서를 이어 붙인다. 결과 길이를 돌려주고 0이면 실패.
 pub fn merge() usize {
-    core.out_len = 0;
-    if (core.b2_len == 0 or b2_page_n == 0 or core.pages_obj == 0) return 0;
+    core.outbuf.len = 0;
+    if (core.bin2.len == 0 or b2_page_n == 0 or core.pages_obj == 0) return 0;
     const a = core.searchSlice();
     const b = b2Slice();
     const shift = 1000000; // A 의 번호와 겹치지 않게 넉넉히 민다
@@ -120,7 +120,7 @@ pub fn merge() usize {
     // 둘째 문서의 객체 수는 미리 모르니 파일 크기로 어림잡는다(객체 하나에
     // 최소 열여섯 바이트). 예전에는 8192 로 묶여, 그보다 많은 객체를 가진
     // 문서를 붙이면 뒤가 조용히 빠진 채 /Kids 만 남았다.
-    const xr = core.xrefTables(b.len / 16 + core.page_count + 128) orelse return 0;
+    const xr = core.xrefTables(b.len / 16 + core.cpage.count + 128) orelse return 0;
     const new_offsets = xr.offs;
     const new_nums = xr.nums;
     var new_n: usize = 0;
@@ -199,10 +199,10 @@ pub fn merge() usize {
     new_n += 1;
     writeNum(&pos, core.pages_obj);
     core.appendStr(&pos, " 0 obj\n<< /Type /Pages /Count ");
-    writeNum(&pos, core.page_count + b2_page_n);
+    writeNum(&pos, core.cpage.count + b2_page_n);
     core.appendStr(&pos, " /Kids [");
     var t: u32 = 0;
-    while (t < core.page_count) : (t += 1) {
+    while (t < core.cpage.count) : (t += 1) {
         core.appendStr(&pos, " ");
         writeNum(&pos, core.page_objs()[t]);
         core.appendStr(&pos, " 0 R");
@@ -358,7 +358,7 @@ pub fn merge() usize {
     core.appendStr(&pos, "\n%%EOF\n");
 
     core.stripEncryptOut(pos);
-    core.out_len = pos;
+    core.outbuf.len = pos;
     return pos;
 }
 

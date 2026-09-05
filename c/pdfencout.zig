@@ -185,7 +185,7 @@ fn copyDictSealed(b: []const u8, from: usize, to: usize, pos: *usize, skip_len: 
 }
 
 pub fn compact() usize {
-    core.out_len = 0;
+    core.outbuf.len = 0;
     if (core.pick_n == 0 or core.pages_obj == 0) return 0;
     const b = core.searchSlice();
 
@@ -433,7 +433,7 @@ pub fn compact() usize {
     core.appendStr(&pos, "\n%%EOF\n");
 
     core.stripEncryptOut(pos);
-    core.out_len = pos;
+    core.outbuf.len = pos;
     return pos;
 }
 

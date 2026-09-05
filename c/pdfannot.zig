@@ -161,8 +161,8 @@ pub fn collectAnnots(b: []const u8, body: usize, end: usize) void {
 }
 
 pub fn collectLinks(b: []const u8, body: usize, end: usize) void {
-    core.link_n = 0;
-    core.link_buf_n = 0;
+    core.link.n = 0;
+    core.link.buf_n = 0;
     const aa = core.find(b[body..end], "/Annots", 0) orelse return;
     var p = body + aa + 7;
     while (p < end and core.isSpace(b[p])) p += 1;
@@ -214,10 +214,10 @@ pub fn collectLinks(b: []const u8, body: usize, end: usize) void {
             var up = ab + ua + 4;
             while (up < abe and core.isSpace(b[up])) up += 1;
             if (up < abe and (b[up] == '(' or b[up] == '<')) {
-                uoff = core.link_buf_n;
-                _ = core.link_buf.room(core.link_buf_n + 8192, 16384);
-                ulen = core.copyPdfText(b, up, abe, core.link_buf.all(), core.link_buf_n);
-                core.link_buf_n += ulen;
+                uoff = core.link.buf_n;
+                _ = core.link.buf.room(core.link.buf_n + 8192, 16384);
+                ulen = core.copyPdfText(b, up, abe, core.link.buf.all(), core.link.buf_n);
+                core.link.buf_n += ulen;
                 break;
             }
             ufrom = ua + 4;
@@ -228,9 +228,9 @@ pub fn collectLinks(b: []const u8, body: usize, end: usize) void {
             pg = core.destPage(b, ab + da + 2, abe);
         }
         if (ulen == 0 and pg < 0) continue;
-        if (!core.growTable(&core.link.at, &core.link.cap, core.link_n, @sizeOf(core.Link), 128)) break;
-        core.link.all()[core.link_n] = .{ .rect = rect, .off = uoff, .len = ulen, .page = pg };
-        core.link_n += 1;
+        if (!core.growTable(&core.link.items.at, &core.link.items.cap, core.link.n, @sizeOf(core.Link), 128)) break;
+        core.link.items.all()[core.link.n] = .{ .rect = rect, .off = uoff, .len = ulen, .page = pg };
+        core.link.n += 1;
     }
 }
 
@@ -244,10 +244,10 @@ fn walkOutline(b: []const u8, first: u32, depth: u8) void {
         var off: u32 = 0;
         var len: u32 = 0;
         if (core.find(b[ob..oe], "/Title", 0)) |ta| {
-            off = core.mark_buf_n;
-            _ = core.mark_buf.room(core.mark_buf_n + 8192, 32768);
-            len = core.copyPdfText(b, ob + ta + 6, oe, core.mark_buf.all(), core.mark_buf_n);
-            core.mark_buf_n += len;
+            off = core.mark.buf_n;
+            _ = core.mark.buf.room(core.mark.buf_n + 8192, 32768);
+            len = core.copyPdfText(b, ob + ta + 6, oe, core.mark.buf.all(), core.mark.buf_n);
+            core.mark.buf_n += len;
         }
         var pg: i32 = -1;
         if (core.find(b[ob..oe], "/Dest", 0)) |da| pg = core.destPage(b, ob + da + 5, oe);
@@ -266,8 +266,8 @@ fn walkOutline(b: []const u8, first: u32, depth: u8) void {
             }
         }
         if (len > 0) {
-            core.mark.all()[core.mark_n] = .{ .depth = depth, .off = off, .len = len, .page = pg };
-            core.mark_n += 1;
+            core.mark.items.all()[core.mark.n] = .{ .depth = depth, .off = off, .len = len, .page = pg };
+            core.mark.n += 1;
         }
         // 자식
         if (core.find(b[ob..oe], "/First", 0)) |fa| {
@@ -288,8 +288,8 @@ fn walkOutline(b: []const u8, first: u32, depth: u8) void {
 }
 
 pub fn collectOutline(b: []const u8, root: u32) void {
-    core.mark_n = 0;
-    core.mark_buf_n = 0;
+    core.mark.n = 0;
+    core.mark.buf_n = 0;
     const rb = core.findObj(b, root) orelse return;
     const re2 = core.objDictEnd(b, rb);
     const oa = core.find(b[rb..re2], "/Outlines", 0) orelse return;
