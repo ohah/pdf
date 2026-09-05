@@ -26,6 +26,10 @@ const assets = {
         // 시험용 — 붙임감을 이름으로 꺼내 쓴다
         : url.startsWith("/fixtures/") ? join(repo, "tests", url)
         : url.startsWith("/cmaps/") ? join(repo, url)
+        // pdf.js 는 JPX(openjpeg)·JBIG2·ICC(qcms) 를 따로 실린 wasm 으로 푼다.
+        // 이걸 안 내어 주면 그런 문서를 "못 그린다" — pdf.js 탓이 아니라
+        // 맞대는 쪽이 덜 차린 것이다.
+        : url.startsWith("/pdfjs/") ? join(repo, "node_modules/pdfjs-dist", url.slice(7))
         // 번들러 없이 dist 를 그대로 물리는 vanilla.html 용
         : url.startsWith("/dist/") ? join(repo, url)
         : null;

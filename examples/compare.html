@@ -48,7 +48,16 @@ async function ours(bytes, pageNo, cv) {
 }
 
 async function theirs(bytes, pageNo, cv) {
-  const task = pdfjs.getDocument({ data: bytes.slice(), cMapUrl: "/cmaps/", cMapPacked: true });
+  // pdf.js 에게도 제 것을 다 준다. wasmUrl 을 빼면 JPX·JBIG2 를 못 풀고,
+  // iccUrl 을 빼면 ICC 프로파일을 안 먹인다 — 그 상태로 맞대면 우리가
+  // 이긴 것처럼 보이지만 상대에게 연장을 안 준 것뿐이다.
+  const task = pdfjs.getDocument({
+    data: bytes.slice(),
+    cMapUrl: "/cmaps/", cMapPacked: true,
+    wasmUrl: "/pdfjs/wasm/",
+    iccUrl: "/pdfjs/iccs/",
+    standardFontDataUrl: "/pdfjs/standard_fonts/",
+  });
   const doc = await task.promise;
   const pg = await doc.getPage(pageNo);
   const vp = pg.getViewport({ scale: SCALE });
