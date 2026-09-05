@@ -1620,6 +1620,46 @@ const CS_CMYK = 2;
 const CS_TINT = 3; // Separation·DeviceN — 값이 잉크 양이라 뒤집어야 한다
 const CS_PATTERN = 4;
 const CS_LAB = 5; // L*a*b* — 값이 0~100 과 ±100 이라 그대로 쓰면 시뻘겋게 나온다
+const CS_CALRGB = 6; // /CalRGB — 감마와 행렬을 거쳐 XYZ 로 간 뒤 화면 색이 된다
+
+/// /CalRGB 를 화면 색(sRGB)으로 옮긴다.
+///
+/// 규격 8.6.5.3: 성분마다 감마를 먹여 선형으로 만들고, 행렬로 XYZ 를 만든
+/// 다음 화면 색으로 옮긴다. 여태 이걸 안 하고 DeviceRGB 로 봤다 — pdf.js 와
+/// poppler 는 둘 다 옮기므로, 우리만 딴 색이 나왔다(0.9 0.2 0.1 이 우리는
+/// 230,51,26 인데 둘은 255,0,60 이었다).
+///
+/// 흰점(WhitePoint)에 맞춘 적응(chromatic adaptation)은 하지 않는다. 거의
+/// 모든 문서가 D65 를 쓰고, 그 경우 적응은 항등이다.
+pub fn calRgbToRgb(a: f32, b2: f32, c: f32, gam: [3]f32, m: [9]f32) [3]f32 {
+    const pw = struct {
+        fn f(v: f32, g: f32) f32 {
+            const x = @max(@as(f32, 0), @min(@as(f32, 1), v));
+            if (g == 1) return x;
+            if (x <= 0) return 0;
+            return @exp2(@log2(x) * g);
+        }
+    }.f;
+    const la = pw(a, gam[0]);
+    const lb = pw(b2, gam[1]);
+    const lc = pw(c, gam[2]);
+    const X = m[0] * la + m[3] * lb + m[6] * lc;
+    const Y = m[1] * la + m[4] * lb + m[7] * lc;
+    const Z = m[2] * la + m[5] * lb + m[8] * lc;
+    var out: [3]f32 = .{
+        3.2406 * X - 1.5372 * Y - 0.4986 * Z,
+        -0.9689 * X + 1.8758 * Y + 0.0415 * Z,
+        0.0557 * X - 0.2040 * Y + 1.0570 * Z,
+    };
+    var i: usize = 0;
+    while (i < 3) : (i += 1) {
+        var v = @max(@as(f32, 0), @min(@as(f32, 1), out[i]));
+        // sRGB 되먹임
+        v = if (v <= 0.0031308) 12.92 * v else 1.055 * @exp2(@log2(v) / 2.4) - 0.055;
+        out[i] = @max(0, @min(1, v));
+    }
+    return out;
+}
 
 /// L*a*b* 를 화면 색(sRGB)으로 옮긴다.
 ///
@@ -1665,6 +1705,9 @@ const CSpace = struct {
     fn_e: usize = 0,
     /// 함수가 내놓는 값을 받을 대체 색공간의 성분 수 (1·3·4)
     alt_comps: u8 = 3,
+    /// /CalRGB 의 감마와 행렬. 행렬 기본값은 단위행렬이다.
+    gamma: [3]f32 = .{ 1, 1, 1 },
+    mat: [9]f32 = .{ 1, 0, 0, 0, 1, 0, 0, 0, 1 },
 };
 
 // ===== ICC 색 프로파일 =====
@@ -2139,6 +2182,20 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
                 // 있었는데 필터 없는 갈래에는 없어, 그런 그림이 통째로
                 // 하얗게 나왔다(kind 0 은 "안 그린다" 는 뜻이다).
                 kind = if (expandLowBpc(dst, w, h, bpc, room, &got)) 2 else 0;
+            } else if (bpc == 16) {
+                // 16비트도 같은 이유로 빠져 있었다 — 압축된 갈래에만 있었다.
+                // 높은 바이트만 남긴다. 화면은 8비트면 충분하다.
+                const half = @as(u32, @intCast(length)) / 2;
+                var hb: u32 = 0;
+                while (hb < half) : (hb += 1) dst[hb] = dst[hb * 2];
+                got = half;
+                const npx16 = @as(usize, w) * @as(usize, h);
+                const c16 = @as(usize, half) / (if (npx16 == 0) 1 else npx16);
+                if (c16 == 4) {
+                    got = cmykToRgb(dst, npx16, img_icc, flip);
+                    flip_done = true;
+                    kind = 1;
+                } else if (c16 >= 3) kind = 1 else if (c16 >= 1) kind = 2 else kind = 0;
             } else kind = 0;
             if (kind != 0 and (bpc == 8 or bpc == 1) and rowb * h > length) kind = 0;
         }
@@ -3808,6 +3865,12 @@ pub fn runOps(b: []const u8, depth: u32) void {
                 r = rgb5[0];
                 g2 = rgb5[1];
                 b3 = rgb5[2];
+            } else if (kind == CS_CALRGB and sp >= 3 and ci >= 0) {
+                const cs4 = cspaces.all()[@intCast(ci)];
+                const v4 = calRgbToRgb(st[sp - 3], st[sp - 2], st[sp - 1], cs4.gamma, cs4.mat);
+                r = v4[0];
+                g2 = v4[1];
+                b3 = v4[2];
             } else if (kind == CS_LAB and sp >= 3) {
                 const v = labToRgb(st[sp - 3], st[sp - 2], st[sp - 1]);
                 r = v[0];
@@ -4098,6 +4161,8 @@ fn scanColorSpaces(b: []const u8, rs: usize, re_: usize) void {
                 var tint_s: usize = 0;
                 var tint_e: usize = 0;
                 var tint_alt: u8 = 3;
+                var cal_gam: [3]f32 = .{ 1, 1, 1 };
+                var cal_mat: [9]f32 = .{ 1, 0, 0, 0, 1, 0, 0, 0, 1 };
                 if (findIn(val, "/Pattern", 0) != null) { kind = CS_PATTERN; comps = 1; }
                 else if (findIn(val, "/Lab", 0) != null) { kind = CS_LAB; comps = 3; }
                 else if (findIn(val, "/Separation", 0) != null or findIn(val, "/DeviceN", 0) != null) {
@@ -4118,6 +4183,13 @@ fn scanColorSpaces(b: []const u8, rs: usize, re_: usize) void {
                     tintOf(b, vs, ve, dn, &tint_s, &tint_e, &tint_alt);
                 }
                 else if (findIn(val, "/Indexed", 0) != null) { kind = CS_GRAY; comps = 1; }
+                else if (findIn(val, "/CalRGB", 0) != null) {
+                    kind = CS_CALRGB;
+                    comps = 3;
+                    if (readArr(b, vs, ve, "/Gamma", cal_gam[0..3]) != 3) cal_gam = .{ 1, 1, 1 };
+                    if (readArr(b, vs, ve, "/Matrix", cal_mat[0..9]) != 9)
+                        cal_mat = .{ 1, 0, 0, 0, 1, 0, 0, 0, 1 };
+                }
                 else if (findIn(val, "/DeviceGray", 0) != null or findIn(val, "/CalGray", 0) != null) { kind = CS_GRAY; comps = 1; }
                 else if (findIn(val, "/DeviceCMYK", 0) != null) { kind = CS_CMYK; comps = 4; }
                 else if (findIn(val, "/ICCBased", 0) != null) {
@@ -4155,6 +4227,8 @@ fn scanColorSpaces(b: []const u8, rs: usize, re_: usize) void {
                 c2.fn_s = tint_s;
                 c2.fn_e = tint_e;
                 c2.alt_comps = tint_alt;
+                c2.gamma = cal_gam;
+                c2.mat = cal_mat;
                 cs_n += 1;
             }
             q = nq;
@@ -6922,6 +6996,10 @@ pub const Shade = struct {
     fxn: u8,
     /// 함수를 안 쓰는 그물의 색 성분 수
     ncomp: u8,
+    /// 색공간이 /CalRGB 인가. 그렇다면 감마·행렬을 거쳐야 화면 색이 된다.
+    cal: u8 = 0,
+    cal_gamma: [3]f32 = .{ 1, 1, 1 },
+    cal_mat: [9]f32 = .{ 1, 0, 0, 0, 1, 0, 0, 0, 1 },
     /// 1형의 /Matrix, /Domain
     mat: [6]f32,
     dom: [4]f32,

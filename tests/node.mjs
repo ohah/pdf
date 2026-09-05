@@ -222,6 +222,18 @@ const t = (name, cond, got) => {
       t("인라인 /AHx 를 푼다", near(ah, [0, 0, 0], 20) && near(ah2, [191, 191, 191], 20),
         `${ah.join(",")} / ${ah2.join(",")}`);
 
+      // /CalRGB — 감마·행렬을 거쳐 XYZ 로 간 뒤 화면 색이 된다. 여태
+      // DeviceRGB 로 봐서 우리만 딴 색이었다(pdf.js·poppler 는 일치).
+      // 채우기와 셰이딩 두 길 모두 봐야 한다 — 셰이딩만 남아 있었다.
+      const cal1 = await px("v-cal.pdf", 50, 30);
+      const calSh = await px("v-cal.pdf", 40, 120);
+      t("CalRGB 채우기가 옮겨진다", near(cal1, [255, 0, 60], 8), cal1.join(","));
+      t("CalRGB 셰이딩도 옮겨진다", near(calSh, [0, 250, 119], 8), calSh.join(","));
+
+      // 16비트 그림 — 2·4비트와 같은 이유로 날 갈래에 길이 없었다
+      const b16 = await px("v-bpc16.pdf", 30, 60);
+      t("16비트 그림을 그린다", near(b16, [136, 136, 136], 8), b16.join(","));
+
       const s1 = await px("t-sep.pdf", 50, 50);
       const s2 = await px("t-sep.pdf", 150, 50);
       t("Separation 이 잉크 변환 함수를 탄다", near(s1, [209, 224, 245]) && near(s2, [48, 117, 209]),

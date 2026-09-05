@@ -527,6 +527,24 @@ pub fn readShade(b: []const u8, ds: usize, de: usize, name: []const u8) void {
     sh.fs = @intCast(fs);
     sh.fe = @intCast(fe);
 
+    // 색공간이 /CalRGB 면 감마·행렬을 거쳐야 화면 색이 된다.
+    //
+    // /Gamma 와 /Matrix 는 *색공간 안*에서만 읽는다. 셰이딩 딕셔너리
+    // 전체에서 찾으면 1형 셰이딩의 제 /Matrix 를 색 행렬로 착각한다.
+    if (root.find(b[ds..de], "/CalRGB", 0)) |ca| {
+        const cs_s = ds + ca;
+        var cs_e = cs_s;
+        var d2: i32 = 0;
+        while (cs_e < de) : (cs_e += 1) {
+            if (b[cs_e] == '<') d2 += 1;
+            if (b[cs_e] == '>') { d2 -= 1; if (d2 <= 0) { cs_e += 1; break; } }
+        }
+        sh.cal = 1;
+        if (root.readArr(b, cs_s, cs_e, "/Gamma", sh.cal_gamma[0..3]) != 3)
+            sh.cal_gamma = .{ 1, 1, 1 };
+        if (root.readArr(b, cs_s, cs_e, "/Matrix", sh.cal_mat[0..9]) != 9)
+            sh.cal_mat = .{ 1, 0, 0, 0, 1, 0, 0, 0, 1 };
+    }
     if (st2 != 2 and st2 != 3) {
         // 1형은 x·y 를 받는 함수 하나로 칠한다
         if (st2 == 1) {
@@ -552,10 +570,14 @@ pub fn readShade(b: []const u8, ds: usize, de: usize, name: []const u8) void {
         const nc = shadeFn(b, sh, t, &v);
         var rgb3: [3]f32 = .{ 0, 0, 0 };
         rgbFrom(nc, v, &rgb3);
+        const c3 = if (sh.cal == 1)
+            root.calRgbToRgb(rgb3[0], rgb3[1], rgb3[2], sh.cal_gamma, sh.cal_mat)
+        else
+            rgb3;
         sh.stops[i * 4] = t;
-        sh.stops[i * 4 + 1] = rgb3[0];
-        sh.stops[i * 4 + 2] = rgb3[1];
-        sh.stops[i * 4 + 3] = rgb3[2];
+        sh.stops[i * 4 + 1] = c3[0];
+        sh.stops[i * 4 + 2] = c3[1];
+        sh.stops[i * 4 + 3] = c3[2];
     }
     sh.stop_n = 8;
     root.shade_n += 1;
