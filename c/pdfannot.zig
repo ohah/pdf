@@ -31,10 +31,10 @@ const Ann = struct {
     obj: u32 = 0,
 };
 /// 쪽 하나의 주석. 세는 상한은 없다.
-var ann: core.Table(Ann) = .{};
+var ann: core.Table(Ann, 128) = .{};
 var ann_n: u32 = 0;
 /// ann_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
-var ann_buf: core.Table(u8) = .{};
+var ann_buf: core.Table(u8, 65536) = .{};
 var ann_used: u32 = 0;
 
 pub fn annCount() u32 { return ann_n; }
@@ -79,7 +79,7 @@ pub fn collectAnnots(b: []const u8, body: usize, end: usize) void {
 
     var q = as2;
     while (q < ae) {
-        if (!core.growTable(&ann.at, &ann.cap, ann_n, @sizeOf(Ann), 128)) break;
+        if (!ann.room(ann_n)) break;
         while (q < ae and core.isSpace(b[q])) q += 1;
         if (q >= ae or b[q] == ']') break;
         if (!core.isDigit(b[q])) { q += 1; continue; }
@@ -96,7 +96,7 @@ pub fn collectAnnots(b: []const u8, body: usize, end: usize) void {
 
         var name: [32]u8 = undefined;
         const nn = core.nameAfter(b, ab, abe, "/Subtype", &name);
-        _ = ann_buf.room(ann_used + nn + 64, 65536);
+        _ = ann_buf.room(ann_used + nn + 64);
         if (nn > 0 and ann_used + nn <= ann_buf.all().len) {
             a.sub_off = ann_used;
             a.sub_len = nn;
@@ -141,17 +141,17 @@ pub fn collectAnnots(b: []const u8, body: usize, end: usize) void {
         }
         // 글(/Contents) · 쓴 이(/T) · 날짜(/M)
         if (core.find(b[ab..abe], "/Contents", 0)) |ta| {
-            _ = ann_buf.room(ann_used + 8192, 65536);
+            _ = ann_buf.room(ann_used + 8192);
             const n2 = core.copyPdfText(b, ab + ta + 9, abe, ann_buf.all(), ann_used);
             if (n2 > 0) { a.txt_off = ann_used; a.txt_len = n2; ann_used += n2; }
         }
         if (core.keyPos(b, ab, abe, "/T")) |ta| {
-            _ = ann_buf.room(ann_used + 8192, 65536);
+            _ = ann_buf.room(ann_used + 8192);
             const n2 = core.copyPdfText(b, ta + 2, abe, ann_buf.all(), ann_used);
             if (n2 > 0) { a.au_off = ann_used; a.au_len = n2; ann_used += n2; }
         }
         if (core.keyPos(b, ab, abe, "/M")) |da| {
-            _ = ann_buf.room(ann_used + 8192, 65536);
+            _ = ann_buf.room(ann_used + 8192);
             const n2 = core.copyPdfText(b, da + 2, abe, ann_buf.all(), ann_used);
             if (n2 > 0) { a.dt_off = ann_used; a.dt_len = n2; ann_used += n2; }
         }
@@ -215,7 +215,7 @@ pub fn collectLinks(b: []const u8, body: usize, end: usize) void {
             while (up < abe and core.isSpace(b[up])) up += 1;
             if (up < abe and (b[up] == '(' or b[up] == '<')) {
                 uoff = core.link.buf_n;
-                _ = core.link.buf.room(core.link.buf_n + 8192, 16384);
+                _ = core.link.buf.room(core.link.buf_n + 8192);
                 ulen = core.copyPdfText(b, up, abe, core.link.buf.all(), core.link.buf_n);
                 core.link.buf_n += ulen;
                 break;
@@ -228,7 +228,7 @@ pub fn collectLinks(b: []const u8, body: usize, end: usize) void {
             pg = core.destPage(b, ab + da + 2, abe);
         }
         if (ulen == 0 and pg < 0) continue;
-        if (!core.growTable(&core.link.items.at, &core.link.items.cap, core.link.n, @sizeOf(core.Link), 128)) break;
+        if (!core.link.items.room(core.link.n)) break;
         core.link.items.all()[core.link.n] = .{ .rect = rect, .off = uoff, .len = ulen, .page = pg };
         core.link.n += 1;
     }
@@ -245,7 +245,7 @@ fn walkOutline(b: []const u8, first: u32, depth: u8) void {
         var len: u32 = 0;
         if (core.find(b[ob..oe], "/Title", 0)) |ta| {
             off = core.mark.buf_n;
-            _ = core.mark.buf.room(core.mark.buf_n + 8192, 32768);
+            _ = core.mark.buf.room(core.mark.buf_n + 8192);
             len = core.copyPdfText(b, ob + ta + 6, oe, core.mark.buf.all(), core.mark.buf_n);
             core.mark.buf_n += len;
         }
@@ -268,7 +268,7 @@ fn walkOutline(b: []const u8, first: u32, depth: u8) void {
         if (len > 0) {
             // 자리를 잡고 쓴다. 잡지 않고 쓰고 있었다 — marks() 가 늘 빈
             // 슬라이스라 목차 제목 자리에 PDF 원문 조각이 나왔다.
-            if (!core.growTable(&core.mark.items.at, &core.mark.items.cap, core.mark.n, @sizeOf(core.Bookmark), 64)) return;
+            if (!core.mark.items.room(core.mark.n)) return;
             core.mark.items.all()[core.mark.n] = .{ .depth = depth, .off = off, .len = len, .page = pg };
             core.mark.n += 1;
         }

@@ -154,8 +154,8 @@ fn attachEncoding(b: []const u8, fbody: usize, fend: usize, f: *core.FontMap) vo
         else if (c >= 160) u = c;
         if (u == 0) continue;
         if (!core.mapRoom(f, f.n + 1)) break;
-        core.u16buf(f.codes_at, f.codes_cap)[f.n] = @intCast(c);
-        core.u16buf(f.unis_at, f.unis_cap)[f.n] = @intCast(@min(u, 65535));
+        f.codes.all()[f.n] = @intCast(c);
+        f.unis.all()[f.n] = @intCast(@min(u, 65535));
         f.n += 1;
     }
     // /Differences 가 있으면 덮어쓴다
@@ -179,14 +179,14 @@ fn attachEncoding(b: []const u8, fbody: usize, fend: usize, f: *core.FontMap) vo
         if (u != 0 and code < 256) {
             var k: u32 = 0;
             var hit = false;
-            while (k < f.n) : (k += 1) if (core.u16buf(f.codes_at, f.codes_cap)[k] == code) {
-                core.u16buf(f.unis_at, f.unis_cap)[k] = @intCast(@min(u, 65535));
+            while (k < f.n) : (k += 1) if (f.codes.all()[k] == code) {
+                f.unis.all()[k] = @intCast(@min(u, 65535));
                 hit = true;
                 break;
             };
             if (!hit and core.mapRoom(f, f.n + 1)) {
-                core.u16buf(f.codes_at, f.codes_cap)[f.n] = @intCast(code);
-                core.u16buf(f.unis_at, f.unis_cap)[f.n] = @intCast(@min(u, 65535));
+                f.codes.all()[f.n] = @intCast(code);
+                f.unis.all()[f.n] = @intCast(@min(u, 65535));
                 f.n += 1;
             }
         }

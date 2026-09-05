@@ -276,8 +276,8 @@ pub fn buildFontCmap(f: *core.FontMap, nglyphs: u16, dst: []u8) u32 {
     var has_n: u32 = 0;
     var i: u16 = 0;
     while (i < f.n) : (i += 1) {
-        const u = core.u16buf(f.unis_at, f.unis_cap)[i];
-        const gid = core.u16buf(f.codes_at, f.codes_cap)[i];
+        const u = f.unis.all()[i];
+        const gid = f.codes.all()[i];
         if (u == 0 or gid == 0) continue;
         if (core.uni2gid[u] == 0) {
             core.uni2gid[u] = gid;

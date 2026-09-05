@@ -198,7 +198,7 @@ pub fn searchSlice() []u8 {
 
 
 /// 페이지 객체 번호들 (문서 순서). 자리는 parse 가 쪽 수에 맞춰 잡는다.
-pub var pgs: Table(u32) = .{};
+pub var pgs: Table(u32, 0) = .{};
 pub var cpage: struct {
     count: u32 = 0,
     x0: f32 = 0,
@@ -228,7 +228,7 @@ pub var doc: struct {
 } = .{};
 pub var pick: struct {
     /// 사용자가 고른 순서
-    items: Table(u32) = .{},
+    items: Table(u32, 0) = .{},
     n: usize = 0,
 } = .{};
 pub var rotate: i32 = 0;
@@ -631,7 +631,7 @@ pub fn objRankTable() []u8 {
 /// 되풀이해 쓰던 것을 하나로 접었다 — 같은 것이 57벌 있었다. 자리는 wasm 선형
 /// 메모리의 주소라 슬라이스가 아니라 usize 로 들고 있다(구역이 되감기면
 /// growTable 이 알아서 버린다).
-pub fn Table(comptime T: type) type {
+pub fn Table(comptime T: type, comptime START: u32) type {
     return struct {
         at: usize = 0,
         cap: u32 = 0,
@@ -644,9 +644,11 @@ pub fn Table(comptime T: type) type {
             return @as([*]T, @ptrFromInt(self.at))[0..self.cap];
         }
 
-        /// want 번째까지 들어갈 자리를 만든다. start 는 처음 잡을 개수.
-        pub fn room(self: *Self, want: u32, start: u32) bool {
-            return growTable(&self.at, &self.cap, want, @sizeOf(T), start);
+        /// want 번째까지 들어갈 자리를 만든다. 처음 잡을 개수는 선언에
+        /// 적힌 START 다 — 부르는 자리마다 되풀이하면 한 곳만 고쳤을 때
+        /// 조용히 어긋난다.
+        pub fn room(self: *Self, want: u32) bool {
+            return growTable(&self.at, &self.cap, want, @sizeOf(T), START);
         }
     };
 }
@@ -1145,7 +1147,7 @@ pub export fn parse(len: usize) u32 {
                         if (findObj(b, num8)) |gb| {
                             const ge = objDictEnd(b, gb);
                             if (find(b[gb..ge], "/Name", 0)) |na| {
-                                _ = (oc.buf.room(oc.used + 4096, 8192));
+                                _ = (oc.buf.room(oc.used + 4096));
                                 const r2 = sigPutStrTo(b, gb + na + 5, ge, oc.buf.all(), &oc.used);
                                 noff = r2[0];
                                 nlen = r2[1];
@@ -1162,7 +1164,7 @@ pub export fn parse(len: usize) u32 {
                     var q = os2 + fa2 + 4;
                     while (q < oe2 and b[q] != '[') q += 1;
                     q += 1;
-                    while (q < oe2 and b[q] != ']' and ocg.off_list.room(ocg.off_n + 1, 64)) {
+                    while (q < oe2 and b[q] != ']' and ocg.off_list.room(ocg.off_n + 1)) {
                         while (q < oe2 and isSpace(b[q])) q += 1;
                         if (q >= oe2 or b[q] == ']') break;
                         if (!isDigit(b[q])) { q += 1; continue; }
@@ -1240,7 +1242,7 @@ export fn addPick(i: u32) void {
 export fn setRotate(deg: i32) void { rotate = deg; }
 
 /// 쪽마다 따로 돌리기. -1 은 "정하지 않음" 이라 전체 회전을 따른다.
-var rot: Table(i16) = .{};
+var rot: Table(i16, 0) = .{};
 export fn clearPageRotate() void {
     for (rot.all()) |*r| r.* = -1;
 }
@@ -1294,7 +1296,7 @@ pub fn appendNum(pos: *usize, v: u32) void {
 /// 유니코드 하나를 이 글꼴 안의 코드로 되찾는다.
 pub fn wmCode(f: *const FontMap, uni: u32) ?u32 {
     var i: u16 = 0;
-    while (i < f.n) : (i += 1) if (u16buf(f.unis_at, f.unis_cap)[i] == uni) return u16buf(f.codes_at, f.codes_cap)[i];
+    while (i < f.n) : (i += 1) if (f.unis.all()[i] == uni) return f.codes.all()[i];
     return null;
 }
 
@@ -1355,7 +1357,7 @@ export fn apply() usize { return pdfapply.apply(); }
 // 세로쓰기를 알아보는 데 쓴다.
 const Item = struct { x: f32, y: f32, size: f32, off: u32, len: u32, font: i32 = -1, vert: bool = false };
 /// 글자 조각. 필요한 만큼 늘어난다(세는 상한 없음).
-var items: Table(Item) = .{};
+var items: Table(Item, 4096) = .{};
 var item_n: u32 = 0;
 
 // --- 그리기 명령 목록 ---
@@ -1366,12 +1368,12 @@ var ops: struct {
     /// 명령 자리는 필요한 만큼 늘어난다(세는 상한 없음). 예전에는 524288 개로
     /// 못박아 두어, 자리 다 다른 네모 20만 개를 그리면 절반에서 잘렸다.
     /// LIMIT 은 growTable 이 정하는 4M 개(=16MB)다 — 그 위는 문서가 망가진 것으로 본다.
-    items: Table(f32) = .{},
+    items: Table(f32, 65536) = .{},
     n: u32 = 0,
 } = .{};
 /// 그물 셰이딩이 명령 자리를 다 먹으면 그 뒤 그림이 통째로 사라진다.
 /// 망가진 파일은 삼각형을 수만 개 뱉으므로 더 못 늘릴 때만 그만둔다.
-pub fn opsRoomLow() bool { return !ops.items.room(ops.n + 4096, 65536); }
+pub fn opsRoomLow() bool { return !ops.items.room(ops.n + 4096); }
 /// 숨긴 레이어를 지나는 동안 명령을 내지 않는다
 var emit_mute: bool = false;
 // ===== 글자 묶음 =====
@@ -1436,7 +1438,7 @@ fn pathReset() void {
 pub fn emitOp(code: f32, args: []const f32) void {
     if (emit_mute) return;
     const need: u32 = ops.n + 2 + @as(u32, @intCast(args.len));
-    if (!ops.items.room(need, 65536)) return;
+    if (!ops.items.room(need)) return;
     const buf = ops.items.all();
     buf[ops.n] = code;
     buf[ops.n + 1] = @floatFromInt(args.len);
@@ -1454,7 +1456,7 @@ export fn opsLen() u32 { return ops.n; }
 var text: struct {
     /// 뽑아 내는 글자. 필요한 만큼 늘어난다(세는 상한 없음) — 예전에는 256KB 에서
     /// 잘려, 빽빽한 쪽의 뒷글자가 소리 없이 사라졌다.
-    items: Table(u8) = .{},
+    items: Table(u8, 65536) = .{},
     n: u32 = 0,
 } = .{};
 var dtext: struct {
@@ -1467,7 +1469,7 @@ var dtext: struct {
     /// 영역 문자를 담아 글리프를 번호로 곧장 집는다.
     /// 화면에 찍을 글자. 필요한 만큼 늘어난다(세는 상한 없음) — 예전에는 256KB 에서
     /// 잘려, 빽빽한 쪽의 뒷글자가 소리 없이 사라졌다.
-    items: Table(u8) = .{},
+    items: Table(u8, 65536) = .{},
     n: u32 = 0,
 } = .{};
 var rtext: struct {
@@ -1479,7 +1481,7 @@ var rtext: struct {
     /// 글리프로 찍고, 글자층은 ToUnicode 로 되찾은 글자로 짓는다.
     /// 사람이 읽는 글자. 필요한 만큼 늘어난다(세는 상한 없음) — 예전에는 256KB 에서
     /// 잘려, 빽빽한 쪽의 뒷글자가 소리 없이 사라졌다.
-    items: Table(u8) = .{},
+    items: Table(u8, 65536) = .{},
     n: u32 = 0,
 } = .{};
 
@@ -1491,10 +1493,8 @@ pub const FontMap = struct {
     /// 코드→유니코드 표. 글꼴마다 따로 구역에서 잡고 필요한 만큼 늘린다.
     /// 예전에는 글꼴 하나에 2048 쌍으로 못박혀, 한자·전각 글꼴의 뒷부분이
     /// 조용히 빠졌다.
-    codes_at: usize,
-    codes_cap: u32,
-    unis_at: usize,
-    unis_cap: u32,
+    codes: Table(u16, 256) = .{},
+    unis: Table(u16, 256) = .{},
     n: u32,
     /// 문서에 박힌 글꼴 파일. 글꼴 영역 안 위치와 길이.
     file_off: u32,
@@ -1505,10 +1505,8 @@ pub const FontMap = struct {
     dw: f32,
     wn: u32,
     /// 글자 폭 표도 같은 식으로 잡는다(1024 개로 못박혀 있었다).
-    wcodes_at: usize,
-    wcodes_cap: u32,
-    wvals_at: usize,
-    wvals_cap: u32,
+    wcodes: Table(u16, 256) = .{},
+    wvals: Table(u16, 256) = .{},
     /// Identity-H — 문자 코드가 곧 글리프 번호다
     identity: bool,
     /// 세로쓰기
@@ -1552,7 +1550,7 @@ pub const FontMap = struct {
 };
 /// 쪽의 글꼴. 필요한 만큼 늘어난다(세는 상한 없음) — 32개로 못박아 두었을 때는
 /// 글꼴을 많이 쓰는 쪽에서 33번째부터 글자가 다른 글꼴로 찍혔다.
-pub var fonts: Table(FontMap) = .{};
+pub var fonts: Table(FontMap, 8) = .{};
 
 /// 이 쪽이 그린 외부 객체(Do)의 수 — 그림과 폼을 함께 센다.
 /// 글자가 없는데 이것이 있으면 스캔 문서다.
@@ -1583,7 +1581,7 @@ const Img = struct {
     smask: u8, // 부드러운 마스크가 든 칸 번호 + 1
 };
 /// 쪽에 놓인 그림 칸. 필요한 만큼 늘어난다(세는 상한 없음).
-var imgs: Table(Img) = .{};
+var imgs: Table(Img, 16) = .{};
 /// 쪽이 쓰는 폼 XObject. 콘텐츠 스트림을 제 변환·자르기로 그린다.
 pub const Form = struct {
     name: [24]u8,
@@ -1596,7 +1594,7 @@ pub const Form = struct {
     group: bool = false,
 };
 /// 쪽 안에 끼운 폼 XObject. 필요한 만큼 늘어난다(세는 상한 없음).
-var forms: Table(Form) = .{};
+var forms: Table(Form, 16) = .{};
 
 /// 그래픽 상태 묶음 (/ExtGState). 투명도와 선 굵기만 본다.
 const GState = struct {
@@ -1614,7 +1612,7 @@ const GState = struct {
     sm_bc: [3]f32,
 };
 /// 이름 붙은 그래픽 상태. 필요한 만큼 늘어난다(세는 상한 없음).
-var gstates: Table(GState) = .{};
+var gstates: Table(GState, 16) = .{};
 var gs_n: u32 = 0;
 
 /// 이름 붙은 색 공간 (/ColorSpace).
@@ -1673,21 +1671,20 @@ const CSpace = struct {
 // 단순식으로 넘기면 색이 어긋난다 — 마젠타 자리에 형광 마젠타가 찍혔다.
 const icc = @import("pdficc.zig");
 var iccs: struct {
-    profs: Table(icc.Profile) = .{},
+    profs: Table(icc.Profile, 4) = .{},
     n: u32 = 0,
     /// 프로파일 바이트를 담아 두는 자리 — 스트림 임시 자리는 곧 덮이므로 옮긴다
-    data_at: usize = 0,
-    data_cap: u32 = 0,
+    data: Table(u8, 65536) = .{},
     data_used: u32 = 0,
 } = .{};
 
 /// 프로파일 스트림을 읽어 담는다. 담은 번호, 못 읽으면 -1.
 fn addIcc(bytes: []const u8) i32 {
     if (bytes.len < 132 or bytes.len > 8 * 1024 * 1024) return -1;
-    if (!growTable(&iccs.profs.at, &iccs.profs.cap, iccs.n + 1, @sizeOf(icc.Profile), 4)) return -1;
+    if (!iccs.profs.room(iccs.n + 1)) return -1;
     const need = iccs.data_used + @as(u32, @intCast(bytes.len));
-    if (!growTable(&iccs.data_at, &iccs.data_cap, need, 1, 65536)) return -1;
-    const dst = @as([*]u8, @ptrFromInt(iccs.data_at))[0..iccs.data_cap];
+    if (!iccs.data.room(need)) return -1;
+    const dst = @as([*]u8, @ptrFromInt(iccs.data.at))[0..iccs.data.cap];
     @memcpy(dst[iccs.data_used..][0..bytes.len], bytes);
     const mine = dst[iccs.data_used..][0..bytes.len];
     iccs.data_used = need;
@@ -1704,7 +1701,7 @@ fn iccToRgb(ix: i32, in: []const f32, out: *[3]f32) bool {
     return icc.toRgb(&iccs.profs.all()[@intCast(ix)], in, out);
 }
 /// 이름 붙은 색 공간. 필요한 만큼 늘어난다(세는 상한 없음).
-var cspaces: Table(CSpace) = .{};
+var cspaces: Table(CSpace, 16) = .{};
 var cs_n: u32 = 0;
 
 fn findCs(name: []const u8) i32 {
@@ -1771,7 +1768,7 @@ export fn slotSMask(i: u32) u32 { return if (i < img.n) imgs.all()[i].smask else
 
 /// 그림 객체 하나를 풀어 그림 표에 담는다. 담은 칸 번호를 준다.
 fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
-    if (!imgs.room(img.n + 2, 16)) return null;
+    if (!imgs.room(img.n + 2)) return null;
     const oe = objDictEnd(b, ob);
     if (find(b[ob..oe], "/Image", 0) == null) return null;
     const w = intAfter(b, ob, oe, "/Width") orelse 0;
@@ -2170,7 +2167,7 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
 /// 스텐실은 1 이 "가린다" 는 뜻이라 알파로는 0 이 된다. /Decode [1 0] 이
 /// 붙어 있으면 그 뜻이 뒤집힌다.
 fn stencilAlpha(mi: u32) ?u32 {
-    if (mi >= img.n or !imgs.room(img.n + 1, 16)) return null;
+    if (mi >= img.n or !imgs.room(img.n + 1)) return null;
     const im = imgs.all()[mi];
     if (im.kind != 4 or im.w == 0 or im.h == 0) return null;
     const px = @as(usize, im.w) * im.h;
@@ -2200,7 +2197,7 @@ fn stencilAlpha(mi: u32) ?u32 {
 
 /// 색 키 가리개 — 범위에 든 화소를 투명으로 만드는 알파 판을 새 칸에 짓는다.
 fn colorKeyMask(slot: u32, lo: []const u32, hi: []const u32) void {
-    if (slot >= img.n or !imgs.room(img.n + 1, 16)) return;
+    if (slot >= img.n or !imgs.room(img.n + 1)) return;
     const im = imgs.all()[slot];
     const px = @as(usize, im.w) * im.h;
     if (px == 0 or px > img.cap - img.used) return;
@@ -2240,7 +2237,7 @@ export fn jpegToRgb(i: u32) i32 {
     const px = @as(usize, im.w) * im.h;
     const need = px * 3;
     if (need + 4096 > img.cap - img.used) return -1;
-    if (!imgs.room(img.n + 1, 16)) return -1;
+    if (!imgs.room(img.n + 1)) return -1;
     const src = @as([*]const u8, @ptrFromInt(imgArea() + im.off))[0..im.len];
     const dst = @as([*]u8, @ptrFromInt(imgArea() + img.used))[0..need];
     // 성분마다 부표본 화소를 담을 자리. 프로그레시브는 계수를 다 들고
@@ -2522,7 +2519,7 @@ pub fn readFloat(b: []const u8, p: *usize) f32 {
 
 /// 글자층에 얹을 글자를 한 자 쓴다 (그리는 글자와 나란히 간다)
 fn putRead(cp: u32) void {
-    if (!rtext.items.room(rtext.n + 8, 65536)) return;
+    if (!rtext.items.room(rtext.n + 8)) return;
     if (cp < 0x80) {
         rtext.items.all()[rtext.n] = @intCast(cp);
         rtext.n += 1;
@@ -2540,7 +2537,7 @@ fn putRead(cp: u32) void {
 
 /// UTF-8 로 한 글자 쓴다
 fn putDraw(cp: u32) void {
-    if (!dtext.items.room(dtext.n + 8, 65536)) return;
+    if (!dtext.items.room(dtext.n + 8)) return;
     if (cp < 0x80) {
         dtext.items.all()[dtext.n] = @intCast(cp);
         dtext.n += 1;
@@ -2557,7 +2554,7 @@ fn putDraw(cp: u32) void {
 }
 
 fn putUtf8(cp: u32) void {
-    if (!text.items.room(text.n + 8, 65536)) return;
+    if (!text.items.room(text.n + 8)) return;
     if (cp < 0x80) {
         text.items.all()[text.n] = @intCast(cp);
         text.n += 1;
@@ -2612,8 +2609,8 @@ fn parseCMap(f: *FontMap, cm: []const u8) void {
             while (p < end and cm[p] != '>') p += 1;
             p += 1;
             if (!mapRoom(f, f.n + 1)) break;
-            u16buf(f.codes_at, f.codes_cap)[f.n] = @truncate(src);
-            u16buf(f.unis_at, f.unis_cap)[f.n] = @truncate(dst);
+            f.codes.all()[f.n] = @truncate(src);
+            f.unis.all()[f.n] = @truncate(dst);
             f.n += 1;
         }
         at = end + 1;
@@ -2659,8 +2656,8 @@ fn parseCMap(f: *FontMap, cm: []const u8) void {
             var c = lo;
             while (c <= hi) : (c += 1) {
                 if (!mapRoom(f, f.n + 1)) break;
-                u16buf(f.codes_at, f.codes_cap)[f.n] = @truncate(c);
-                u16buf(f.unis_at, f.unis_cap)[f.n] = @truncate(dst + (c - lo));
+                f.codes.all()[f.n] = @truncate(c);
+                f.unis.all()[f.n] = @truncate(dst + (c - lo));
                 f.n += 1;
             }
         }
@@ -2680,7 +2677,7 @@ fn mapCode2(code: u32) u32 {
 
 fn lookup(f: *const FontMap, code: u32) u32 {
     var i: u16 = 0;
-    while (i < f.n) : (i += 1) if (u16buf(f.codes_at, f.codes_cap)[i] == code) return u16buf(f.unis_at, f.unis_cap)[i];
+    while (i < f.n) : (i += 1) if (f.codes.all()[i] == code) return f.unis.all()[i];
     // 표에 없으면 코드를 그대로 본다 (라틴 폰트는 대개 맞는다)
     return code;
 }
@@ -2724,18 +2721,18 @@ export fn resetPage(w: f32, h: f32) void {
 
 /// 코드→유니코드 짝을 want 개까지 담을 자리를 마련한다.
 pub fn mapRoom(f: *FontMap, want: u32) bool {
-    return growTable(&f.codes_at, &f.codes_cap, want, 2, 256) and
-        growTable(&f.unis_at, &f.unis_cap, want, 2, 256);
+    return f.codes.room(want) and
+        f.unis.room(want);
 }
 /// 글자 폭 표도 같은 식으로.
 fn widthRoom(f: *FontMap, want: u32) bool {
-    return growTable(&f.wcodes_at, &f.wcodes_cap, want, 2, 256) and
-        growTable(&f.wvals_at, &f.wvals_cap, want, 2, 256);
+    return f.wcodes.room(want) and
+        f.wvals.room(want);
 }
 
 /// 폰트 하나를 등록한다. cmap 이 비어 있으면 코드=유니코드로 본다.
 export fn addFont(name: [*]const u8, name_len: u32, cmap: [*]const u8, cmap_len: u32) void {
-    if (!fonts.room(fontarea.n + 1, 8)) return;
+    if (!fonts.room(fontarea.n + 1)) return;
     const f = &fonts.all()[fontarea.n];
     // 이 자리는 구역에서 떼어 온 것이라, 앞서 누가 쓰던 값이 그대로 남아
     // 있다. 정적 배열이던 때는 0 으로 시작해 눈에 안 띄었다.
@@ -2785,7 +2782,7 @@ fn selectFont(name: []const u8) void {
 
 /// 문자열 하나를 항목으로 남긴다.
 fn emit(x: f32, y: f32, size: f32, start: u32) void {
-    if (!items.room(item_n + 1, 4096) or text.n <= start) return;
+    if (!items.room(item_n + 1) or text.n <= start) return;
     // CTM 을 적용한 좌표는 PDF 기준(아래가 원점)이므로 캔버스 기준으로 뒤집는다.
     // 다만 문서가 이미 위 기준으로 그리는 경우(세로 배율 음수)는 그대로 둔다.
     const cy = if (y > cpage.h or y < 0) y else cpage.h - y;
@@ -3083,7 +3080,7 @@ fn t3Replay(i: u32) void {
     const pool = t3cPool();
     const n = t3c.len[i];
     if (pool.len == 0 or n == 0) return;
-    if (!ops.items.room(ops.n + n, 65536)) return;
+    if (!ops.items.room(ops.n + n)) return;
     @memcpy(ops.items.all()[ops.n..][0..n], pool[t3c.off[i]..][0..n]);
     ops.n += n;
 }
@@ -3401,7 +3398,7 @@ pub fn runOps(b: []const u8, depth: u32) void {
             }
             runFlush();
             // 뽑아 둔 글자는 문자열 단위로 묶는다 — 나중에 본문 검색에 쓴다
-            if (text.n > start_text and items.room(item_n + 1, 4096)) {
+            if (text.n > start_text and items.room(item_n + 1)) {
                 items.all()[item_n] = .{
                     .x = x0, .y = y0, .size = tf_size,
                     .off = start_text, .len = text.n - start_text,
@@ -3774,7 +3771,7 @@ pub fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
                                 }
                             }
                         }
-                    } else if (pt == 1 and tiles.room(tile_n + 1, 16)) {
+                    } else if (pt == 1 and tiles.room(tile_n + 1)) {
                         // 타일 무늬 — 안에서 처음 나오는 색을 대표로 쓴다
                         const t2 = &tiles.all()[tile_n];
                         const nl5 = @min(nm5.len, 24);
@@ -3860,7 +3857,7 @@ pub fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
             }
         }
         var q = cs2;
-        while (q < ce2 and cspaces.room(cs_n + 1, 16)) {
+        while (q < ce2 and cspaces.room(cs_n + 1)) {
             if (b[q] != '/') { q += 1; continue; }
             var nq = q + 1;
             while (nq < ce2 and !isSpace(b[nq]) and b[nq] != '/' and b[nq] != '>' and
@@ -3955,7 +3952,7 @@ pub fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
             if (findObj(b, pn)) |pb| { ps2 = pb; pe2 = objDictEnd(b, pb); }
         }
         var q = ps2;
-        while (q < pe2 and props.room(prop_n + 1, 16)) {
+        while (q < pe2 and props.room(prop_n + 1)) {
             if (b[q] != '/') { q += 1; continue; }
             var nq = q + 1;
             while (nq < pe2 and !isSpace(b[nq]) and b[nq] != '/' and b[nq] != '>') nq += 1;
@@ -3991,7 +3988,7 @@ pub fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
             }
         }
         var q = gsx;
-        while (q < gex and gstates.room(gs_n + 1, 16)) {
+        while (q < gex and gstates.room(gs_n + 1)) {
             if (b[q] != '/') { q += 1; continue; }
             var nq = q + 1;
             while (nq < gex and !isSpace(b[nq]) and b[nq] != '/' and b[nq] != '>' and b[nq] != '<') nq += 1;
@@ -4185,7 +4182,7 @@ pub fn scanResources(b: []const u8, rs: usize, re_: usize, depth: u32) void {
                     const oe = objDictEnd(b, ob);
                     if (find(b[ob..oe], "/Form", 0) != null) {
                         formn.n += 1;
-                        if (forms.room(formn.n2 + 1, 16)) {
+                        if (forms.room(formn.n2 + 1)) {
                             const fo = &forms.all()[formn.n2];
                             const nl2 = @min(nm.len, 24);
                             var k2: usize = 0;
@@ -4374,7 +4371,7 @@ const NoteT = struct {
     obj: u32 = 0,
 };
 /// 사용자가 더한 것 — 세는 상한은 없다(자리잡개에서 늘어난다)
-pub var notes: Table(NoteT) = .{};
+pub var notes: Table(NoteT, 64) = .{};
 pub var note: struct {
     n: u32 = 0,
     buf: [64 * 1024]u8 = undefined,
@@ -4387,7 +4384,7 @@ export fn clearNotes() void { note.n = 0; note.used = 0; note.pt_n = 0; }
 export fn addNote(kind: u32, page: u32, x0: f32, y0: f32, x1: f32, y1: f32,
     r: f32, g: f32, b: f32) u32
 {
-    if (!growTable(&notes.at, &notes.cap, note.n, @sizeOf(NoteT), 64)) return 0;
+    if (!notes.room(note.n)) return 0;
     notes.all()[note.n] = .{
         .kind = @intCast(@min(kind, 6)), .page = page,
         .rect = .{ @min(x0, x1), @min(y0, y1), @max(x0, x1), @max(y0, y1) },
@@ -4501,7 +4498,7 @@ export fn setFieldEditMask(w: u32, h: u32, len: u32) u32 {
     return 1;
 }
 /// 사용자가 고친 입력 칸. 필요한 만큼 늘어난다(세는 상한 없음).
-pub var edits: Table(EditT) = .{};
+pub var edits: Table(EditT, 64) = .{};
 pub var edit: struct {
     n: u32 = 0,
     buf: [96 * 1024]u8 = undefined,
@@ -4511,7 +4508,7 @@ pub var edit: struct {
 export fn clearFieldEdits() void { edit.n = 0; edit.used = 0; maskt.used = 0; }
 /// kind 0 글상자 · 1 확인란 켜기 · 2 확인란 끄기 · 3 이름 바꾸기 · 4 지우기
 export fn addFieldEdit(obj: u32, kind: u32) u32 {
-    if (!edits.room(edit.n + 1, 64)) return 0;
+    if (!edits.room(edit.n + 1)) return 0;
     edits.all()[edit.n] = .{ .obj = obj, .kind = @intCast(@min(kind, 4)), .off = edit.used, .len = 0,
         .mw = 0, .mh = 0, .moff = 0, .mlen = 0 };
     edit.n += 1;
@@ -4574,7 +4571,7 @@ const NewFieldT = struct {
 };
 pub var newf: struct {
     /// 사용자가 더한 것 — 세는 상한은 없다(자리잡개에서 늘어난다)
-    items: Table(NewFieldT) = .{},
+    items: Table(NewFieldT, 32) = .{},
     n: u32 = 0,
     buf: [16 * 1024]u8 = undefined,
     used: u32 = 0,
@@ -4586,7 +4583,7 @@ export fn clearNewFields() void {
 }
 
 export fn addNewField(page: u32, kind: u32, x0: f32, y0: f32, x1: f32, y1: f32) u32 {
-    if (!growTable(&newf.items.at, &newf.items.cap, newf.n, @sizeOf(NewFieldT), 32)) return 0;
+    if (!newf.items.room(newf.n)) return 0;
     // 없는 쪽에 달라고 하면 그냥 안 단다. 예전에는 쪽 표가 [4096] 고정이라
     // 빈 자리(0)를 읽었지만, 지금은 그 뒤가 다른 표라 엉뚱한 번호를 집는다.
     if (page >= cpage.count) return 0;
@@ -5810,10 +5807,10 @@ fn collectInfo(b: []const u8) void {
 
 pub var link: struct {
     /// 쪽 하나의 링크. 세는 상한은 없다 — 필요한 만큼 늘어난다.
-    items: Table(Link) = .{},
+    items: Table(Link, 128) = .{},
     n: u32 = 0,
     /// link_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
-    buf: Table(u8) = .{},
+    buf: Table(u8, 16384) = .{},
     buf_n: u32 = 0,
 } = .{};
 pub const Link = struct { rect: [4]f32, off: u32, len: u32, page: i32 };
@@ -5828,10 +5825,10 @@ export fn linkTextPtr() [*]u8 { return @ptrFromInt(if (link.buf.at == 0) heapBas
 
 pub var mark: struct {
     /// 목차 줄 수. 세는 상한은 없다.
-    items: Table(Bookmark) = .{},
+    items: Table(Bookmark, 64) = .{},
     n: u32 = 0,
     /// mark_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
-    buf: Table(u8) = .{},
+    buf: Table(u8, 32768) = .{},
     buf_n: u32 = 0,
 } = .{};
 pub const Bookmark = struct { depth: u8, off: u32, len: u32, page: i32 };
@@ -6024,10 +6021,10 @@ const StructNode = struct {
 };
 var stru: struct {
     /// 태그 구조 나무의 마디. 세는 상한은 없다.
-    items: Table(StructNode) = .{},
+    items: Table(StructNode, 256) = .{},
     n: u32 = 0,
     /// st_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
-    buf: Table(u8) = .{},
+    buf: Table(u8, 32768) = .{},
     used: u32 = 0,
 } = .{};
 
@@ -6042,7 +6039,7 @@ export fn structAltLen(i: u32) u32 { return if (i < stru.n) stru.items.all()[i].
 export fn structTextPtr() [*]u8 { return @ptrFromInt(if (stru.buf.at == 0) heapBase() else stru.buf.at); }
 
 fn stPut(txt: []const u8) struct { off: u32, len: u16 } {
-    _ = stru.buf.room(stru.used + @as(u32, @intCast(txt.len)) + 64, 32768);
+    _ = stru.buf.room(stru.used + @as(u32, @intCast(txt.len)) + 64);
     if (txt.len == 0 or stru.used + txt.len > stru.buf.all().len or txt.len > 65535) return .{ .off = 0, .len = 0 };
     const off = stru.used;
     @memcpy(stru.buf.all()[off..][0..txt.len], txt);
@@ -6053,7 +6050,7 @@ fn stPut(txt: []const u8) struct { off: u32, len: u16 } {
 /// 구조 요소 하나와 그 아래를 훑는다. /K 는 숫자(MCID)·딕셔너리·배열 셋 다 온다.
 fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) void {
     if (depth > 32) return;
-    if (!growTable(&stru.items.at, &stru.items.cap, stru.n, @sizeOf(StructNode), 256)) return;
+    if (!stru.items.room(stru.n)) return;
     var node: StructNode = .{ .depth = depth, .page = page_hint };
 
     var tmp: [64]u8 = undefined;
@@ -6070,7 +6067,7 @@ fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) vo
     }
     // 대체 글(/Alt) — 그림에 붙는 설명이다
     if (keyPos(b, ob, oe, "/Alt")) |aa| {
-        _ = stru.buf.room(stru.used + 8192, 32768);
+        _ = stru.buf.room(stru.used + 8192);
         const n2 = copyPdfText(b, aa + 4, oe, stru.buf.all(), stru.used);
         if (n2 > 0) {
             node.alt_off = stru.used;
@@ -6365,18 +6362,18 @@ fn collectOpenAction(b: []const u8) void {
 /// 딸린 파일. 32 이던 것을 올렸다.
 /// 딸린 파일 표 셋을 함께 늘린다.
 fn attRoom(want: u32) bool {
-    return att.obj.room(want, 64) and att.name_off.room(want, 64) and att.name_len.room(want, 64);
+    return att.obj.room(want) and att.name_off.room(want) and att.name_len.room(want);
 }
 var att: struct {
     /// 딸린 파일의 객체 번호. 필요한 만큼 늘어난다(세는 상한 없음).
-    obj: Table(u32) = .{},
+    obj: Table(u32, 64) = .{},
     /// 그 이름 위치. 필요한 만큼 늘어난다(세는 상한 없음).
-    name_off: Table(u32) = .{},
+    name_off: Table(u32, 64) = .{},
     /// 그 이름 길이. 필요한 만큼 늘어난다(세는 상한 없음).
-    name_len: Table(u32) = .{},
+    name_len: Table(u32, 64) = .{},
     n: u32 = 0,
     /// att.buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
-    buf: Table(u8) = .{},
+    buf: Table(u8, 8192) = .{},
     used: u32 = 0,
     at: usize = 0,
 } = .{};
@@ -6432,7 +6429,7 @@ fn walkAttAt(b: []const u8, ob: usize, oe: usize, depth: u8) void {
         while (q < end and attRoom(att.n + 1) and guard < 4096) : (guard += 1) {
             while (q < end and b[q] != '(' and b[q] != '<') q += 1;
             if (q >= end) break;
-            _ = att.buf.room(att.used + 4096, 8192);
+            _ = att.buf.room(att.used + 4096);
             const nm = sigPutStrTo(b, q, end, att.buf.all(), &att.used);
             // 이름 뒤의 값이 파일 명세다
             q = skipVal(b, q, end);
@@ -6506,14 +6503,14 @@ fn checkXfa(b: []const u8) void {
 // template·datasets 같은 조각이 이름마다 따로 들어 있어 이어 붙여야 한다.
 // 여기서는 XML 을 통째로 꺼내 주고, 뜯어 그리는 것은 xfa.items.ts 가 한다.
 var xfa: struct {
-    items: Table(u8) = .{},
+    items: Table(u8, 65536) = .{},
     used: u32 = 0,
 } = .{};
 export fn xfaXmlLen() u32 { return xfa.used; }
 export fn xfaXmlPtr() usize { return if (xfa.items.at == 0) heapBase() else xfa.items.at; }
 
 fn xfaAppend(part: []const u8) void {
-    if (!growTable(&xfa.items.at, &xfa.items.cap, xfa.used + @as(u32, @intCast(part.len)) + 2, 1, 65536)) return;
+    if (!xfa.items.room(xfa.used + @as(u32, @intCast(part.len)) + 2)) return;
     const buf = xfa.items.all();
     @memcpy(buf[xfa.used..][0..part.len], part);
     xfa.used += @intCast(part.len);
@@ -6683,7 +6680,7 @@ pub const Shade = struct {
     stop_n: u8,
 };
 /// 이름 붙은 그늘. 필요한 만큼 늘어난다(세는 상한 없음).
-pub var shades: Table(Shade) = .{};
+pub var shades: Table(Shade, 16) = .{};
 pub var shade_n: u32 = 0;
 
 /// 타일 무늬는 아직 깔지 못한다. 대표 색만 뽑아 단색으로 칠한다 —
@@ -6700,39 +6697,39 @@ const Tile = struct {
     ystep: f32,
 };
 /// 이름 붙은 타일 무늬. 필요한 만큼 늘어난다(세는 상한 없음).
-pub var tiles: Table(Tile) = .{};
+pub var tiles: Table(Tile, 16) = .{};
 var tile_n: u32 = 0;
 
 var ocg: struct {
     /// 꺼 놓은 레이어(/OCProperties /D /OFF)의 객체 번호
     /// 레이어. 64 이던 것을 올렸다 — 도면은 그보다 많다.
     /// 레이어 객체 번호. 필요한 만큼 늘어난다(세는 상한 없음).
-    off_list: Table(u32) = .{},
+    off_list: Table(u32, 64) = .{},
     off_n: u32 = 0,
 } = .{};
 /// 이름 → 레이어 객체 (/Properties)
 const Prop = struct { name: [24]u8, name_len: u8, obj: u32 };
 /// 이름 붙은 레이어(/Properties). 필요한 만큼 늘어난다(세는 상한 없음).
-var props: Table(Prop) = .{};
+var props: Table(Prop, 16) = .{};
 var prop_n: u32 = 0;
 
 /// 레이어 목록 — 화면이 켜고 끌 수 있게 이름과 상태를 들고 있는다
 /// 레이어 표 넷을 함께 늘린다.
 fn ocRoom(want: u32) bool {
-    return oc.obj.room(want, 64) and oc.name_off.room(want, 64) and
-        oc.name_len.room(want, 64) and oc.on.room(want, 64);
+    return oc.obj.room(want) and oc.name_off.room(want) and
+        oc.name_len.room(want) and oc.on.room(want);
 }
 /// 레이어(optional content). 표들은 필요한 만큼 늘어난다(세는 상한 없음).
 var oc: struct {
     /// 레이어 객체 번호
-    obj: Table(u32) = .{},
+    obj: Table(u32, 64) = .{},
     /// 레이어 이름의 곳간 안 위치와 길이
-    name_off: Table(u32) = .{},
-    name_len: Table(u32) = .{},
+    name_off: Table(u32, 64) = .{},
+    name_len: Table(u32, 64) = .{},
     /// 레이어를 켜 두었나
-    on: Table(bool) = .{},
+    on: Table(bool, 64) = .{},
     /// 이름 글자 곳간
-    buf: Table(u8) = .{},
+    buf: Table(u8, 8192) = .{},
     n: u32 = 0,
     used: u32 = 0,
 } = .{};
@@ -6935,7 +6932,7 @@ fn cmap_pool() []u8 {
 }
 const CMapT = struct { name: [32]u8, name_len: u8, off: u32, len: u32 };
 /// 미리 정의된 CMap. 필요한 만큼 늘어난다(세는 상한 없음).
-var cmaps: Table(CMapT) = .{};
+var cmaps: Table(CMapT, 8) = .{};
 
 export fn cmapReset() void { cmapp.n = 0; cmapp.used = 0; }
 /// 다음 표를 적을 자리. 화면 쪽이 여기에 바이트를 넣고 cmapAdd 를 부른다.
@@ -6950,7 +6947,7 @@ export fn cmapRoom() u32 { return CMAP_POOL - cmapp.used; }
 /// 방금 cmapPtr 에 적은 len 바이트를, 목록의 idx 번째 이름으로 등록한다.
 /// 이름을 따로 넘기지 않는 건 받을 것이 늘 그 목록에서 나오기 때문이다.
 export fn cmapAdd(idx: u32, len: u32) u32 {
-    if (!cmaps.room(cmapp.n + 1, 8) or len == 0 or idx >= needs.n) return 0;
+    if (!cmaps.room(cmapp.n + 1) or len == 0 or idx >= needs.n) return 0;
     if (len > CMAP_POOL - cmapp.used) return 0;
     const nm = needs.buf[needs.off[idx]..][0..needs.lens[idx]];
     const t = &cmaps.all()[cmapp.n];
@@ -7252,7 +7249,7 @@ pub fn std14For(b: []const u8, fbody: usize, fend: usize) ?*const [256]u16 {
 
 pub fn widthOf(f: *const FontMap, code: u32) f32 {
     var i: u16 = 0;
-    while (i < f.wn) : (i += 1) if (u16buf(f.wcodes_at, f.wcodes_cap)[i] == code) return @floatFromInt(u16buf(f.wvals_at, f.wvals_cap)[i]);
+    while (i < f.wn) : (i += 1) if (f.wcodes.all()[i] == code) return @floatFromInt(f.wvals.all()[i]);
     // 표준 14종은 문서가 /Widths 를 안 적어도 된다. 그때는 Adobe 가 낸
     // AFM 값을 쓴다 — 없으면 글자마다 500 으로 잡아 자간이 통째로 어긋난다.
     if (f.std_w) |w| {
@@ -7266,8 +7263,8 @@ pub fn widthOf(f: *const FontMap, code: u32) f32 {
 pub fn pushWidth(f: *FontMap, code: u32, v: f32) void {
     if (code > 65535 or !widthRoom(f, f.wn + 1)) return;
     const c: f32 = @max(0, @min(65535, v));
-    u16buf(f.wcodes_at, f.wcodes_cap)[f.wn] = @intCast(code);
-    u16buf(f.wvals_at, f.wvals_cap)[f.wn] = @intFromFloat(c);
+    f.wcodes.all()[f.wn] = @intCast(code);
+    f.wvals.all()[f.wn] = @intFromFloat(c);
     f.wn += 1;
 }
 

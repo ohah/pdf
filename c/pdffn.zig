@@ -448,7 +448,7 @@ pub fn rgbFrom(comps: u32, v: [4]f32, out: *[3]f32) void {
 
 /// 셰이딩 딕셔너리 하나를 읽는다.
 pub fn readShade(b: []const u8, ds: usize, de: usize, name: []const u8) void {
-    if (!root.shades.room(root.shade_n + 1, 16)) return;
+    if (!root.shades.room(root.shade_n + 1)) return;
     const st2 = root.intAfter(b, ds, de, "/ShadingType") orelse return;
     if (st2 < 1 or st2 > 7) return;
     const sh = &root.shades.all()[root.shade_n];

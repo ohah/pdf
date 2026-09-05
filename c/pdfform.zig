@@ -17,7 +17,7 @@ const core = @import("pdf.zig");
 // 그려 둔 그림이다. 우리는 자리와 값을 꺼내 화면에 진짜 입력 칸을 얹고,
 // 만들 때 값과 겉모습을 다시 써 넣는다.
 /// 문서의 입력 칸. 세는 상한은 없다.
-var field: core.Table(FieldT) = .{};
+var field: core.Table(FieldT, 64) = .{};
 const FieldT = struct {
     obj: u32,
     rect: [4]f32,
@@ -45,7 +45,7 @@ const FieldT = struct {
 };
 pub var field_n: u32 = 0;
 /// fld_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
-pub var fld_buf: core.Table(u8) = .{};
+pub var fld_buf: core.Table(u8, 65536) = .{};
 pub var fld_used: u32 = 0;
 
 pub fn fieldCount() u32 { return field_n; }
@@ -72,7 +72,7 @@ pub fn fieldOptsOff(i: u32) u32 { return if (i < field_n) field.all()[i].opts_of
 pub fn fieldOptsLen(i: u32) u32 { return if (i < field_n) field.all()[i].opts_len else 0; }
 
 fn fldPut(bytes: []const u8) [2]u32 {
-    _ = fld_buf.room(fld_used + @as(u32, @intCast(bytes.len)) + 64, 65536);
+    _ = fld_buf.room(fld_used + @as(u32, @intCast(bytes.len)) + 64);
     const n: u32 = @intCast(@min(bytes.len, fld_buf.all().len - fld_used));
     if (n == 0) return .{ fld_used, 0 };
     @memcpy(fld_buf.all()[fld_used..][0..n], bytes[0..n]);
@@ -241,7 +241,7 @@ fn fieldScript(b: []const u8, num: u32, sub: []const u8) [2]u32 {
 }
 
 /// 셈하는 차례 (/AcroForm /CO). 값을 하나 고치면 이 차례로 다시 셈한다.
-var calc: core.Table(u32) = .{};
+var calc: core.Table(u32, 16) = .{};
 var calc_n: u32 = 0;
 pub fn calcOrderCount() u32 { return calc_n; }
 pub fn calcOrderObj(i: u32) u32 { return if (i < calc_n) calc.all()[i] else 0; }
@@ -276,7 +276,7 @@ pub fn collectCalcOrder(b: []const u8) void {
         if (q2 < end and core.isDigit(b[q2])) _ = core.readUint(b, &q2);
         while (q2 < end and core.isSpace(b[q2])) q2 += 1;
         if (q2 < end and b[q2] == 'R') q2 += 1;
-        if (!core.growTable(&calc.at, &calc.cap, calc_n + 1, 4, 16)) break;
+        if (!calc.room(calc_n + 1)) break;
         calc.all()[calc_n] = num;
         calc_n += 1;
     }
@@ -324,7 +324,7 @@ pub fn collectFields(b: []const u8, body: usize, end: usize) void {
         if (core.intAfter(b, ab, abe, "/F")) |fl| {
             if ((fl & 2) != 0) continue; // 숨김
         }
-        if (!core.growTable(&field.at, &field.cap, field_n, @sizeOf(FieldT), 64)) break;
+        if (!field.room(field_n)) break;
         const f = &field.all()[field_n];
         f.* = .{
             .obj = num, .rect = .{ 0, 0, 0, 0 }, .kind = 0, .flags = 0, .maxlen = 0,

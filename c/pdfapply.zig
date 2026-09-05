@@ -42,7 +42,7 @@ const LabelT = struct {
     mobj: u32 = 0,
 };
 /// 사용자가 더한 것 — 세는 상한은 없다(자리잡개에서 늘어난다)
-var labs: core.Table(LabelT) = .{};
+var labs: core.Table(LabelT, 32) = .{};
 var lab_n: u32 = 0;
 var lab_cp: [4096]u32 = undefined;
 var lab_cn: u32 = 0;
@@ -50,7 +50,7 @@ var lab_body: [16384]u8 = undefined;
 
 pub fn clearLabels() void { lab_n = 0; lab_cn = 0; }
 pub fn addLabel(page: u32, x: f32, y: f32, size: f32, r: f32, g: f32, bb: f32) u32 {
-    if (!core.growTable(&labs.at, &labs.cap, lab_n, @sizeOf(LabelT), 32)) return 0;
+    if (!labs.room(lab_n)) return 0;
     labs.all()[lab_n] = .{
         .page = page, .x = x, .y = y, .size = size,
         .col = .{ r, g, bb }, .off = @intCast(lab_cn), .n = 0,
