@@ -1,0 +1,74 @@
+{
+  "g-bs.pdf": {
+    "pages": 1,
+    "w": 200,
+    "h": 200,
+    "items": 0,
+    "ops": 14,
+    "imgs": 0,
+    "anns": 4,
+    "fields": 4,
+    "fonts": 0,
+    "text": ""
+  },
+  "g-interp.pdf": {
+    "pages": 1,
+    "w": 200,
+    "h": 200,
+    "items": 0,
+    "ops": 30,
+    "imgs": 2,
+    "anns": 0,
+    "fields": 0,
+    "fonts": 0,
+    "text": ""
+  },
+  "g-matte.pdf": {
+    "pages": 1,
+    "w": 200,
+    "h": 200,
+    "items": 0,
+    "ops": 29,
+    "imgs": 2,
+    "anns": 0,
+    "fields": 0,
+    "fonts": 0,
+    "text": ""
+  },
+  "g-radio.pdf": {
+    "pages": 1,
+    "w": 200,
+    "h": 200,
+    "items": 0,
+    "ops": 186,
+    "imgs": 0,
+    "anns": 2,
+    "fields": 2,
+    "fonts": 0,
+    "text": ""
+  },
+  "g-ti.pdf": {
+    "pages": 1,
+    "w": 200,
+    "h": 200,
+    "items": 0,
+    "ops": 14,
+    "imgs": 0,
+    "anns": 1,
+    "fields": 1,
+    "fonts": 0,
+    "text": ""
+  },
+  "g-vert-w2.pdf": {
+    "pages": 1,
+    "w": 200,
+    "h": 200,
+    "items": 1,
+    "ops": 78,
+    "imgs": 0,
+    "anns": 0,
+    "fields": 0,
+    "fonts": 1,
+    "text": "\u0001\u0002\u0001\u0002"
+  }
+}
