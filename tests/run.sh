@@ -30,6 +30,22 @@ FX="tests/fixtures"
 # 코드가 tail 의 것이라 늘 0 이고, 시험이 터져도 마지막 줄(스택 트레이스)에
 # "실패" 글자가 없어 통과로 셌다 — fontkey 를 일부러 터뜨렸더니 결과 자리에
 # "Node.js v26.8.1" 이 찍히고 "모두 통과" 가 나왔다.
+# 시험이 *몇 개나* 돌았는지 본다.
+#
+# 여태 "실패 [1-9]" 만 봤다. 그러면 시험이 조용히 적게 돌아도 통과다 —
+# 견본 디렉터리가 바뀌거나 앞에서 return 하면 "3개 중 통과 3, 실패 0" 이
+# 되고 run.sh 는 모두 통과라고 한다(실제로 383 → 3 으로 줄여 확인했다).
+# 앱 화면 시험은 예전에 같은 이유로 56 과 맞대게 고쳤는데, 엔진 쪽은
+# 그대로였다.
+#
+#   atleast <이름> <실제 수> <있어야 할 최소>
+atleast() {
+  if [ -z "$2" ] || [ "$2" -lt "$3" ] 2>/dev/null; then
+    echo "  $1 이 $3 개는 돌아야 하는데 ${2:-0} 개만 돌았다"
+    fail=1
+  fi
+}
+
 one() {
   if ONE_OUT=$("$@" 2>&1); then ONE_RC=0; else ONE_RC=$?; fi
   ONE_LAST=$(printf '%s' "$ONE_OUT" | tail -1)
@@ -104,6 +120,13 @@ for pass in $(seq 1 "$N"); do
   echo "        ${pl# } | ${sg# } | ${nd# } | ${ty# } | ${tc# }"
   echo "        API ${ap# } | ${rg# } | ${fj# } | ${xf# } | ${jm# } | ${fk# } | ${gp# }"
   if [ "$ex" != 0 ] || [ "$slow" != 0 ]; then echo "$adv" | grep -E '예외|⚠'; fail=1; fi
+  # 개수를 못 박는다 — 줄어들면 잡는다. 늘어나는 것은 막지 않는다.
+  atleast "기능 단언" "$(printf '%s' "$fn" | grep -oE '기능 단언 [0-9]+' | grep -oE '[0-9]+')" 380
+  atleast "적대적" "$n" 600
+  atleast "Node" "$(printf '%s' "$nd" | grep -oE '통과 [0-9]+' | tail -1 | grep -oE '[0-9]+')" 55
+  atleast "빈틈" "$(printf '%s' "$gp" | grep -oE '빈틈 [0-9]+' | grep -oE '[0-9]+')" 18
+  atleast "글꼴 열쇠" "$(printf '%s' "$fk" | grep -oE '글꼴 열쇠 [0-9]+' | grep -oE '[0-9]+')" 5
+  atleast "서명" "$(printf '%s' "$sg" | grep -oE '서명 [0-9]+' | grep -oE '[0-9]+')" 30
   if echo "$fn" | grep -qE '실패 [1-9]'; then echo "$fn"; fail=1; fi
   if echo "$ln$pl$sg" | grep -qE '실패 [1-9]'; then echo "$ln"; echo "$pl"; echo "$sg"; fail=1; fi
   if echo "$nd" | grep -qE '실패 [1-9]'; then echo "$nd"; fail=1; fi
