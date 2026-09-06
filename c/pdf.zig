@@ -795,6 +795,28 @@ pub fn findObj(b: []const u8, num: u32) ?usize {
     return best;
 }
 
+/// 쪽의 /Annots 배열이 놓인 자리. 없으면 null.
+///
+/// 배열이 딕셔너리에 바로 박혀 있을 수도 있고, 딴 객체를 가리킬 수도 있다.
+/// 이 열여덟 줄이 세 군데(collectFields·drawAnnots·collectAnnots)에 글자까지
+/// 똑같이 있었다. 셋이 따로 있으면 한쪽만 고쳐질 수 있다.
+pub fn annotsRange(b: []const u8, body: usize, end: usize) ?struct { s: usize, e: usize } {
+    const aa = find(b[body..end], "/Annots", 0) orelse return null;
+    var p = body + aa + 7;
+    while (p < end and isSpace(b[p])) p += 1;
+    if (p < end and b[p] == '[') return .{ .s = p + 1, .e = arrayEnd(b, p, end) };
+    if (p < end and isDigit(b[p])) {
+        const an = readUint(b, &p);
+        if (findObj(b, an)) |ab| {
+            const abe = find(b, "endobj", ab) orelse b.len;
+            var q = ab;
+            while (q < abe and b[q] != '[') q += 1;
+            return .{ .s = q + 1, .e = arrayEnd(b, q, abe) };
+        }
+    }
+    return null;
+}
+
 /// 객체 딕셔너리의 끝. stream 이 먼저 오면 거기까지다.
 ///
 /// "stream" 을 그냥 앞에서부터 찾으면 그 객체에 스트림이 없을 때 다음 객체의

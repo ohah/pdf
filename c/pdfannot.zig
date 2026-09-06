@@ -58,26 +58,10 @@ pub fn annDateLen(i: u32) u32 { return if (i < ann_n) ann.all()[i].dt_len else 0
 pub fn collectAnnots(b: []const u8, body: usize, end: usize) void {
     ann_n = 0;
     ann_used = 0;
-    const aa = core.find(b[body..end], "/Annots", 0) orelse return;
-    var p = body + aa + 7;
-    while (p < end and core.isSpace(b[p])) p += 1;
-    var as2 = p;
-    var ae = end;
-    if (p < end and b[p] == '[') {
-        as2 = p + 1;
-        ae = core.arrayEnd(b, p, end);
-    } else if (p < end and core.isDigit(b[p])) {
-        const an = core.readUint(b, &p);
-        if (core.findObj(b, an)) |ab| {
-            const abe = core.find(b, "endobj", ab) orelse b.len;
-            var q = ab;
-            while (q < abe and b[q] != '[') q += 1;
-            as2 = q + 1;
-            ae = core.arrayEnd(b, q, abe);
-        } else return;
-    } else return;
+    const arr = core.annotsRange(b, body, end) orelse return;
+    const ae = arr.e;
 
-    var q = as2;
+    var q = arr.s;
     while (q < ae) {
         if (!ann.room(ann_n)) break;
         while (q < ae and core.isSpace(b[q])) q += 1;

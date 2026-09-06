@@ -283,26 +283,10 @@ pub fn collectCalcOrder(b: []const u8) void {
 }
 
 pub fn collectFields(b: []const u8, body: usize, end: usize) void {
-    const aa = core.find(b[body..end], "/Annots", 0) orelse return;
-    var p = body + aa + 7;
-    while (p < end and core.isSpace(b[p])) p += 1;
-    var as2 = p;
-    var ae = end;
-    if (p < end and b[p] == '[') {
-        as2 = p + 1;
-        ae = core.arrayEnd(b, p, end);
-    } else if (p < end and core.isDigit(b[p])) {
-        const an = core.readUint(b, &p);
-        if (core.findObj(b, an)) |ab| {
-            const abe = core.find(b, "endobj", ab) orelse b.len;
-            var q2 = ab;
-            while (q2 < abe and b[q2] != '[') q2 += 1;
-            as2 = q2 + 1;
-            ae = core.arrayEnd(b, q2, abe);
-        } else return;
-    } else return;
+    const arr = core.annotsRange(b, body, end) orelse return;
+    const ae = arr.e;
 
-    var q = as2;
+    var q = arr.s;
     var count: u32 = 0;
     // /Annots 를 훑는 횟수. 1024 이던 것을 올렸다 — 링크·주석이 앞에 많이
     // 붙은 쪽에서는 뒤에 있는 입력 칸까지 차례가 안 갔다(링크 300 + 주석
@@ -507,26 +491,10 @@ var form_layer: bool = false;
 pub fn setFormLayer(on: u32) void { form_layer = on != 0; }
 
 pub fn drawAnnots(b: []const u8, body: usize, end: usize) void {
-    const aa = core.find(b[body..end], "/Annots", 0) orelse return;
-    var p = body + aa + 7;
-    while (p < end and core.isSpace(b[p])) p += 1;
-    var as2 = p;
-    var ae = end;
-    if (p < end and b[p] == '[') {
-        as2 = p + 1;
-        ae = core.arrayEnd(b, p, end);
-    } else if (p < end and core.isDigit(b[p])) {
-        const an = core.readUint(b, &p);
-        if (core.findObj(b, an)) |ab| {
-            const abe = core.find(b, "endobj", ab) orelse b.len;
-            var q = ab;
-            while (q < abe and b[q] != '[') q += 1;
-            as2 = q + 1;
-            ae = core.arrayEnd(b, q, abe);
-        } else return;
-    } else return;
+    const arr = core.annotsRange(b, body, end) orelse return;
+    const ae = arr.e;
 
-    var q = as2;
+    var q = arr.s;
     var count: u32 = 0;
     while (q < ae and count < 256) {
         while (q < ae and core.isSpace(core.q_at(b, q))) q += 1;
