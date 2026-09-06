@@ -814,27 +814,30 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
     list.some((c) => Math.abs(c[0] - want[0]) < tol && Math.abs(c[1] - want[1]) < tol && Math.abs(c[2] - want[2]) < tol);
 
   {
-    // 표본 함수를 안 읽던 때는 빨강→파랑이 회색 띠가 됐다
+    // 표본 함수를 안 읽던 때는 빨강→파랑이 회색 띠가 됐다.
+    // 마디는 8개였는데 32로 늘렸다 — CalRGB 처럼 변환이 비선형이고 0 에서
+    // 잘리는 색 공간에서는 8개 사이를 직선으로 이으면 잘리는 자리가
+    // 뭉개진다(v-cal 이 pdf.js 와 1.67% 달랐고, 32에서 0.00 이 됐다).
     const r = await load('fn0.pdf');
     const { stops } = colorsOf(r);
-    ok('표본 함수: 마디 8개', stops.length === 8, stops.length);
+    ok('표본 함수: 마디 32개', stops.length === 32, stops.length);
     ok('표본 함수: 빨강에서 시작', near([stops[0]], [1, 0, 0], 0.05), stops[0]?.join());
-    ok('표본 함수: 파랑에서 끝', near([stops[7]], [0, 0, 1], 0.05), stops[7]?.join());
+    ok('표본 함수: 파랑에서 끝', near([stops.at(-1)], [0, 0, 1], 0.05), stops.at(-1)?.join());
   }
   {
     // 계산기 함수 — { dup 1 exch sub 0.5 } 는 t 를 (t, 1-t, 0.5) 로 만든다
     const r = await load('fn4.pdf');
     const { stops } = colorsOf(r);
-    ok('계산기 함수: 마디 8개', stops.length === 8, stops.length);
+    ok('계산기 함수: 마디 32개', stops.length === 32, stops.length);
     ok('계산기 함수: 처음 (0,1,0.5)', near([stops[0]], [0, 1, 0.5], 0.02), stops[0]?.join());
-    ok('계산기 함수: 끝 (1,0,0.5)', near([stops[7]], [1, 0, 0.5], 0.02), stops[7]?.join());
+    ok('계산기 함수: 끝 (1,0,0.5)', near([stops.at(-1)], [1, 0, 0.5], 0.02), stops.at(-1)?.join());
   }
   {
     // 성분마다 함수가 따로인 경우
     const r = await load('fnarr.pdf');
     const { stops } = colorsOf(r);
     ok('함수 배열: 처음 (0,1,0.25)', near([stops[0]], [0, 1, 0.25], 0.02), stops[0]?.join());
-    ok('함수 배열: 끝 (1,0,0.75)', near([stops[7]], [1, 0, 0.75], 0.02), stops[7]?.join());
+    ok('함수 배열: 끝 (1,0,0.75)', near([stops.at(-1)], [1, 0, 0.75], 0.02), stops.at(-1)?.join());
   }
   {
     const r = await load('sh1.pdf');

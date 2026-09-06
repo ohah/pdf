@@ -27,7 +27,7 @@ const BLENDS = [
 function gradientFrom(g: CanvasRenderingContext2D, ops: Float32Array, a: number) {
   const kind = ops[a];
   const c = [ops[a + 1], ops[a + 2], ops[a + 3], ops[a + 4], ops[a + 5], ops[a + 6]];
-  const n = Math.max(0, Math.min(8, ops[a + 9]));
+  const n = Math.max(0, Math.min(32, ops[a + 9]));
   let grad: CanvasGradient;
   try {
     grad = kind === 2

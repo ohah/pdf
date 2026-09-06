@@ -7028,7 +7028,7 @@ pub const Shade = struct {
     coords: [6]f32,
     ext0: bool,
     ext1: bool,
-    stops: [8 * 4]f32, // t,r,g,b × 8
+    stops: [32 * 4]f32, // t,r,g,b × 32
     stop_n: u8,
 };
 /// 이름 붙은 그늘. 필요한 만큼 늘어난다(세는 상한 없음).

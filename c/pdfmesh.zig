@@ -459,7 +459,7 @@ fn emitShadeGrad(sh: *const root.Shade, code: f32) void {
     // 10 + 마디 8개 × 4 = 42 칸이 필요하다. 40 으로 두었더니 마지막 마디의
     // 뒤 두 칸이 배열 밖이었고(ReleaseSmall 이라 경계 검사도 없다), 자르는
     // 길이도 arg[0..42] 라 스택 8바이트를 그대로 실어 보냈다.
-    var arg: [10 + 8 * 4]f32 = undefined;
+    var arg: [10 + 32 * 4]f32 = undefined;
     arg[0] = @floatFromInt(sh.kind);
     var i: u32 = 0;
     while (i < 6) : (i += 1) arg[1 + i] = sh.coords[i];
@@ -467,7 +467,7 @@ fn emitShadeGrad(sh: *const root.Shade, code: f32) void {
     arg[8] = if (sh.ext1) 1 else 0;
     arg[9] = @floatFromInt(sh.stop_n);
     var k: u32 = 0;
-    while (k < sh.stop_n and k < 8) : (k += 1) {
+    while (k < sh.stop_n and k < 32) : (k += 1) {
         arg[10 + k * 4] = sh.stops[k * 4];
         arg[11 + k * 4] = sh.stops[k * 4 + 1];
         arg[12 + k * 4] = sh.stops[k * 4 + 2];

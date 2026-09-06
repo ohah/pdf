@@ -564,8 +564,8 @@ pub fn readShade(b: []const u8, ds: usize, de: usize, name: []const u8) void {
 
     if (fe <= fs) return;
     i = 0;
-    while (i < 8) : (i += 1) {
-        const t = @as(f32, @floatFromInt(i)) / 7;
+    while (i < 32) : (i += 1) {
+        const t = @as(f32, @floatFromInt(i)) / (32 - 1);
         var v: [4]f32 = .{ 0, 0, 0, 0 };
         const nc = shadeFn(b, sh, t, &v);
         var rgb3: [3]f32 = .{ 0, 0, 0 };
@@ -579,7 +579,7 @@ pub fn readShade(b: []const u8, ds: usize, de: usize, name: []const u8) void {
         sh.stops[i * 4 + 2] = c3[1];
         sh.stops[i * 4 + 3] = c3[2];
     }
-    sh.stop_n = 8;
+    sh.stop_n = 32;
     root.shade_n += 1;
 }
 
