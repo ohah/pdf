@@ -1612,6 +1612,47 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   ok('AESV3 로 잠근다', out.includes('/CFM /AESV3'), out.includes('/CFM /AESV3'));
 }
 
+// ── 우리가 쓴 파일의 머리와 워터마크 한도
+//
+// 고장 내기로 알았다 — compact 의 머리를 %PDF-1.7 에서 1.4 로 바꿔도 아무
+// 시험도 안 걸렸다. 1.4 는 객체 스트림도 AES-256 도 없던 판이라, 그렇게
+// 적으면 규격에 안 맞는 파일이 된다.
+//
+// apply 는 증분 갱신이라 원본 머리를 그대로 둬야 한다 — 바꾸면 앞부분과
+// 어긋난다. 둘은 서로 다른 규칙이고, 둘 다 아무도 안 봤다.
+{
+  const mk = async (fn, pre) => {
+    const m = await WebAssembly.instantiate(wasm, { wasi_snapshot_preview1: new Proxy({}, { get: () => () => 0 }) });
+    const ex = m.instance.exports;
+    const buf = fs.readFileSync(`${S}/korean.pdf`);
+    ex.reserve(buf.length, buf.length * 3 + 201326592);
+    new Uint8Array(ex.memory.buffer, ex.inputPtr(), buf.length).set(buf);
+    ex.parse(buf.length);
+    ex.clearPick();
+    for (let i = 0; i < ex.pageCount(); i++) ex.addPick(i);
+    ex.setRotate(0); ex.clearWatermark(); ex.clearLabels(); ex.clearFieldEdits();
+    ex.clearPageRotate(); ex.clearNotes();
+    if (pre) pre(ex);
+    const n = ex[fn]();
+    return Buffer.from(new Uint8Array(ex.memory.buffer, ex.outputPtr(), n)).toString('latin1');
+  };
+  const src = fs.readFileSync(`${S}/korean.pdf`).toString('latin1').slice(0, 9);
+  const a = await mk('apply');
+  const c = await mk('compact');
+  ok('apply 는 원본 머리를 그대로 둔다', a.startsWith(src), JSON.stringify(a.slice(0, 9)));
+  ok('compact 는 %PDF-1.7 로 쓴다', c.startsWith('%PDF-1.7'), JSON.stringify(c.slice(0, 9)));
+
+  // 워터마크 64자가 잘리지 않고 다 나가는가.
+  //
+  // 이것은 아스키 곳간(wm.items)을 못 박는다. 코드포인트 곳간(wm.cp)은 따로
+  // 있고 라틴 문구에는 안 쓰이므로, 그 한도를 한 자 줄여도 여기서는 안
+  // 걸린다 — 고장 내기로 확인했다. 그 자리는 아직 안 덮인 채로 둔다.
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-';
+  const wm = await mk('apply', (ex) => { for (const ch of chars) ex.addWatermarkChar(ch.codePointAt(0)); });
+  ok('워터마크 64자가 다 나간다', chars.length === 64 && wm.includes(chars),
+    `${chars.length}자 · 담김 ${wm.includes(chars)}`);
+}
+
 console.log(`  기능 단언 ${pass + fail}개 중 통과 ${pass}, 실패 ${fail}`);
 if (bad.length) bad.forEach((b3) => console.log('    ✗ ' + b3));
 process.exit(fail ? 1 : 0);
