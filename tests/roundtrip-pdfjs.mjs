@@ -40,6 +40,10 @@ for (const r of rows) {
   if (r.oursInk > 0.5 && r.theirsInk < r.oursInk * 0.5)
     bad.push(`${r.name}: pdf.js 가 훨씬 덜 그렸다 (우리 ${r.oursInk.toFixed(2)}% / 저쪽 ${r.theirsInk.toFixed(2)}%)`);
 }
+// 견본이 조용히 줄면 "문제 0개" 로 통과한다 — 실패의 증거만 찾고 성공의
+// 증거는 안 봤기 때문이다. 바닥값을 둔다.
+const MIN_DOCS = 10;
+if (rows.length < MIN_DOCS) bad.push(`견본이 ${MIN_DOCS}개는 돼야 하는데 ${rows.length}개만 돌았다`);
 console.log(`\n견본 ${rows.length}개 · 문제 ${bad.length}개`);
 for (const x of bad) console.log("  ✗ " + x);
 process.exit(bad.length ? 1 : 0);

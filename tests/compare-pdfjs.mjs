@@ -61,4 +61,29 @@ if (errs.length) {
   console.log(`\n못 연 것 ${errs.length}개:`);
   for (const r of errs) console.log(`  ${r.name}: ${r.err}`);
 }
-if (oursBlank.length) process.exit(1);
+// 실패의 증거만 찾지 않고, 성공의 증거를 요구한다.
+//
+// 여태 "우리가 못 그린 쪽" 이 있을 때만 1 로 끝났다. 그러면 견본이 조용히
+// 줄거나 맞댈 수 있는 수가 무너져도 통과다 — 견본 디렉터리가 바뀌거나
+// 브라우저가 반쯤 죽어도 "OK" 로 적힌다. 실제로 vite 가 안 떠 이 시험이
+// 종료 코드 1 로 죽었는데 검증 실행기가 "pdfjs OK" 라고 적은 일이 있다.
+//
+// 바닥값은 지금 수(견본 139 · 맞댄 것 129)보다 넉넉히 낮게 둔다. 견본을
+// 더 넣는 것은 막지 않고, 무너지는 것만 잡는다.
+const MIN_DOCS = 130;
+const MIN_REAL = 120;
+let bad = 0;
+if (rows.length < MIN_DOCS) {
+  console.log(`\n✗ 견본이 ${MIN_DOCS}개는 돼야 하는데 ${rows.length}개만 돌았다`);
+  bad = 1;
+}
+if (real.length < MIN_REAL) {
+  console.log(`\n✗ 맞댈 수 있는 것이 ${MIN_REAL}개는 돼야 하는데 ${real.length}개다`);
+  bad = 1;
+}
+if (errs.length) {
+  console.log(`\n✗ 못 연 것이 ${errs.length}개 있다 — 견본이 규격에 안 맞거나 우리가 못 연다`);
+  bad = 1;
+}
+if (oursBlank.length) bad = 1;
+process.exit(bad);
