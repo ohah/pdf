@@ -382,27 +382,35 @@ fn paintPatchMesh(sh: *const root.Shade) void {
 fn paintFnShade(sh: *const root.Shade) void {
     if (sh.fe <= sh.fs) return;
     const b = root.doc.items;
+    // 예전에는 24×24 단색 사각형으로 메웠다. 두 가지가 잘못됐다 — 색이 띠로
+    // 뚝뚝 끊기고(pdf.js 는 매끄럽다), 칸마다 2% 크게 그려 겹치는 바람에
+    // 경계마다 이음매가 남았다. 녹색이 0 이어야 할 자리에 22 가 찍혔다.
+    // 칸을 잘게 해도 안 낫는다 — 오히려 나빠진다(24→48→96 에서 크게다름이
+    // 4.18 → 12.14 → 26.68 으로 늘었다). 이음매가 띠보다 크기 때문이다.
+    //
+    // 그래서 값만 N×N 으로 보내고 사이는 캔버스가 잇게 한다.
+    const N: u32 = 32;
     root.emitOp(14, &[_]f32{});
     root.emitOp(16, &[_]f32{ sh.mat[0], sh.mat[1], sh.mat[2], sh.mat[3], sh.mat[4], sh.mat[5] });
-    const N: u32 = 24;
-    const fx = @as(f32, @floatFromInt(N));
-    var i: u32 = 0;
-    while (i < N) : (i += 1) {
-        var j: u32 = 0;
-        while (j < N) : (j += 1) {
-            const x0 = sh.dom[0] + (sh.dom[1] - sh.dom[0]) * @as(f32, @floatFromInt(i)) / fx;
-            const x1 = sh.dom[0] + (sh.dom[1] - sh.dom[0]) * @as(f32, @floatFromInt(i + 1)) / fx;
-            const y0 = sh.dom[2] + (sh.dom[3] - sh.dom[2]) * @as(f32, @floatFromInt(j)) / fx;
-            const y1 = sh.dom[2] + (sh.dom[3] - sh.dom[2]) * @as(f32, @floatFromInt(j + 1)) / fx;
+    root.emitOp(37, &[_]f32{ sh.dom[0], sh.dom[1], sh.dom[2], sh.dom[3], @floatFromInt(N) });
+    var row: [32 * 3]f32 = undefined;
+    var j: u32 = 0;
+    while (j < N) : (j += 1) {
+        // 칸 한가운데가 아니라 격자점에서 찍는다. 사이는 이어 그리므로
+        // 가장자리까지 값이 맞아야 한다.
+        const y = sh.dom[2] + (sh.dom[3] - sh.dom[2]) * @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(N - 1));
+        var i: u32 = 0;
+        while (i < N) : (i += 1) {
+            const x = sh.dom[0] + (sh.dom[1] - sh.dom[0]) * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(N - 1));
             var v: [4]f32 = .{ 0, 0, 0, 0 };
-            const nc = root.evalFnN(b, sh.fs, sh.fe, &[_]f32{ (x0 + x1) / 2, (y0 + y1) / 2 }, &v);
-            if (nc == 0) continue;
+            const nc = root.evalFnN(b, sh.fs, sh.fe, &[_]f32{ x, y }, &v);
             var rgb3: [3]f32 = .{ 0, 0, 0 };
-            root.rgbFrom(nc, v, &rgb3);
-            root.emitOp(11, &[_]f32{ rgb3[0], rgb3[1], rgb3[2] });
-            root.emitOp(5, &[_]f32{ x0, y0, (x1 - x0) * 1.02, (y1 - y0) * 1.02 });
-            root.emitOp(6, &[_]f32{0});
+            if (nc != 0) root.rgbFrom(nc, v, &rgb3);
+            row[i * 3] = rgb3[0];
+            row[i * 3 + 1] = rgb3[1];
+            row[i * 3 + 2] = rgb3[2];
         }
+        root.emitOp(38, row[0 .. N * 3]);
     }
     root.emitOp(15, &[_]f32{});
 }

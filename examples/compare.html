@@ -72,7 +72,10 @@ async function theirs(bytes, pageNo, cv) {
   return n;
 }
 
-const DOCS = (new URLSearchParams(location.search).get("docs") || "").split(",").filter(Boolean);
+const Q = new URLSearchParams(location.search);
+const DOCS = (Q.get("docs") || "").split(",").filter(Boolean);
+// 세 방향으로 가릴 때만 그림을 내준다. 146개를 늘 담으면 무겁다.
+const WANT_PNG = Q.get("png") === "1";
 const rows = [];
 const A = document.getElementById("a"), B = document.getElementById("b");
 for (const name of DOCS) {
@@ -87,6 +90,7 @@ for (const name of DOCS) {
       const ga = A.getContext("2d").getImageData(0, 0, A.width, A.height).data;
       const gb = B.getContext("2d").getImageData(0, 0, B.width, B.height).data;
       Object.assign(row, stats(ga, gb, A.width, A.height), { w: A.width, h: A.height });
+      if (WANT_PNG) { row.pngA = A.toDataURL(); row.pngB = B.toDataURL(); }
     }
   } catch (e) {
     row.err = String(e?.message ?? e).slice(0, 90);

@@ -804,6 +804,8 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
       const k = o[i], n = o[i + 1];
       if (k === 11) cols.push([o[i + 2], o[i + 3], o[i + 4]]);
       if (k === 27) { const m = o[i + 11]; for (let j = 0; j < m; j++) stops.push([o[i + 13 + j * 4], o[i + 14 + j * 4], o[i + 15 + j * 4]]); }
+      // 1형 셰이딩은 줄(38)로 온다. 예전에는 칸마다 칠하기 색(11)이었다.
+      if (k === 38) for (let j = 0; j + 2 < n; j += 3) cols.push([o[i + 2 + j], o[i + 3 + j], o[i + 4 + j]]);
       i += 2 + n;
     }
     return { cols, stops };
@@ -837,7 +839,11 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   {
     const r = await load('sh1.pdf');
     const { cols } = colorsOf(r);
-    ok('셰이딩 1형: 격자를 메움', r.counts[6] === 576, r.counts[6]);
+    // 값만 32×32 로 보내고 사이는 캔버스가 잇는다. 예전에는 24×24 단색
+    // 사각형으로 메웠는데, 칸 경계마다 이음매가 남아 pdf.js 와 4.18% 달랐다.
+    let rows = 0, head = 0;
+    for (let i = 0; i < r.ops.length;) { const k = r.ops[i]; if (k === 37) head = r.ops[i + 6]; if (k === 38) rows++; i += 2 + r.ops[i + 1]; }
+    ok('셰이딩 1형: 32줄로 보낸다', rows === 32 && head === 32, `줄 ${rows} 머리 ${head}`);
     ok('셰이딩 1형: x 가 빨강', near(cols, [0.67, 0, 0], 0.12), cols.length);
     ok('셰이딩 1형: y 가 파랑', near(cols, [0, 0, 0.67], 0.12));
   }

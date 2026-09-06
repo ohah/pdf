@@ -14,6 +14,7 @@ export const OP = {
   TILE_BEGIN: 35, TILE_END: 36,
   LINECAP: 19, LINEJOIN: 20, ALPHA: 21, INLINE: 22, SALPHA: 23, DASH: 24,
   MITER: 25, BLEND: 26, SHFILL: 27, SHCOLOR: 28,
+  FNSHADE: 37, FNROW: 38,
 } as const;
 
 const BLENDS = [
@@ -439,11 +440,14 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
   const guard = ops.length + 16;
   let steps = 0;
 
+  /** 1형 셰이딩을 한 줄씩 받아 모으는 중. 다 받으면 그려서 비운다. */
+  let fnShade: { x0: number; x1: number; y0: number; y1: number; n: number; row: number; px: ImageData | null } | null = null;
   while (i + 1 < ops.length && steps++ < guard) {
     const code = ops[i];
     const argc = ops[i + 1];
     const a = i + 2;
     i = a + argc;
+
 
     switch (code) {
       case OP.SAVE: g.save(); fillStack.push(fillCss); depth++; break;
@@ -670,6 +674,43 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
           g.fillStyle = grad;
           g.fillRect(-100000, -100000, 200000, 200000);
           g.restore();
+        }
+        break;
+      }
+      // 1형(함수) 셰이딩. 값만 N×N 으로 받고 사이는 캔버스가 잇는다 —
+      // 예전에는 엔진이 단색 사각형 24×24 로 메워 띠와 이음매가 남았다.
+      case OP.FNSHADE: {
+        fnShade = { x0: ops[a], x1: ops[a + 1], y0: ops[a + 2], y1: ops[a + 3],
+                    n: ops[a + 4] | 0, row: 0, px: null };
+        const n = fnShade.n;
+        fnShade.px = new ImageData(n, n);
+        break;
+      }
+      case OP.FNROW: {
+        const f = fnShade;
+        if (!f || !f.px || f.row >= f.n) break;
+        const d = f.px.data;
+        for (let i = 0; i < f.n; i++) {
+          const o = (f.row * f.n + i) * 4;
+          d[o] = Math.round(Math.max(0, Math.min(1, ops[a + i * 3])) * 255);
+          d[o + 1] = Math.round(Math.max(0, Math.min(1, ops[a + i * 3 + 1])) * 255);
+          d[o + 2] = Math.round(Math.max(0, Math.min(1, ops[a + i * 3 + 2])) * 255);
+          d[o + 3] = 255;
+        }
+        f.row++;
+        if (f.row === f.n) {
+          // 작은 그림을 도메인 사각형에 늘여 그린다. 늘이는 일은 캔버스가
+          // 겹선 없이 해 준다 — 사각형을 나열하면 경계마다 이음매가 남았다.
+          const c = scratch(f.n, f.n, g.canvas as unknown as { constructor: unknown });
+          const cg = c?.getContext("2d") as CanvasRenderingContext2D | null;
+          if (c && cg) {
+            cg.putImageData(f.px, 0, 0);
+            const sm = g.imageSmoothingEnabled;
+            g.imageSmoothingEnabled = true;
+            g.drawImage(c as unknown as CanvasImageSource, f.x0, f.y0, f.x1 - f.x0, f.y1 - f.y0);
+            g.imageSmoothingEnabled = sm;
+          }
+          fnShade = null;
         }
         break;
       }
