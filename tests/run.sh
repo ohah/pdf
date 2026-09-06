@@ -75,7 +75,9 @@ for pass in $(seq 1 "$N"); do
   pl=$(bun run tests/place.ts)
   sg=$(bun run tests/sig.ts)
   nd=$(node tests/node.mjs "$FX" 2>&1 || true)
-  ap=$(node tests/api-adv.mjs "$pass" "$FX" 2>&1 || true)
+  one node tests/api-adv.mjs "$pass" "$FX"
+  ap="$ONE_OUT"
+  ap_rc="$ONE_RC"
   one node tests/range.mjs
   rg="$ONE_LAST"
   if [ "$ONE_RC" != 0 ]; then
@@ -134,7 +136,14 @@ for pass in $(seq 1 "$N"); do
   if echo "$fk" | grep -qE '실패 [1-9]'; then node tests/fontkey.mjs 2>&1 | head -4; fail=1; fi
   if echo "$gp" | grep -qE '실패 [1-9]'; then node tests/gap.mjs "$FX" 2>&1 | tail -5; fail=1; fi
   if echo "$ty" | grep -qE '실패 [1-9]'; then echo "$ty"; fail=1; fi
-  if echo "$ap" | grep -q '✗'; then echo "$ap"; fail=1; fi
+  # 성공한 흔적이 *있는지* 부터 본다.
+  #
+  # 예전에는 '✗ 가 없으면 통과' 였다. 터지면 ✗ 도 없으니 그대로 통과였다 —
+  # 같은 꼴이 내 검증 실행기에도 있어, vite 가 안 떠 compare 가 죽었는데
+  # "pdfjs OK" 로 적힌 일이 있다.
+  if [ "$ap_rc" != 0 ] || ! echo "$ap" | grep -q '내보낸 함수'; then
+    echo "  api-adv.mjs 가 제대로 안 돌았다 (exit $ap_rc)"; printf '%s\n' "$ap" | tail -5; fail=1
+  elif echo "$ap" | grep -q '✗'; then echo "$ap"; fail=1; fi
 done
 [ "$fail" = 0 ] || { echo "실패한 항목이 있다."; exit 1; }
 echo "모두 통과."
