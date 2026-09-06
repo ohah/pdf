@@ -1585,6 +1585,33 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   ok('JBIG2: 안 가리키는 사전이 앞 글자를 물려받지 않는다', w.join(',') === '5,6,6', w.join(','));
 }
 
+// ── 우리가 잠근 파일의 암호 딕셔너리가 규격대로인가
+//
+// 고장 내기로 알았다 — /Length 256 을 128 로 바꿔도 아무 시험도 안 걸렸다.
+// 읽는 쪽 견본(enc-aes256.pdf)은 있는데 *쓰는 쪽* 을 보는 단언이 없었다.
+// 암호는 compact() 만 건다. apply() 는 안 건다.
+{
+  const m = await WebAssembly.instantiate(wasm, { wasi_snapshot_preview1: new Proxy({}, { get: () => () => 0 }) });
+  const ex = m.instance.exports;
+  const buf = fs.readFileSync(`${S}/korean.pdf`);
+  ex.reserve(buf.length, buf.length * 3 + 201326592);
+  new Uint8Array(ex.memory.buffer, ex.inputPtr(), buf.length).set(buf);
+  ex.parse(buf.length);
+  ex.clearPick();
+  for (let i = 0; i < ex.pageCount(); i++) ex.addPick(i);
+  ex.setRotate(0); ex.clearWatermark(); ex.clearLabels(); ex.clearFieldEdits();
+  ex.clearPageRotate(); ex.clearNotes();
+  ex.setEncrypt(1);
+  for (const c of 'pw1234') ex.addEncryptChar(c.codePointAt(0));
+  const n = ex.compact();
+  const out = Buffer.from(new Uint8Array(ex.memory.buffer, ex.outputPtr(), n)).toString('latin1');
+  ok('잠근 파일이 나온다', n > 1000, n);
+  ok('암호 딕셔너리가 있다', out.includes('/Encrypt'), out.includes('/Encrypt'));
+  ok('AES-256 을 쓴다 (V5 R6)', out.includes('/V 5') && out.includes('/R 6'), out.includes('/V 5'));
+  ok('열쇠가 256비트다', out.includes('/Length 256'), /\/Length (\d+)/.exec(out.slice(out.indexOf('/Encrypt')))?.[1]);
+  ok('AESV3 로 잠근다', out.includes('/CFM /AESV3'), out.includes('/CFM /AESV3'));
+}
+
 console.log(`  기능 단언 ${pass + fail}개 중 통과 ${pass}, 실패 ${fail}`);
 if (bad.length) bad.forEach((b3) => console.log('    ✗ ' + b3));
 process.exit(fail ? 1 : 0);

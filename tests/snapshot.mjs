@@ -70,6 +70,22 @@ export async function snap(mod, file, S) {
     put(`p${p}크기`, `${e.pageWidth()}x${e.pageHeight()}@${e.pageOriginX()},${e.pageOriginY()}r${e.pageRotate()}`);
     put(`p${p}글자`, dec.decode(new Uint8Array(e.memory.buffer, e.textPtr(), e.textLen())));
     put(`p${p}그림`, `${e.imageCount()}/${e.formCount()}/${e.imageSlots?.() ?? 0}`);
+    // 푼 그림의 바이트까지 본다.
+    //
+    // 개수만 보면 JPEG·CCITT·JBIG2·JPX 의 복호가 틀려도 안 걸린다 — IDCT
+    // 상수를 바꿔 화소가 달라져도 손자국이 그대로였다. 슬롯마다 크기와
+    // 바이트 해시를 적어 둔다.
+    const slots = e.imageSlots?.() ?? 0;
+    for (let si = 0; si < Math.min(slots, 8); si++) {
+      const off = e.slotOff?.(si) ?? 0;
+      const len = e.slotLen?.(si) ?? 0;
+      let h = 2166136261;
+      if (len > 0 && e.imageAreaPtr) {
+        const b2 = new Uint8Array(e.memory.buffer, e.imageAreaPtr() + off, Math.min(len, 1 << 20));
+        for (let k = 0; k < b2.length; k++) h = Math.imul(h ^ b2[k], 16777619) >>> 0;
+      }
+      put(`p${p}칸${si}`, `${e.slotKind?.(si) ?? 0}:${e.slotWidth?.(si) ?? 0}x${e.slotHeight?.(si) ?? 0}:${len}:${h.toString(36)}`);
+    }
     const ops = new Float32Array(e.memory.buffer, e.opsPtr(), e.opsLen());
     let h = 2166136261;
     for (let i = 0; i < ops.length; i++) { h = ((h ^ (Math.round(ops[i] * 1000) | 0)) * 16777619) >>> 0; }
