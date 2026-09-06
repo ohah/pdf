@@ -229,10 +229,37 @@ const t = (name, cond, got) => {
       const calSh = await px("v-cal.pdf", 40, 120);
       t("CalRGB 채우기가 옮겨진다", near(cal1, [255, 0, 60], 8), cal1.join(","));
       t("CalRGB 셰이딩도 옮겨진다", near(calSh, [0, 250, 119], 8), calSh.join(","));
+      // 끝값만 보면 못 잡는다 — 255 나 0 으로 뭉개져(clamp) 계수를 바꿔도
+      // 같은 값이 나온다. 실제로 sRGB 행렬의 3.2406 을 3.1406 으로 바꿔도
+      // 시험이 통과했다. 중간 색조를 하나 더 본다.
+      const calMid = await px("v-cal.pdf", 100, 120);
+      t("CalRGB 중간 색조가 맞다", near(calMid, [192, 172, 171], 6), calMid.join(","));
 
       // 16비트 그림 — 2·4비트와 같은 이유로 날 갈래에 길이 없었다
       const b16 = await px("v-bpc16.pdf", 30, 60);
       t("16비트 그림을 그린다", near(b16, [136, 136, 136], 8), b16.join(","));
+      // 상위 바이트를 쓰는지 못 박는다. 견본 자료의 상위·하위를 다르게
+      // 두었으므로, 하위를 읽도록 고장 내면 여기서 걸린다.
+      const b16c = await px("v-bpc16.pdf", 130, 60);
+      t("16비트는 상위 바이트를 쓴다", near(b16c, [153, 102, 7], 8), b16c.join(","));
+
+      // CMYK → RGB 도 화소로 못 박는다. 여태 run.sh 안에는 CMYK 색을 보는
+      // 단언이 없어, 변환식을 고장 내도(k 를 0.9 배) 통과했다. 그림 맞대기는
+      // 잡지만 그건 검증 실행기에서만 돈다.
+      const cki = await px("img-cmyk.pdf", 60, 15);
+      t("CMYK 그림", near(cki, [43, 46, 52], 6), cki.join(","));
+      // CMYK *채우기*(k 연산자)는 견본이 하나도 없었다 — 고장 내기로 알았다.
+      // cmykRgb 의 계수를 바꿔도 아무도 그 길을 안 밟아 통과했다.
+      //
+      // 값은 우리 것을 못 박는다. poppler 는 CMYK 모델이 달라 10~15 쯤
+      // 어긋나지만(시안 0,185,242 대 0,173,239) 그건 방식 차이다. 우리는
+      // pdf.js 와 같은 다항식을 쓴다.
+      const cf1 = await px("v-cmyk-fill.pdf", 50, 30);    // 시안
+      const cf2 = await px("v-cmyk-fill.pdf", 145, 80);   // 검정
+      const cf3 = await px("v-cmyk-fill.pdf", 50, 130);   // 섞은 색
+      t("CMYK 채우기 — 시안", near(cf1, [0, 185, 242], 4), cf1.join(","));
+      t("CMYK 채우기 — 검정", near(cf2, [44, 46, 53], 4), cf2.join(","));
+      t("CMYK 채우기 — 섞은 색", near(cf3, [194, 145, 103], 4), cf3.join(","));
 
       const s1 = await px("t-sep.pdf", 50, 50);
       const s2 = await px("t-sep.pdf", 150, 50);

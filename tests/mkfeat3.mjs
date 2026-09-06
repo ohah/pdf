@@ -137,13 +137,22 @@ page("v-cal.pdf",
 // ④ 16비트 그림 — 회색과 RGB
 {
   const w = 4, h = 4;
+  // 상위·하위 바이트를 다르게 둔다.
+  //
+  // 예전에는 i*65535/15 로 채워 0x0000·0x1111·0x2222… 가 됐다. 상위와
+  // 하위가 같으니 어느 쪽을 읽든 같은 값이라, 상위 대신 하위를 읽도록
+  // 고장 내도 시험이 못 잡았다.
   const g16 = Buffer.alloc(w * h * 2);
-  for (let i = 0; i < w * h; i++) g16.writeUInt16BE(Math.round(i * 65535 / (w * h - 1)), i * 2);
+  for (let i = 0; i < w * h; i++) {
+    const hi = Math.round(i * 255 / (w * h - 1));
+    g16.writeUInt16BE((hi << 8) | ((255 - hi) & 0xff), i * 2);
+  }
   const rgb16 = Buffer.alloc(w * h * 3 * 2);
   for (let i = 0; i < w * h; i++) {
-    rgb16.writeUInt16BE(Math.round(i * 65535 / (w * h - 1)), i * 6);
-    rgb16.writeUInt16BE(65535 - Math.round(i * 65535 / (w * h - 1)), i * 6 + 2);
-    rgb16.writeUInt16BE(30000, i * 6 + 4);
+    const hi = Math.round(i * 255 / (w * h - 1));
+    rgb16.writeUInt16BE((hi << 8) | 0x0f, i * 6);
+    rgb16.writeUInt16BE(((255 - hi) << 8) | 0xf0, i * 6 + 2);
+    rgb16.writeUInt16BE(0x7 << 8 | 0xa5, i * 6 + 4);
   }
   page("v-bpc16.pdf", "q 80 0 0 80 15 100 cm /A Do Q\nq 80 0 0 80 105 100 cm /B Do Q\n",
     { res: "/XObject << /A 5 0 R /B 6 0 R >>",
@@ -158,4 +167,18 @@ page("v-cal.pdf",
     { res: "/XObject << /A 5 0 R >>",
       extra: [stream(`/Type /XObject /Subtype /Image /Width ${W} /Height ${H} /ImageMask true /BitsPerComponent 1 /Filter /CCITTFaxDecode /DecodeParms << /K 0 /Columns ${W} /Rows ${H} /EncodedByteAlign false /BlackIs1 true >>`, stripOf(f))] });
 }
-console.log("v-ccitt-k·v-ccitt-black·v-cal·v-bpc16·v-ccitt-align 만듦");
+// ⑥ CMYK 채우기·선 (k·K 연산자)
+//
+// 고장 내기로 알았다 — cmykRgb 의 계수를 바꿔도 시험이 안 걸렸다. 견본
+// 어디에도 k 연산자가 없어 그 경로를 아무도 안 밟았기 때문이다.
+// (cmyk.pdf·img-cmyk.pdf 는 CMYK *그림* 이라 다른 길로 간다.)
+page("v-cmyk-fill.pdf",
+  "1 0 0 0 k 10 150 85 40 re f\n" +      // 시안
+  "0 1 0 0 k 105 150 85 40 re f\n" +     // 마젠타
+  "0 0 1 0 k 10 100 85 40 re f\n" +      // 노랑
+  "0 0 0 1 k 105 100 85 40 re f\n" +     // 검정
+  "0.2 0.4 0.6 0.1 k 10 50 85 40 re f\n" +   // 섞은 색
+  "0 0 0 0.5 k 105 50 85 40 re f\n" +        // 반 검정
+  "0.9 0.1 0.1 0 K 6 w 15 15 170 20 re S\n"); // 선도 CMYK
+
+console.log("v-ccitt-k·v-ccitt-black·v-cal·v-bpc16·v-ccitt-align·v-cmyk-fill 만듦");
