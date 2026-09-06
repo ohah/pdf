@@ -14,6 +14,12 @@ import {
   type OpenAction, type CalcField, type ValueOf, type XfaForm, type XfaPage, type XfaBox,
   readXfa, drawXfa, toPt, runCalc, recalculate, formCalc, runJs, type Sandbox,
 } from "../src/index.js";
+// 어댑터 셋은 index 에서 안 딸려 온다. 여기서 부르지 않으면 이 검사의 그물
+// 밖이라, .d.ts 를 내는 build-js.sh 만 이들을 본다 — 그쪽은 형 선언을 내는
+// 김에 보는 것이라, 차례가 바뀌거나 실패를 삼키면 조용히 열린다.
+import { usePdf as useReact, PDFPage as ReactPage, type UsePdf, type PDFPageProps } from "../src/react.js";
+import { pdfStore, pdfPage, type PDFPageParams } from "../src/svelte.js";
+import { usePdf as useVue, PDFPage as VuePage } from "../src/vue.js";
 
 export async function demo(pdf: PDFDocument) {
   const items: TextItem[] = await pdf.textItems(1);
@@ -53,4 +59,17 @@ export async function demo(pdf: PDFDocument) {
   void drawXfa;
   return {
     open, order, xml, form, page, box, pt, calcs, one, many, partial, fc, flow, js, sbox, items, fields, links, annots, sigs, merged, outline, perm, layers, atts, dests, tree, vp, spec, opts, paths, runs };
+}
+
+/** 어댑터의 이름이 다 나갔는지. 부르지는 않고 가리키기만 한다 — React·Vue
+ *  훅은 컴포넌트 밖에서 부르면 안 되고, 여기서 필요한 건 타입뿐이다. */
+export function adapters() {
+  const r: typeof useReact = useReact;
+  const v: typeof useVue = useVue;
+  const s2: typeof pdfStore = pdfStore;
+  const a2: typeof pdfPage = pdfPage;
+  const u: UsePdf | null = null;
+  const pp: PDFPageProps | null = null;
+  const sp: PDFPageParams | null = null;
+  return { r, v, s2, a2, u, pp, sp, ReactPage, VuePage };
 }
