@@ -160,3 +160,18 @@ node tests/mksig.mjs   tests/fixtures   # 전자 서명 (openssl 이 필요하�
 선형화(`/Linearized`)는 넣지 않았다. 규격에 맞으려면 힌트 스트림과 첫 쪽
 전용 상호참조표까지 있어야 하는데, 값을 지어내면 "선형화된 파일" 이 아니라
 "거짓말하는 딕셔너리" 를 시험하는 꼴이 된다.
+
+## tests/snap.mjs — 뽑아낸 값이 조용히 달라지지 않게
+
+    node tests/snap.mjs tests/fixtures
+    node tests/snap.mjs tests/fixtures --update   # 일부러 바꿨을 때
+
+A/B(`tests/ab.mjs`)는 wasm 두 개를 맞댄다. 기준 wasm 이 있어야 해서 상시
+시험에는 못 넣었고, 그 사이 `run.sh` 는 값이 바뀌어도 통과했다 — 글자
+이동량을 1.05배로 고장 내도 안 걸렸다.
+
+여기서는 기준을 파일(`tests/snap-baseline.json`)에 둔다. 추출 정의는 A/B 와
+같은 것(`tests/snapshot.mjs`)을 쓴다 — 베끼면 한쪽만 고쳐져 어긋난다.
+
+일부러 변경 감지기다. 값을 바꾸는 수정을 했다면 `--update` 로 기준을 옮기고,
+그 diff 가 곧 "무엇이 달라졌는가" 의 기록이 된다.

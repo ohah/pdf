@@ -103,6 +103,13 @@ for pass in $(seq 1 "$N"); do
   if [ "$ONE_RC" != 0 ]; then
     echo "  fontkey.mjs 이 터졌다 (exit $ONE_RC)"; printf '%s\n' "$ONE_OUT" | tail -5; fail=1
   fi
+  # 견본마다 뽑아낸 값이 조용히 달라지지 않게 못 박는다.
+  # A/B 는 wasm 두 개를 맞대야 해서 상시로 못 돌린다 — 그 자리를 메운다.
+  one node tests/snap.mjs "$FX"
+  sn="$ONE_LAST"
+  if [ "$ONE_RC" != 0 ]; then
+    echo "  snap.mjs 가 걸렸다 (exit $ONE_RC)"; printf '%s\n' "$ONE_OUT" | tail -8; fail=1
+  fi
   # 아직 없는 기능이 조용히 달라지지 않게 못 박는다 (일부러 변경 감지기다)
   one node tests/gap.mjs "$FX"
   gp="$ONE_LAST"
@@ -120,13 +127,14 @@ for pass in $(seq 1 "$N"); do
   printf "%s회차  적대적 %s개 · 예외 %s · 느림 %s | %s | %s\n" \
     "$pass" "$n" "$ex" "$slow" "$(echo "$fn" | head -1 | sed 's/^ *//')" "$(echo "$ln" | head -1 | sed 's/^ *//')"
   echo "        ${pl# } | ${sg# } | ${nd# } | ${ty# } | ${tc# }"
-  echo "        API ${ap# } | ${rg# } | ${fj# } | ${xf# } | ${jm# } | ${fk# } | ${gp# }"
+  echo "        API ${ap# } | ${rg# } | ${fj# } | ${xf# } | ${jm# } | ${fk# } | ${gp# } | ${sn# }"
   if [ "$ex" != 0 ] || [ "$slow" != 0 ]; then echo "$adv" | grep -E '예외|⚠'; fail=1; fi
   # 개수를 못 박는다 — 줄어들면 잡는다. 늘어나는 것은 막지 않는다.
   atleast "기능 단언" "$(printf '%s' "$fn" | grep -oE '기능 단언 [0-9]+' | grep -oE '[0-9]+')" 380
   atleast "적대적" "$n" 600
   atleast "Node" "$(printf '%s' "$nd" | grep -oE '통과 [0-9]+' | tail -1 | grep -oE '[0-9]+')" 55
   atleast "빈틈" "$(printf '%s' "$gp" | grep -oE '빈틈 [0-9]+' | grep -oE '[0-9]+')" 18
+  atleast "손자국" "$(printf '%s' "$sn" | grep -oE '손자국 [0-9]+' | grep -oE '[0-9]+')" 160
   atleast "글꼴 열쇠" "$(printf '%s' "$fk" | grep -oE '글꼴 열쇠 [0-9]+' | grep -oE '[0-9]+')" 5
   atleast "서명" "$(printf '%s' "$sg" | grep -oE '서명 [0-9]+' | grep -oE '[0-9]+')" 30
   if echo "$fn" | grep -qE '실패 [1-9]'; then echo "$fn"; fail=1; fi
