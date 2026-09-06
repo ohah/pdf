@@ -24,6 +24,17 @@ cd "$(dirname "$0")/.."
 N=${1:-3}
 FX="tests/fixtures"
 
+# 시험 하나를 돌리고 마지막 줄과 종료 코드를 함께 받는다.
+#
+# 예전에는 `node tests/x.mjs | tail -1 || true` 였다. 파이프를 타면 종료
+# 코드가 tail 의 것이라 늘 0 이고, 시험이 터져도 마지막 줄(스택 트레이스)에
+# "실패" 글자가 없어 통과로 셌다 — fontkey 를 일부러 터뜨렸더니 결과 자리에
+# "Node.js v26.8.1" 이 찍히고 "모두 통과" 가 나왔다.
+one() {
+  if ONE_OUT=$("$@" 2>&1); then ONE_RC=0; else ONE_RC=$?; fi
+  ONE_LAST=$(printf '%s' "$ONE_OUT" | tail -1)
+}
+
 if [ ! -f dist/pdf.wasm ]; then
   echo "dist/pdf.wasm 이 없다. npm run build:wasm 를 먼저 돌린다."
   exit 1
@@ -49,13 +60,37 @@ for pass in $(seq 1 "$N"); do
   sg=$(bun run tests/sig.ts)
   nd=$(node tests/node.mjs "$FX" 2>&1 || true)
   ap=$(node tests/api-adv.mjs "$pass" "$FX" 2>&1 || true)
-  rg=$(node tests/range.mjs 2>&1 | tail -1 || true)
-  fj=$(node tests/formjs.mjs 2>&1 | tail -1 || true)
-  xf=$(node tests/xfa.mjs 2>&1 | tail -1 || true)
-  jm=$(node tests/jsmini.mjs 2>&1 | tail -1 || true)
-  fk=$(node tests/fontkey.mjs 2>&1 | tail -1 || true)
+  one node tests/range.mjs
+  rg="$ONE_LAST"
+  if [ "$ONE_RC" != 0 ]; then
+    echo "  range.mjs 이 터졌다 (exit $ONE_RC)"; printf '%s\n' "$ONE_OUT" | tail -5; fail=1
+  fi
+  one node tests/formjs.mjs
+  fj="$ONE_LAST"
+  if [ "$ONE_RC" != 0 ]; then
+    echo "  formjs.mjs 이 터졌다 (exit $ONE_RC)"; printf '%s\n' "$ONE_OUT" | tail -5; fail=1
+  fi
+  one node tests/xfa.mjs
+  xf="$ONE_LAST"
+  if [ "$ONE_RC" != 0 ]; then
+    echo "  xfa.mjs 이 터졌다 (exit $ONE_RC)"; printf '%s\n' "$ONE_OUT" | tail -5; fail=1
+  fi
+  one node tests/jsmini.mjs
+  jm="$ONE_LAST"
+  if [ "$ONE_RC" != 0 ]; then
+    echo "  jsmini.mjs 이 터졌다 (exit $ONE_RC)"; printf '%s\n' "$ONE_OUT" | tail -5; fail=1
+  fi
+  one node tests/fontkey.mjs
+  fk="$ONE_LAST"
+  if [ "$ONE_RC" != 0 ]; then
+    echo "  fontkey.mjs 이 터졌다 (exit $ONE_RC)"; printf '%s\n' "$ONE_OUT" | tail -5; fail=1
+  fi
   # 아직 없는 기능이 조용히 달라지지 않게 못 박는다 (일부러 변경 감지기다)
-  gp=$(node tests/gap.mjs "$FX" 2>&1 | tail -1 || true)
+  one node tests/gap.mjs "$FX"
+  gp="$ONE_LAST"
+  if [ "$ONE_RC" != 0 ]; then
+    echo "  gap.mjs 이 터졌다 (exit $ONE_RC)"; printf '%s\n' "$ONE_OUT" | tail -5; fail=1
+  fi
   ty=$(npx tsc --noEmit --ignoreConfig --strict --target ES2022 --module ESNext \
         --moduleResolution bundler --lib ES2022,DOM,DOM.Iterable tests/types.ts 2>&1 \
         && echo "타입 이름 다 나감" || echo "타입 실패 1")
