@@ -535,6 +535,7 @@ export class PDFDocument {
       originX: q.x0, originY: q.y0, rotate: vp.rotation,
       background: opts.background,
       fontFamily: (i) => fams[i - 1],
+      fontName: (i) => q.fonts[i - 1]?.base,
       fontIsPua: (i) => q.fonts[i - 1]?.pua === true,
       fontUnusable: (i) => {
         const f = q.fonts[i - 1];

@@ -1505,6 +1505,11 @@ var rtext: struct {
 pub const FontMap = struct {
     name: [24]u8,
     name_len: u8,
+    /// 문서가 적어 둔 글꼴 이름(/BaseFont). 리소스 이름(F0)과 다르다 —
+    /// 파일이 안 박힌 표준 14글꼴을 무엇으로 대신 그릴지 이걸로 정한다.
+    /// 서브셋 접두어(ABCDEF+)는 떼고 담는다.
+    base: [40]u8,
+    base_len: u8,
     two_byte: bool,
     /// 코드→유니코드 표. 글꼴마다 따로 구역에서 잡고 필요한 만큼 늘린다.
     /// 예전에는 글꼴 하나에 2048 쌍으로 못박혀, 한자·전각 글꼴의 뒷부분이
@@ -2679,6 +2684,12 @@ export fn fontNamePtr(i: u32) [*]const u8 {
     return if (i < fontarea.n) &fonts.all()[i].name else &fonts.all()[0].name;
 }
 export fn fontNameLen(i: u32) u32 { return if (i < fontarea.n) fonts.all()[i].name_len else 0; }
+
+/// 문서가 적어 둔 글꼴 이름(/BaseFont). 없으면 길이 0.
+export fn fontBasePtr(i: u32) [*]const u8 {
+    return if (i < fontarea.n) &fonts.all()[i].base else @ptrFromInt(heapBase());
+}
+export fn fontBaseLen(i: u32) u32 { return if (i < fontarea.n) fonts.all()[i].base_len else 0; }
 export fn fontGlyphs(i: u32) u32 { return if (i < fontarea.n) fonts.all()[i].wn else 0; }
 export fn fontCount() u32 { return fontarea.n; }
 export fn fontFileOff(i: u32) u32 { return if (i < fontarea.n) fonts.all()[i].file_off else 0; }
@@ -2946,7 +2957,7 @@ fn widthRoom(f: *FontMap, want: u32) bool {
 }
 
 /// 폰트 하나를 등록한다. cmap 이 비어 있으면 코드=유니코드로 본다.
-fn addFont(name: [*]const u8, name_len: u32, cmap: [*]const u8, cmap_len: u32) void {
+fn addFont(name: [*]const u8, name_len: u32, cmap: [*]const u8, cmap_len: u32, base: []const u8) void {
     if (!fonts.room(fontarea.n + 1)) return;
     const f = &fonts.all()[fontarea.n];
     // 이 자리는 구역에서 떼어 온 것이라, 앞서 누가 쓰던 값이 그대로 남아
@@ -2956,6 +2967,10 @@ fn addFont(name: [*]const u8, name_len: u32, cmap: [*]const u8, cmap_len: u32) v
     var i: u32 = 0;
     while (i < nl) : (i += 1) f.name[i] = name[i];
     f.name_len = @intCast(nl);
+    const bl = @min(base.len, 40);
+    var bi: usize = 0;
+    while (bi < bl) : (bi += 1) f.base[bi] = base[bi];
+    f.base_len = @intCast(bl);
     f.n = 0;
     f.two_byte = false;
     f.file_off = 0;
@@ -4456,8 +4471,22 @@ fn scanFonts(b: []const u8, rs: usize, re_: usize) void {
                 const fobj = readUint(b, &vp);
                 var cmap_ptr: [*]const u8 = b.ptr;
                 var cmap_len: u32 = 0;
+                var base_name: []const u8 = &[_]u8{};
                 if (findObj(b, fobj)) |fbody| {
                     const fend = find(b, "endobj", fbody) orelse b.len;
+                    if (find(b[fbody..fend], "/BaseFont", 0)) |ba| {
+                        var bp = fbody + ba + 9;
+                        while (bp < fend and isSpace(b[bp])) bp += 1;
+                        if (bp < fend and b[bp] == '/') {
+                            bp += 1;
+                            var be = bp;
+                            while (be < fend and !isSpace(b[be]) and b[be] != '/' and
+                                b[be] != '>' and b[be] != '[' and b[be] != '(') be += 1;
+                            // 서브셋 접두어 ABCDEF+ 는 뗀다 — 갈래를 고를 때 걸리적거린다
+                            if (be > bp + 7 and b[bp + 6] == '+') bp += 7;
+                            base_name = b[bp..be];
+                        }
+                    }
                     if (find(b[fbody..fend], "/ToUnicode", 0)) |tu| {
                         var tp = fbody + tu + 10;
                         while (tp < fend and isSpace(b[tp])) tp += 1;
@@ -4468,7 +4497,7 @@ fn scanFonts(b: []const u8, rs: usize, re_: usize) void {
                         }
                     }
                 }
-                addFont(b[q + 1 ..].ptr, nlen, cmap_ptr, cmap_len);
+                addFont(b[q + 1 ..].ptr, nlen, cmap_ptr, cmap_len, base_name);
                 if (findObj(b, fobj)) |fbody| {
                     attachWidths(b, fbody);
                     attachType3(b, fbody);

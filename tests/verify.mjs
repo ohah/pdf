@@ -851,6 +851,29 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
     ok('셰이딩 1형: y 가 파랑', near(cols, [0, 0, 0.67], 0.12));
   }
   {
+    // 문서가 적어 둔 글꼴 이름(/BaseFont). 리소스 이름(F0)과 다르다.
+    //
+    // 파일이 안 박힌 표준 14글꼴을 무엇으로 대신 그릴지 이걸로 정한다.
+    // 여태 리소스 이름만 나가서, 화면은 Times 인지 Courier 인지 알 수 없었고
+    // 전부 sans-serif 로 그렸다 — caps-fonts 는 셋을 나란히 쓰는데 셋이 같은
+    // 글꼴로 보였다.
+    const r = await load('caps-fonts.pdf');
+    const base = (i) => {
+      const n = r.ex.fontBaseLen?.(i) ?? 0;
+      return n ? dec.decode(new Uint8Array(r.ex.memory.buffer, r.ex.fontBasePtr(i), n)) : '';
+    };
+    ok('BaseFont: Helvetica', base(0) === 'Helvetica', base(0));
+    ok('BaseFont: Times-Roman', base(1) === 'Times-Roman', base(1));
+    ok('BaseFont: Courier', base(2) === 'Courier', base(2));
+  }
+  {
+    // 서브셋 접두어(ABCDEF+)는 떼고 담는다 — 갈래를 고를 때 걸리적거린다.
+    const r = await load('korean.pdf');
+    const n = r.ex.fontBaseLen?.(0) ?? 0;
+    const b0 = n ? dec.decode(new Uint8Array(r.ex.memory.buffer, r.ex.fontBasePtr(0), n)) : '';
+    ok('BaseFont: 서브셋 접두어를 뗀다', b0 === 'NanumGothicBold', b0);
+  }
+  {
     const r = await load('sh4.pdf');
     const { cols } = colorsOf(r);
     ok('셰이딩 4형: 삼각형을 쪼갬', r.counts[6] > 50, r.counts[6]);

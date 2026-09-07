@@ -50,6 +50,8 @@ type Exports = {
   fontIsPua: (i: number) => number;
   fontKind?: (i: number) => number;
   fontNamePtr?: (i: number) => number;
+  fontBasePtr?: (i: number) => number;
+  fontBaseLen?: (i: number) => number;
   fontNameLen?: (i: number) => number;
   formCount?: () => number;
   inlinePtr?: () => number;
@@ -736,7 +738,7 @@ async function page(i: number, formOn: boolean, light = false) {
     if (bitmap) bitmaps.push(bitmap);
   }
   // 글꼴은 날바이트로 넘긴다 — FontFace 는 화면 갈래에서만 만들 수 있다
-  const fonts: { bytes: Uint8Array | null; pua: boolean; name: string; kind: number; len: number }[] = [];
+  const fonts: { bytes: Uint8Array | null; pua: boolean; name: string; base: string; kind: number; len: number }[] = [];
   const area = e.fontAreaPtr();
   for (let fi = 0; !light && fi < e.fontCount(); fi++) {
     const flen = e.fontFileLen(fi);
@@ -746,6 +748,11 @@ async function page(i: number, formOn: boolean, light = false) {
       name: e.fontNamePtr && e.fontNameLen
         ? dec.decode(new Uint8Array(e.memory.buffer, e.fontNamePtr(fi), e.fontNameLen(fi)))
         : String(fi),
+      // 문서가 적어 둔 이름(/BaseFont). 리소스 이름(F0)과 다르다 — 파일이
+      // 안 박힌 표준 14글꼴을 무엇으로 대신 그릴지 이걸로 정한다.
+      base: e.fontBasePtr && e.fontBaseLen && e.fontBaseLen(fi) > 0
+        ? dec.decode(new Uint8Array(e.memory.buffer, e.fontBasePtr(fi), e.fontBaseLen(fi)))
+        : "",
       kind: e.fontKind?.(fi) ?? 0,
       len: flen,
     });

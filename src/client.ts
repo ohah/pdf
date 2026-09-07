@@ -53,7 +53,14 @@ export type PageMsg = {
     /** 보이는 꼴을 정하는 스크립트 (/AA /F) */
     format: string;
   }[];
-  fonts: { bytes: Uint8Array | null; pua: boolean; name: string; kind: number; len: number }[];
+  fonts: {
+    bytes: Uint8Array | null; pua: boolean;
+    /// 리소스 이름(F0). 문서 안에서 이 글꼴을 가리키는 이름이다.
+    name: string;
+    /// 문서가 적어 둔 글꼴 이름(/BaseFont). 서브셋 접두어는 떼어 두었다.
+    base: string;
+    kind: number; len: number;
+  }[];
   /**
    * 쪽에 놓인 그림. 브라우저에서는 ImageBitmap 이고, 그것을 못 만드는
    * 자리(Node)에서는 날 화소로 온다 — 그리는 쪽이 캔버스에 얹는다.

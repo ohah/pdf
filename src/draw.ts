@@ -23,6 +23,19 @@ const BLENDS = [
   "exclusion", "hue", "saturation", "color", "luminosity",
 ] as const;
 
+/** 파일이 안 박힌 글꼴을 무엇으로 대신 그릴지.
+ *
+ * 여태 이름을 안 보고 늘 sans-serif 로 그렸다. 그래서 Times-Roman 도
+ * Courier 도 산세리프로 나왔다 — caps-fonts 견본은 셋을 나란히 쓰는데
+ * 셋이 같은 글꼴로 보였다. 갈래만이라도 맞춘다.
+ */
+function generic(name: string | undefined): string {
+  const n = (name ?? "").toLowerCase();
+  if (/courier|mono/.test(n)) return "monospace";
+  if (/times|roman|serif|georgia|garamond|bookman|century/.test(n)) return "serif";
+  return "system-ui, sans-serif";
+}
+
 /** 셰이딩 명령에서 캔버스 그라데이션을 만든다. */
 function gradientFrom(g: CanvasRenderingContext2D, ops: Float32Array, a: number) {
   const kind = ops[a];
@@ -84,6 +97,9 @@ export type DrawInput = {
   bitmaps?: (ImageBitmap | RawPix | undefined)[];
   /** 글꼴 번호 → CSS font-family. 없으면 시스템 글꼴로 그린다. */
   fontFamily?: (idx: number) => string | undefined;
+  /** 글꼴 번호 → 문서가 적어 둔 글꼴 이름(BaseFont).
+   *  파일이 안 박힌 표준 14글꼴을 어느 갈래로 대신 그릴지 정하는 데 쓴다. */
+  fontName?: (idx: number) => string | undefined;
   /** 글꼴 번호 → 글리프를 번호로 집는 글꼴인가.
    *  그런 글꼴은 문서 글꼴을 못 실으면 그리지 않는다 — 시스템 글꼴로
    *  대신 그려 봐야 뜻 없는 네모만 나온다. */
@@ -750,7 +766,7 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
         g.transform(ta, tb, tc, td, x, y);
         g.transform(1, 0, 0, -1, 0, 0);
         // 부분집합 글꼴에 없는 글자는 시스템 글꼴로 넘어가게 뒤를 받쳐 둔다.
-        const fam = emb ? `"${emb}", system-ui, sans-serif` : "system-ui, sans-serif";
+        const fam = emb ? `"${emb}", system-ui, sans-serif` : generic(input.fontName?.(fontIdx));
         g.font = `${Math.max(size, 0.01)}px ${fam}`;
         // 대신 그린 글꼴이 제 칸보다 넓으면 가로로 눌러 넣는다.
         // 이렇게 해야 글꼴이 바뀌어도 글자가 서로 겹치지 않는다.
