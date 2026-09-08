@@ -7300,7 +7300,7 @@ fn cidToGid(f: *const FontMap, cid: u32) u32 {
 // ===== 미리 정의된 CMap =====
 //
 // KSCms-UHC-H 같은 이름만 적힌 CMap 은 표가 PDF 안에 없다. 표는 Adobe 가
-// 이름으로 배포한다. 다 싣기엔 7MB 라 wasm 에 넣지 않는다. 문서가 실제로
+// 이름으로 배포한다. 다 싣기엔 3.8MB 라 wasm 에 넣지 않는다. 문서가 실제로
 // 쓰는 이름만 화면 쪽이 받아 여기에 넣어 준다 — 한글 문서면 보통 4KB 하나다.
 // 굽는 형식은 scripts/build-cmaps.mjs 에 있다.
 const CMAP_POOL = 2 * 1024 * 1024;
@@ -7333,8 +7333,103 @@ export fn cmapPtr() usize {
 export fn cmapRoom() u32 { return CMAP_POOL - cmapp.used; }
 /// 방금 cmapPtr 에 적은 len 바이트를, 목록의 idx 번째 이름으로 등록한다.
 /// 이름을 따로 넘기지 않는 건 받을 것이 늘 그 목록에서 나오기 때문이다.
-export fn cmapAdd(idx: u32, len: u32) u32 {
-    if (!cmaps.room(cmapp.n + 1) or len == 0 or idx >= needs.n) return 0;
+/// CM2 를 CM1 꼴로 편다. 편 길이, 못 펴면 0.
+///
+/// 오가는 길에서만 줄이고 여기서 바로 편다 — 찾기가 이진 탐색이라 범위를
+/// 번호로 바로 집을 수 있어야 한다. 줄인 것을 그대로 두면 18,500개를
+/// 차례로 훑어야 한다.
+///
+/// 줄인 것은 곳간 앞쪽(at)에 있고, 편 것은 그 뒤(at+len)에 쓴 다음 앞으로
+/// 당긴다. 제자리에서 펴면 아직 안 읽은 바이트를 덮어쓴다.
+fn expandCM2(pool: []u8, at: u32, len: u32) u32 {
+    const d = pool[at..][0..len];
+    if (len < 9 or d[0] != 'C' or d[1] != 'M' or d[2] != '2') return 0;
+    const wide = d[4] != 0;
+    const ns = le16(d, 5);
+    const nr = le16(d, 7);
+    const sw: u32 = if (wide) 9 else 5;
+    const rw: u32 = if (wide) 10 else 6;
+    const head = 9 + ns * sw;
+    if (head > len) return 0;
+    const out_len = head + nr * rw;
+    if (at + len + out_len > pool.len) return 0;
+    const out = pool[at + len ..][0..out_len];
+
+    // 머리와 코드폭 범위는 그대로 옮기고 표식만 CM1 로 바꾼다
+    @memcpy(out[0..head], d[0..head]);
+    out[2] = '1';
+
+    var p: u32 = head;
+    var prev_hi: i64 = 0;
+    var prev_cid: i64 = 0;
+    var i: u32 = 0;
+    while (i < nr) : (i += 1) {
+        var v: [3]i64 = .{ 0, 0, 0 };
+        var k: u32 = 0;
+        while (k < 3) : (k += 1) {
+            var n: u64 = 0;
+            var sh: u6 = 0;
+            while (true) {
+                if (p >= len) return 0;
+                const c = d[p];
+                p += 1;
+                n |= @as(u64, c & 0x7f) << sh;
+                if (c & 0x80 == 0) break;
+                sh += 7;
+                if (sh > 56) return 0;
+            }
+            v[k] = @intCast(n);
+        }
+        // 지그재그 — 부호를 최하위 비트에 담았다
+        const dlo = if (@rem(v[0], 2) == 1) -@divTrunc(v[0] + 1, 2) else @divTrunc(v[0], 2);
+        const dcid = if (@rem(v[2], 2) == 1) -@divTrunc(v[2] + 1, 2) else @divTrunc(v[2], 2);
+        const lo = prev_hi + dlo;
+        const hi = lo + v[1];
+        const cid = prev_cid + dcid;
+        if (lo < 0 or hi < lo or cid < 0) return 0;
+        const o = head + i * rw;
+        if (wide) {
+            wle32(out, o, @intCast(lo));
+            wle32(out, o + 4, @intCast(hi));
+            wle16(out, o + 8, @intCast(cid & 0xffff));
+        } else {
+            wle16(out, o, @intCast(lo & 0xffff));
+            wle16(out, o + 2, @intCast(hi & 0xffff));
+            wle16(out, o + 4, @intCast(cid & 0xffff));
+        }
+        prev_hi = hi;
+        prev_cid = cid + (hi - lo);
+    }
+    // 앞으로 당긴다
+    var j: u32 = 0;
+    while (j < out_len) : (j += 1) pool[at + j] = out[j];
+    return out_len;
+}
+
+fn wle16(b: []u8, at: u32, v: u16) void {
+    b[at] = @intCast(v & 0xff);
+    b[at + 1] = @intCast(v >> 8);
+}
+fn wle32(b: []u8, at: u32, v: u32) void {
+    b[at] = @intCast(v & 0xff);
+    b[at + 1] = @intCast((v >> 8) & 0xff);
+    b[at + 2] = @intCast((v >> 16) & 0xff);
+    b[at + 3] = @intCast((v >> 24) & 0xff);
+}
+
+export fn cmapAdd(idx: u32, len_in: u32) u32 {
+    if (!cmaps.room(cmapp.n + 1) or len_in == 0 or idx >= needs.n) return 0;
+    if (len_in > CMAP_POOL - cmapp.used) return 0;
+    // 줄여 온 것이면 여기서 편다. 옛 CM1 도 그대로 받는다.
+    var len = len_in;
+    const pool = cmap_pool();
+    if (pool.len != 0 and len >= 3 and pool[cmapp.used] == 'C' and
+        pool[cmapp.used + 1] == 'M' and pool[cmapp.used + 2] == '2')
+    {
+        const got = expandCM2(pool, cmapp.used, len);
+        if (got == 0) return 0;
+        len = got;
+    }
     if (len > CMAP_POOL - cmapp.used) return 0;
     const nm = needs.buf[needs.off[idx]..][0..needs.lens[idx]];
     const t = &cmaps.all()[cmapp.n];

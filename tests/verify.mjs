@@ -524,6 +524,20 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   ok('미리 정의된 CMap: UHC 두 바이트', r && r.text.startsWith('가각간'), r && JSON.stringify(r.text));
   ok('미리 정의된 CMap: 한·두 바이트 섞임', r && r.text.endsWith('A가B'), r && JSON.stringify(r.text));
   ok('미리 정의된 CMap: 받을 목록', r && r.need.join() === 'KSCms-UHC-H,Korea1-UCS2', r && r.need.join());
+}
+
+{
+  // 범위가 뒤로 물러나는 표.
+  //
+  // 표를 줄여 실으면서(CM2) 범위를 앞 범위로부터의 차이로 적는다. 그 차이는
+  // 음수일 수 있다 — UniJIS-UTF16-V 는 코드 0x2032 가 앞 범위(…8243)보다
+  // 뒤인 8242 에서 시작한다. 189개 표 가운데 72개가 그렇다.
+  //
+  // 한국어 견본만으로는 이 길을 못 밟는다. 실제로 부호 처리를 지우고 재
+  // 봤더니 395개가 다 통과했다.
+  const r = await load('vert-jis.pdf');
+  ok('되돌아가는 범위: 앞 글자', r && r.text.startsWith('\u2031'), r && JSON.stringify(r.text));
+  ok('되돌아가는 범위: 되돌이 뒤 글자', r && r.text.includes('\u2032'), r && JSON.stringify(r.text));
   const b = await load('cmap.pdf', 0, false);
   ok('표 없어도 ToUnicode 로 읽음', b && b.text === '가각간A가B', b && JSON.stringify(b.text));
 }
