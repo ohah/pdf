@@ -34,7 +34,7 @@ cp node_modules/@ohah/pdf/dist/pdf.wasm public/
 cp -r node_modules/@ohah/pdf/cmaps public/
 ```
 
-CMap 은 문서가 실제로 쓰는 이름만 그때그때 받아 간다 — 3.8MB 를 통째로 내려받지
+CMap 은 문서가 실제로 쓰는 이름만 그때그때 받아 간다 — 3.7MB 를 통째로 내려받지
 않는다. 한글·일본어·중국어 문서를 안 다룬다면 `cmaps` 는 없어도 된다.
 
 ### 표준 글꼴 (없어도 된다)

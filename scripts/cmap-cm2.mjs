@@ -89,18 +89,60 @@ export function expandCM2(b) {
   return { wmode, wide, sp, cr };
 }
 
+/** CU1 — CID 로 바로 집는 유니코드 표. 머리 4바이트 + CID 마다 u16. */
+export function readCU1(b) {
+  if (b.length < 4 || b.toString('latin1', 0, 3) !== 'CU1') return null;
+  const n = (b.length - 4) >> 1;
+  const v = new Array(n);
+  for (let i = 0; i < n; i++) v[i] = b.readUInt16LE(4 + i * 2);
+  return { pad: b[3], v };
+}
+
+/** CU2 — 앞 값으로부터의 차이를 가변길이로. 빈 칸(0)이 이어지는 데가 많다. */
+export function packCU2(c) {
+  const body = [];
+  let prev = 0;
+  for (const x of c.v) { put(body, zig(x - prev)); prev = x; }
+  const head = Buffer.alloc(8);
+  head.write('CU2', 0, 'latin1');
+  head.writeUInt8(c.pad, 3);
+  head.writeUInt32LE(c.v.length, 4);
+  return Buffer.concat([head, Buffer.from(body)]);
+}
+
+export function expandCU2(b) {
+  if (b.length < 8 || b.toString('latin1', 0, 3) !== 'CU2') return null;
+  const n = b.readUInt32LE(4);
+  let o = 8;
+  const get = () => { let x = 0, s = 1; for (;;) { const c = b[o++]; x += (c & 0x7f) * s; if (!(c & 0x80)) return x; s *= 128; } };
+  const unzig = (x) => (x % 2 ? -(x + 1) / 2 : x / 2);
+  const v = new Array(n);
+  let prev = 0;
+  for (let i = 0; i < n; i++) { prev += unzig(get()); v[i] = prev; }
+  return { pad: b[3], v };
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const write = process.argv.includes('--write');
   let a = 0, b2 = 0, bad = 0, n = 0;
   for (const f of fs.readdirSync(DIR).filter((x) => x.endsWith('.bin')).sort()) {
     const raw = fs.readFileSync(path.join(DIR, f));
     const c = readCM1(raw);
-    if (!c) continue;                        // CU1(CID→유니코드)은 그대로 둔다
-    const p = packCM2(c);
-    const back = expandCM2(p);
-    const same = back && back.wmode === c.wmode && back.wide === c.wide &&
-      JSON.stringify(back.sp) === JSON.stringify(c.sp) &&
-      JSON.stringify(back.cr) === JSON.stringify(c.cr);
+    let p, back, same;
+    if (c) {
+      p = packCM2(c);
+      back = expandCM2(p);
+      same = back && back.wmode === c.wmode && back.wide === c.wide &&
+        JSON.stringify(back.sp) === JSON.stringify(c.sp) &&
+        JSON.stringify(back.cr) === JSON.stringify(c.cr);
+    } else {
+      const u = readCU1(raw);
+      if (!u) continue;                      // 이미 줄인 것
+      p = packCU2(u);
+      const ub = expandCU2(p);
+      same = ub && ub.pad === u.pad && ub.v.length === u.v.length &&
+        ub.v.every((x, i) => x === u.v[i]);
+    }
     if (!same) { console.log(`  ✗ ${f} 왕복이 안 맞는다`); bad++; }
     a += raw.length; b2 += p.length; n++;
     if (write && same) fs.writeFileSync(path.join(DIR, f), p);
