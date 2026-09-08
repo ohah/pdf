@@ -31,4 +31,28 @@ EXPORTS=$(grep -ho '^\(pub \)\?export fn [A-Za-z_][A-Za-z0-9_]*' *.zig \
 }
 mv pdf.wasm ../dist/pdf.wasm
 rm -f ./*.o 2>/dev/null || true
+
+# wasm-opt 으로 한 번 더 줄인다 — 13% 가 빠진다(354,106 → 307,432).
+#
+# 켤 기능은 이 wasm 이 실제로 쓰는 것만 적는다. -all 로 다 켜면 안 쓰는
+# 것까지 들어가 Node 가 "unknown import kind" 로 못 읽는 모듈이 나온다.
+#
+# 임시 자리에 내고 성한 것만 옮긴다. 같은 파일을 넣고 같은 파일로 내면
+# (f -o f) 도중에 죽을 때 파일이 잘린다.
+#
+# 없으면 그냥 지나간다 — 빌드가 이 도구에 매이면 안 된다.
+WASM_OPT="${WASM_OPT:-$(command -v wasm-opt || echo /opt/homebrew/opt/binaryen/bin/wasm-opt)}"
+if [ -x "$WASM_OPT" ]; then
+  if "$WASM_OPT" --enable-bulk-memory --enable-bulk-memory-opt \
+       --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals \
+       -Oz --strip-debug --strip-producers \
+       ../dist/pdf.wasm -o ../dist/pdf.wasm.tmp && [ -s ../dist/pdf.wasm.tmp ]; then
+    mv ../dist/pdf.wasm.tmp ../dist/pdf.wasm
+  else
+    rm -f ../dist/pdf.wasm.tmp
+    echo "  wasm-opt 이 실패했다 — 줄이기 전 파일을 그대로 둔다"
+  fi
+else
+  echo "  wasm-opt 이 없다 — 줄이기를 건너뛴다 (brew install binaryen)"
+fi
 echo "dist/pdf.wasm  $(wc -c < ../dist/pdf.wasm | tr -d ' ') bytes"
