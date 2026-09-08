@@ -51,11 +51,22 @@ const make = (n, seed = 97) => {
 
 // ⑤ 큰 글꼴도 제때 끝난다 (CJK 부분집합은 5MB 까지 간다)
 {
+  // 벽시계가 아니라 CPU 시간으로 잰다.
+  //
+  // 기계가 바쁘면 벽시계는 튄다 — 검증 한 바퀴에서 170.3ms 가 찍혀 걸렸는데
+  // 홀로 재면 3ms 다(기준의 16분의 1). 일부러 부하를 걸어도(load 16) 벽시계는
+  // 2.3~3.4ms 라 그 170ms 를 재현하지는 못했다. 브라우저와 vite 까지 함께
+  // 도는 자리라 더 심했던 것으로 보이나 원인을 확정하지는 못했다.
+  //
+  // 원인과 무관하게 CPU 시간이 훨씬 덜 흔들린다(부하에서 3.2 → 4.7ms).
+  // 여기서 보려는 것은 "덩치를 따라 선형인가" 이지 "이 기계가 지금 한가한가"가
+  // 아니다.
   const big = make(5 * 1024 * 1024);
-  const t = process.hrtime.bigint();
+  const c0 = process.cpuUsage();
   fontKey(big);
-  const ms = Number(process.hrtime.bigint() - t) / 1e6;
-  ok("5MB 글꼴 열쇠가 50ms 안에 끝난다", ms < 50, `${ms.toFixed(1)}ms`);
+  const c = process.cpuUsage(c0);
+  const ms = (c.user + c.system) / 1000;
+  ok("5MB 글꼴 열쇠가 CPU 50ms 안에 끝난다", ms < 50, `${ms.toFixed(1)}ms`);
 }
 
 console.log(`  글꼴 열쇠 ${pass + fail}개 중 통과 ${pass}, 실패 ${fail}`);
