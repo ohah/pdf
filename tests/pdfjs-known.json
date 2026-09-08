@@ -1,0 +1,60 @@
+{
+  "_": [
+    "pdf.js 와 화소가 크게 다른 견본과 그 까닭.",
+    "",
+    "여기 없는 이름이 기준을 넘으면 시험이 실패한다. 그래야 새로 생긴 차이가",
+    "이미 알던 차이 속에 숨지 않는다. 하나하나 poppler 를 세 번째 눈으로 넣어",
+    "가렸다(tests/triage.mjs) — 우리가 틀린 것은 고쳤고, 남은 것이 이 목록이다.",
+    "",
+    "max 는 지금 값에 여유를 둔 것이다. 넘으면 무언가 나빠진 것이니 들여다본다.",
+    "값이 max 의 절반 아래로 내려가면 좋아진 것이니 목록을 줄이라고 알려 준다."
+  ],
+  "img-cmyk.pdf": {
+    "max": 55,
+    "why": "CMYK ICC 프로파일을 안 싣는다. 우리 근사식은 pdf.js 것과 같은 코드고, pdf.js 에서 iccUrl 을 빼면 0.00 이 된다. 견본이 순수 CMYK 네 칸뿐이라 자홍·노랑 두 칸이 기준을 넘어 정확히 50% 가 된다."
+  },
+  "v-cmyk-fill.pdf": {
+    "max": 20,
+    "why": "img-cmyk 과 같다 — ICC 미탑재. iccUrl 을 빼면 0.00. 흰 여백이 섞여 값이 낮을 뿐이다."
+  },
+  "g-matte.pdf": {
+    "max": 22,
+    "why": "/Matte(미리 곱한 알파)를 아직 안 만들었다. tests/gap.mjs 가 지키는 알려진 빈틈이다."
+  },
+  "jb-half.pdf": {
+    "max": 30,
+    "why": "홀로 돌리면 0.00 이다. 같은 브라우저 세션에서 앞 문서의 JBIG2 상태가 pdf.js 쪽에 남는다 — 우리 엔진 출력은 앞 문서와 무관하게 바이트까지 같음을 확인했다."
+  },
+  "jb-halfmmr.pdf": { "max": 30, "why": "jb-half 와 같다 — pdf.js 쪽 상태 누출. 홀로 0.00." },
+  "jb-page1.pdf": { "max": 22, "why": "jb-half 와 같다. jb-mmr 을 먼저 그렸을 때만 어긋난다." },
+  "jb-page2.pdf": { "max": 22, "why": "jb-page1 과 같다." },
+  "v-ccitt-k.pdf": {
+    "max": 11,
+    "why": "poppler 로 가려 보면 우리가 더 가깝다(우리 1.35 · pdf.js 3.00). pdf.js 쪽이 소수의견이다."
+  },
+  "trclip.pdf": {
+    "max": 4,
+    "why": "우리가 poppler 에 더 가깝다(우리 1.03 · pdf.js 2.03)."
+  },
+  "jb-globals.pdf": {
+    "max": 4,
+    "why": "우리가 poppler 에 더 가깝다(우리 1.60 · pdf.js 2.87)."
+  },
+  "t-trmode.pdf": {
+    "max": 8,
+    "why": "셋이 고만고만하게 다르다(우리 6.72 · pdf.js 4.75). 글자 그리기 방식 차이로 보이며 누가 옳다고 하기 어렵다."
+  },
+  "tile.pdf": {
+    "max": 8,
+    "why": "셋이 고만고만하다(우리 4.33 · pdf.js 5.08) — 오히려 우리가 조금 가깝다."
+  },
+  "jpx-mct.pdf": {
+    "max": 6,
+    "why": "셋 다 다르다(우리 8.33 · pdf.js 9.62). JPEG2000 색변환을 셋이 다르게 푼다."
+  },
+  "signed.pdf": {
+    "max": 5,
+    "why": "표준 14글꼴 데이터를 안 싣는다. fonts 경로를 주면 1.61 로 떨어진다."
+  },
+  "signed-tampered.pdf": { "max": 5, "why": "signed 와 같다. fonts 경로를 주면 1.60." }
+}

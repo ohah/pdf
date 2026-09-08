@@ -49,6 +49,31 @@ for (const r of real.slice(0, 20)) {
 }
 const over = real.filter((r) => r.bad > BAD_PCT);
 console.log(`\n견본 ${rows.length}개 · 맞댈 수 있던 것 ${real.length} · 크게다름 ${BAD_PCT}% 초과 ${over.length}`);
+
+// 크게 다른 것을 세기만 하면 "13" 이 "14" 가 되어도 아무도 안 본다. 하나하나
+// poppler 를 세 번째 눈으로 넣어 가린 뒤 까닭과 함께 적어 두었다. 여기 없는
+// 이름이 기준을 넘으면 실패한다 — 새 차이가 알던 차이 속에 숨지 않게.
+const known = JSON.parse(fs.readFileSync("tests/pdfjs-known.json", "utf8"));
+const news = over.filter((r) => !known[r.name]);
+const loud = over.filter((r) => known[r.name] && r.bad > known[r.name].max);
+// 좋아진 것도 알려 준다 — 안 그러면 목록이 낡은 채로 남는다.
+const quiet = Object.entries(known).filter(([k, v]) =>
+  k !== "_" && real.some((r) => r.name === k && r.bad < v.max / 2));
+const gone = Object.keys(known).filter((k) => k !== "_" && !real.some((r) => r.name === k));
+
+if (news.length) {
+  console.log(`\n적혀 있지 않은 차이 ${news.length}개 — 가려서 tests/pdfjs-known.json 에 적어야 한다:`);
+  for (const r of news) console.log(`  ${r.name} ${r.bad.toFixed(2)}%`);
+}
+if (loud.length) {
+  console.log(`\n적어 둔 것보다 나빠진 것 ${loud.length}개:`);
+  for (const r of loud) console.log(`  ${r.name} ${r.bad.toFixed(2)}% > ${known[r.name].max}% — ${known[r.name].why.slice(0, 60)}`);
+}
+if (quiet.length) {
+  console.log(`\n좋아진 것 ${quiet.length}개 — 목록의 max 를 줄이거나 지운다:`);
+  for (const [k, v] of quiet) console.log(`  ${k} ${real.find((r) => r.name === k).bad.toFixed(2)}% (적어 둔 것 ${v.max}%)`);
+}
+if (gone.length) console.log(`\n목록에는 있는데 맞댄 적 없는 이름 ${gone.length}개: ${gone.join(", ")}`);
 if (theirsBlank.length) {
   console.log(`\npdf.js 가 못 그린 쪽 ${theirsBlank.length}개 (우리는 그렸다):`);
   console.log("  " + theirsBlank.map((r) => `${r.name} ${r.inkA.toFixed(0)}%`).join(", "));
@@ -86,4 +111,12 @@ if (errs.length) {
   bad = 1;
 }
 if (oursBlank.length) bad = 1;
+if (news.length) {
+  console.log('\n✗ 가리지 않은 차이가 있다 — 우리 결함인지 아닌지 정해서 적어야 한다');
+  bad = 1;
+}
+if (loud.length) {
+  console.log('\n✗ 적어 둔 것보다 나빠졌다');
+  bad = 1;
+}
 process.exit(bad);
