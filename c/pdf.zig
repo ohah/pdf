@@ -1344,6 +1344,7 @@ pub fn putFrac(dst: []u8, v: f32) usize {
 // 부르는 자리를 안 건드리도록 이름만 이어 둔다. JS 에 내보내는 것은
 // 껍데기만 여기 두고 알맹이는 저쪽에 있다.
 const pdfapply = @import("pdfapply.zig");
+pub const sortXref = pdfapply.sortXref;
 pub const keyIs = pdfapply.keyIs;
 pub const skipVal = pdfapply.skipVal;
 pub const stripEncryptOut = pdfapply.stripEncryptOut;

@@ -54,6 +54,18 @@ export function checkPdf(buf) {
     else if (s.startsWith("xref", at)) {
       const tail = s.slice(at, at + 200000);
       const secs = [...tail.matchAll(/(\d+)\s+(\d+)\s*\n((?:\d{10} \d{5} [nf]\s\s?\n?)+)/g)];
+      // 구역은 객체 번호 오름차순이어야 하고 겹치면 안 된다.
+      //
+      // 여태 구역마다 머리에 적힌 번호로 항목만 확인했다. 그러면 구역 순서가
+      // 뒤집혀도 통과다 — 쓰는 쪽 정렬을 통째로 꺼도 아무도 안 잡았다
+      // (구역 번호가 9 25 23 24 2 26 으로 나왔다). 엄격한 리더는 이런 표를
+      // 통째로 버려서, 덧붙인 객체가 없는 것처럼 읽힌다.
+      let seen = -1;
+      for (const sec of secs) {
+        const first = Number(sec[1]);
+        if (first <= seen) bad.push(`xref 구역이 오름차순이 아니다 (${first} 이 ${seen} 뒤에 온다)`);
+        seen = first + Number(sec[2]) - 1;
+      }
       for (const sec of secs) {
         let num = Number(sec[1]);
         for (const e of sec[3].matchAll(/(\d{10}) (\d{5}) ([nf])/g)) {

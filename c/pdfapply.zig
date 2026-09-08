@@ -291,6 +291,29 @@ pub fn skipVal(b: []const u8, from: usize, end: usize) usize {
 /// 시절의 숫자인데, 쪽 상한을 없애면서 이 둘만 남았다 — 4100 쪽짜리를
 /// 돌려 내면 표 밖으로 넘겨 써서 상호참조표에 엉뚱한 번호가 박혔다
 /// (6000 쪽이면 3806 개). 이제 담을 만큼 잡는다.
+/// 상호참조표를 객체 번호 오름차순으로 세운다.
+///
+/// 순서가 어긋나면 엄격한 리더가 표를 통째로 버려, 덧붙인 객체가 없는 것처럼
+/// 읽힌다. 항목이 수백 개를 넘지 않으므로 삽입정렬로 충분하고, 거의 정렬된
+/// 입력에서는 한 번 훑는 것과 같다.
+///
+/// 이 열두 줄이 세 군데(merge·encout·apply)에 글자까지 똑같이 있었는데,
+/// 왜 정렬해야 하는지는 한 곳에만 적혀 있었다.
+pub fn sortXref(nums: []u32, offs: []usize, n: usize) void {
+    var i: usize = 1;
+    while (i < n) : (i += 1) {
+        const kn = nums[i];
+        const ko = offs[i];
+        var j = i;
+        while (j > 0 and nums[j - 1] > kn) : (j -= 1) {
+            nums[j] = nums[j - 1];
+            offs[j] = offs[j - 1];
+        }
+        nums[j] = kn;
+        offs[j] = ko;
+    }
+}
+
 pub fn xrefTables(want: usize) ?struct { offs: []usize, nums: []u32 } {
     const cap = @max(@as(usize, 64), @min(want, 1 << 20));
     const off_at = core.zoneAlloc(cap * @sizeOf(usize)) orelse return null;
@@ -1632,18 +1655,7 @@ pub fn apply() usize {
     // 상호참조표는 객체 번호 오름차순이어야 한다. 순서가 어긋나면 엄격한
     // 리더가 표를 통째로 버려, 덧붙인 객체가 없는 것처럼 읽힌다.
     {
-        var si: usize = 1;
-        while (si < new_n) : (si += 1) {
-            const kn = new_nums[si];
-            const ko = new_offsets[si];
-            var sj = si;
-            while (sj > 0 and new_nums[sj - 1] > kn) : (sj -= 1) {
-                new_nums[sj] = new_nums[sj - 1];
-                new_offsets[sj] = new_offsets[sj - 1];
-            }
-            new_nums[sj] = kn;
-            new_offsets[sj] = ko;
-        }
+        sortXref(new_nums, new_offsets, new_n);
     }
     const xref_pos = pos;
     core.appendStr(&pos, "xref\n");

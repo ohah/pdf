@@ -311,18 +311,7 @@ pub fn merge() usize {
 
     // 상호참조표와 트레일러
     {
-        var si: usize = 1;
-        while (si < new_n) : (si += 1) {
-            const kn = new_nums[si];
-            const ko = new_offsets[si];
-            var sj = si;
-            while (sj > 0 and new_nums[sj - 1] > kn) : (sj -= 1) {
-                new_nums[sj] = new_nums[sj - 1];
-                new_offsets[sj] = new_offsets[sj - 1];
-            }
-            new_nums[sj] = kn;
-            new_offsets[sj] = ko;
-        }
+        core.sortXref(new_nums, new_offsets, new_n);
     }
     const xref_pos = pos;
     core.appendStr(&pos, "xref\n");
