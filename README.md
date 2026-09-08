@@ -37,6 +37,27 @@ cp -r node_modules/@ohah/pdf/cmaps public/
 CMap 은 문서가 실제로 쓰는 이름만 그때그때 받아 간다 — 7MB 를 통째로 내려받지
 않는다. 한글·일본어·중국어 문서를 안 다룬다면 `cmaps` 는 없어도 된다.
 
+### 표준 글꼴 (없어도 된다)
+
+Helvetica·Times 처럼 "다들 갖고 있는 글꼴"은 문서가 파일을 안 싣는다. 아무것도
+안 알려 주면 시스템 글꼴로 대신 그린다 — 보기에는 멀쩡하지만 글자 자리가 OS·
+브라우저마다 조금씩 다르다(같은 글을 재 보니 `serif` 폭이 chromium 241 ·
+firefox 273 · webkit 241 로 갈렸다).
+
+진짜 글꼴을 두고 주소를 알려 주면 그 차이가 없어진다.
+
+```js
+PDFDocument.open(bytes, { wasm: "/pdf.wasm", cmaps: "/cmaps", fonts: "/standard_fonts" })
+```
+
+받는 것은 문서가 실제로 쓰는 한 벌뿐이다. 안 알려 주면 아무것도 안 받는다 —
+꾸러미가 커지지도 않는다.
+
+지금은 Helvetica 계열(Liberation Sans, TrueType)만 싣는다. Times·Courier·
+Symbol 은 Type1(`.pfb`)뿐인데 브라우저가 셋 다 거부한다(chromium·firefox·
+webkit 에 직접 물어봤다). 그것들은 이름을 보고 갈래(`serif`·`monospace`)만
+맞춰 시스템 글꼴로 그린다.
+
 ## 무엇을 하나
 
 **읽기** — 쪽 그리기, 글자 뽑기(읽는 차례로 줄 세우기 포함), 링크, 목차,

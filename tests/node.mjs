@@ -10,6 +10,7 @@
 // dist/ 를 읽으므로 build:js 를 먼저 돌려야 한다.
 import { readFile } from "node:fs/promises";
 import { PDFDocument, PasswordNeeded } from "../dist/index.js";
+import { stdFontFile, stdFontUrl } from "../dist/std14.js";
 
 const FX = (process.argv[2] ?? "tests/fixtures").replace(/\/$/, "");
 let ok = 0;
@@ -431,6 +432,33 @@ const t = (name, cond, got) => {
     }
   }
 }
+
+// 표준 14글꼴을 밖에서 받을 때 어느 파일을 고르는가.
+//
+// 이름만 보고 고르므로 견본 없이도 잰다. .pfb(Type1)를 고르면 안 된다 —
+// 세 브라우저 다 FontFace 로 거부한다(직접 물어봤다). 그래서 Times·
+// Courier·Symbol 은 undefined 여야 하고, 시스템 글꼴로 대신 그린다.
+for (const [name, want] of [
+  ["Helvetica", "LiberationSans-Regular.ttf"],
+  ["Helvetica-Bold", "LiberationSans-Bold.ttf"],
+  ["Helvetica-Oblique", "LiberationSans-Italic.ttf"],
+  ["Helvetica-BoldOblique", "LiberationSans-BoldItalic.ttf"],
+  ["Arial", "LiberationSans-Regular.ttf"],
+  ["Arial-BoldMT", "LiberationSans-Bold.ttf"],
+  ["ArialMT", "LiberationSans-Regular.ttf"],
+  ["Times-Roman", undefined],
+  ["Times-Bold", undefined],
+  ["Courier", undefined],
+  ["Symbol", undefined],
+  ["ZapfDingbats", undefined],
+  ["NanumGothic", undefined],
+  ["", undefined],
+]) t(`표준글꼴 이름: ${name || "(빈 이름)"}`, stdFontFile(name) === want, stdFontFile(name));
+
+// 폴더 끝의 / 는 있으나 없으나 같다
+t("표준글꼴 주소: 끝 슬래시", stdFontUrl("/std/", "Helvetica") === "/std/LiberationSans-Regular.ttf", stdFontUrl("/std/", "Helvetica"));
+t("표준글꼴 주소: 슬래시 없음", stdFontUrl("/std", "Helvetica") === "/std/LiberationSans-Regular.ttf", stdFontUrl("/std", "Helvetica"));
+t("표준글꼴 주소: 못 고르면 없음", stdFontUrl("/std", "Times-Roman") === undefined, stdFontUrl("/std", "Times-Roman"));
 
 console.log(`Node  통과 ${ok} · 실패 ${bad}`);
 process.exit(bad === 0 ? 0 : 1);

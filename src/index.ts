@@ -14,6 +14,7 @@ import { PDFClient, type PageMsg, type OpenMsg, type BuildSpec } from "./client.
 import { openRanged, fillRest, type Ranged } from "./range.js";
 import { drawOps, toLines, type TextRun } from "./draw.js";
 import { type Paths } from "./config.js";
+import { stdFontUrl } from "./std14.js";
 import { checkSignature, type SigCheck } from "./sig.js";
 import { makeViewport, type Viewport } from "./viewport.js";
 
@@ -251,6 +252,20 @@ const fontCache = new Map<string, Promise<string | undefined>>();
 let fontSeq = 0;
 
 /** 문서에 박힌 글꼴을 브라우저에 등록한다. 실패하면 undefined 다. */
+/** 밖에 둔 표준 글꼴 하나. 주소마다 한 번만 받는다. */
+const stdCache = new Map<string, Promise<string | undefined>>();
+async function loadStdFont(url: string): Promise<string | undefined> {
+  const hit = stdCache.get(url);
+  if (hit) return hit;
+  const task = (async () => {
+    // 못 받아도 그냥 시스템 글꼴로 그린다 — 글자가 안 보이는 것보다 낫다.
+    const b = await loadBytes(url).catch(() => null);
+    return b ? await loadFont(b) : undefined;
+  })();
+  stdCache.set(url, task);
+  return task;
+}
+
 async function loadFont(bytes: Uint8Array): Promise<string | undefined> {
   // FontFace 는 문서에 다는 것이라 브라우저에만 있다. Node 에서는 건너뛴다 —
   // 글자 뽑기에는 필요 없고, 그리기는 어차피 캔버스가 있어야 한다.
@@ -282,6 +297,8 @@ export class PDFDocument {
   private shut = false;
   private cache = new Map<string, PageMsg>();
   private fams = new Map<string, (string | undefined)[]>();
+  /** 표준 14글꼴을 어디서 받을지. 안 주면 시스템 글꼴로 대신 그린다. */
+  private stdDir: string | undefined;
   private raw: Uint8Array;
 
   /** 쪽 수 */
@@ -353,9 +370,10 @@ export class PDFDocument {
   private structFlat!: NonNullable<OpenMsg["struct"]>;
   private sigsRaw!: NonNullable<OpenMsg["sigs"]>;
 
-  private constructor(cl: PDFClient, r: OpenMsg, raw: Uint8Array) {
+  private constructor(cl: PDFClient, r: OpenMsg, raw: Uint8Array, stdDir?: string) {
     this.cl = cl;
     this.raw = raw;
+    this.stdDir = stdDir;
     this.take(r);
   }
 
@@ -439,7 +457,7 @@ export class PDFDocument {
         : "could not read the PDF",
       );
     }
-    const doc = new PDFDocument(cl, r, keep);
+    const doc = new PDFDocument(cl, r, keep, opts.fonts);
     if (ranged?.partial) {
       doc.partial = true;
       doc.rest = { url, ranged, opts };
@@ -488,7 +506,12 @@ export class PDFDocument {
     // 그 쪽만 계속 답해 준다.
     if (this.shut) throw new Error("the document is already closed");
     const fams: (string | undefined)[] = [];
-    for (const f of q.fonts) fams.push(f.bytes ? await loadFont(f.bytes) : undefined);
+    for (const f of q.fonts) {
+      if (f.bytes) { fams.push(await loadFont(f.bytes)); continue; }
+      // 파일이 안 박힌 표준 14글꼴. 어디 두었는지 알려 준 경우에만 받는다.
+      const url = this.stdDir ? stdFontUrl(this.stdDir, f.base) : undefined;
+      fams.push(url ? await loadStdFont(url) : undefined);
+    }
     this.cache.set(key, q);
     this.fams.set(key, fams);
     return q;

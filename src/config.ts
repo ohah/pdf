@@ -8,6 +8,12 @@ export type Paths = {
   wasm?: string;
   /** 미리 정의된 CMap 표가 있는 폴더. 없으면 그 표를 쓰는 옛 문서의 글자가 깨진다. */
   cmaps?: string;
+  /**
+   * 표준 14글꼴(Helvetica …) 파일이 있는 폴더. 안 주면 시스템 글꼴로 대신
+   * 그린다 — 받는 것도 없고 보기도 지금과 같지만, 글자 자리가 OS·브라우저
+   * 마다 조금씩 다르다. 주면 필요한 것만 받아 실어 그 차이를 없앤다.
+   */
+  fonts?: string;
 };
 
 /**
@@ -29,7 +35,8 @@ export const onNode =
 // 갈래로 들어오지도 않는데 쓰는 쪽 빌드 로그가 지저분해진다.
 const here = (rel: string) => new URL(rel, import.meta.url).href;
 
-export const DEFAULTS: Required<Paths> = {
+// fonts 는 기본값을 두지 않는다 — 안 주면 아무것도 안 받는 것이 요점이다.
+export const DEFAULTS: Required<Omit<Paths, "fonts">> = {
   wasm: onNode ? here("./pdf.wasm") : "./pdf.wasm",
   cmaps: onNode ? here("../cmaps") : "./cmaps",
 };
