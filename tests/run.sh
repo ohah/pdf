@@ -111,6 +111,14 @@ for pass in $(seq 1 "$N"); do
     echo "  snap.mjs 가 걸렸다 (exit $ONE_RC)"; printf '%s\n' "$ONE_OUT" | tail -8; fail=1
   fi
   # 아직 없는 기능이 조용히 달라지지 않게 못 박는다 (일부러 변경 감지기다)
+  # 곳간을 다시 쓰는지 — 거듭 열어도 잡아 둔 메모리가 안 자라야 한다.
+  # 예전에 300쪽을 굴린 뒤 캔버스 화소로만 392MB 를 쥐고 있던 일이 있었는데,
+  # 그때는 이 시험이 없어 사람이 눈으로 찾았다.
+  one node tests/mem-check.mjs "$FX"
+  mm="$ONE_LAST"
+  if [ "$ONE_RC" != 0 ]; then
+    echo "$ONE_OUT" | grep -E '✗' | head -5; fail=1
+  fi
   one node tests/gap.mjs "$FX"
   gp="$ONE_LAST"
   if [ "$ONE_RC" != 0 ]; then
@@ -127,11 +135,12 @@ for pass in $(seq 1 "$N"); do
   printf "%s회차  적대적 %s개 · 예외 %s · 느림 %s | %s | %s\n" \
     "$pass" "$n" "$ex" "$slow" "$(echo "$fn" | head -1 | sed 's/^ *//')" "$(echo "$ln" | head -1 | sed 's/^ *//')"
   echo "        ${pl# } | ${sg# } | ${nd# } | ${ty# } | ${tc# }"
-  echo "        API ${ap# } | ${rg# } | ${fj# } | ${xf# } | ${jm# } | ${fk# } | ${gp# } | ${sn# }"
+  echo "        API ${ap# } | ${rg# } | ${fj# } | ${xf# } | ${jm# } | ${fk# } | ${gp# } | ${sn# } | ${mm# }"
   if [ "$ex" != 0 ] || [ "$slow" != 0 ]; then echo "$adv" | grep -E '예외|⚠'; fail=1; fi
   # 개수를 못 박는다 — 줄어들면 잡는다. 늘어나는 것은 막지 않는다.
   atleast "기능 단언" "$(printf '%s' "$fn" | grep -oE '기능 단언 [0-9]+' | grep -oE '[0-9]+')" 396
   atleast "적대적" "$n" 600
+  atleast "메모리" "$(printf '%s' "$mm" | grep -oE '메모리 [0-9]+' | grep -oE '[0-9]+')" 6
   atleast "Node" "$(printf '%s' "$nd" | grep -oE '통과 [0-9]+' | tail -1 | grep -oE '[0-9]+')" 76
   atleast "빈틈" "$(printf '%s' "$gp" | grep -oE '빈틈 [0-9]+' | grep -oE '[0-9]+')" 18
   atleast "손자국" "$(printf '%s' "$sn" | grep -oE '손자국 [0-9]+' | grep -oE '[0-9]+')" 160
