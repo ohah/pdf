@@ -46,6 +46,7 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 | `getOpenAction` | ✅ `openAction` |
 | `fingerprints` | ✅ `fingerprint` |
 | `getMarkInfo` | ✅ `tagged` |
+| (pdf.js 에 없음) | ✅ `collection` — 파일 묶음(포트폴리오)의 보기·처음 열 파일·목록 칸 |
 | `getFieldObjects` (문서 전체) | ⚠️ 쪽 단위 `fields(page)` 만 |
 | `getJSActions` · `hasJSActions` · `getCalculationOrderIds` | ⚠️ `calcOrder` 와 양식 계산식(`runCalc`·`recalculate`)은 된다 — 작은 해석기로 푼다. `/OpenAction` 의 자유 스크립트는 일부러 안 돌린다 |
 | `getPageIndex(ref)` · `cachedPageNumber(ref)` | ❌ 객체 ref 개념 없음 |
