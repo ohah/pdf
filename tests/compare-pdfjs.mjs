@@ -20,13 +20,28 @@ const docs = args.length
 // 크게 다른 화소가 이 비율을 넘으면 들여다볼 것으로 친다
 const BAD_PCT = Number(process.env.BAD_PCT ?? 2.0);
 
+// 문서를 여러 쪽에 나눠 나란히 돌린다.
+//
+// 한 쪽에서 147개를 줄줄이 돌리면 20초가 걸린다. 문서끼리는 서로 상관이
+// 없으니 갈라도 된다 — 오히려 갈라야 한다. pdf.js 는 같은 쪽에서 앞 문서의
+// JBIG2 상태를 다음 문서로 흘린다(jb-half 가 홀로면 0.00, 붙여 돌리면
+// 26.51 이었다). 쪽을 나누면 그 물듦도 줄어든다.
+const LANES = Number(process.env.LANES ?? 4);
 const b = await chromium.launch();
-const p = await b.newPage();
-p.on("pageerror", (e) => console.log("  ! " + String(e.message).slice(0, 100)));
-const url = `http://localhost:4277/compare.html?docs=${encodeURIComponent(docs.join(","))}`;
-await p.goto(url, { waitUntil: "domcontentloaded" });
-await p.waitForFunction(() => document.title === "done", null, { timeout: 600_000 });
-const rows = await p.evaluate(() => window.__cmp);
+const slice = Math.ceil(docs.length / LANES);
+const lanes = [];
+for (let i = 0; i < docs.length; i += slice) lanes.push(docs.slice(i, i + slice));
+const got = await Promise.all(lanes.map(async (part) => {
+  const p = await b.newPage();
+  p.on("pageerror", (e) => console.log("  ! " + String(e.message).slice(0, 100)));
+  const url = `http://localhost:4277/compare.html?docs=${encodeURIComponent(part.join(","))}`;
+  await p.goto(url, { waitUntil: "domcontentloaded" });
+  await p.waitForFunction(() => document.title === "done", null, { timeout: 600_000 });
+  const r = await p.evaluate(() => window.__cmp);
+  await p.close();
+  return r;
+}));
+const rows = got.flat();
 await b.close();
 
 const pad = (s, n) => String(s).padEnd(n);
