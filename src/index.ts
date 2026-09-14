@@ -173,6 +173,32 @@ export type Layer = { name: string; on: boolean };
 /** 딸린 파일 하나 */
 export type Attachment = { name: string };
 
+/** 포트폴리오의 칸 하나 — 파일 목록을 어떤 열로 보여 줄지 문서가 정한 것. */
+export type CollectionField = {
+  /** 파일의 /CI 에서 값을 찾을 열쇠 */
+  key: string;
+  /** 사람이 볼 이름. 없으면 열쇠와 같다 */
+  label: string;
+  /** 왼쪽부터의 차례 */
+  order: number;
+  kind: "text" | "date" | "number";
+};
+
+/**
+ * 파일 묶음(포트폴리오) 문서.
+ *
+ * `/Collection` 이 있으면 이 문서의 쪽은 표지일 뿐이고, 뷰어는 `attachments`
+ * 를 목록으로 보여 줘야 한다(규격 §12.3.5). `null` 이면 보통 문서다.
+ */
+export type Collection = {
+  /** 자세히(열 보기) · 타일 · 숨김 */
+  view: "details" | "tile" | "hidden";
+  /** 처음 열 파일 이름. 빈 글자면 문서가 안 정한 것이다 */
+  first: string;
+  /** 목록의 열. 차례대로 정렬해 둔다 */
+  fields: CollectionField[];
+};
+
 /** 이름 목적지 하나. 못 풀면 `page` 는 -1 */
 export type Destination = { name: string; page: number };
 
@@ -315,6 +341,8 @@ export class PDFDocument {
   readonly layers!: Layer[];
   /** 딸린 파일 이름 */
   readonly attachments!: Attachment[];
+  /** 파일 묶음(포트폴리오)이면 그 얼개. 보통 문서면 `null` */
+  readonly collection!: Collection | null;
   /** XFA 양식인가 — 그렇다면 쪽이 거의 비어 있는 것이 정상이다 */
   readonly isXfa!: boolean;
   /**
@@ -391,6 +419,7 @@ export class PDFDocument {
     w.info = r.info ?? [];
     w.layers = r.layers ?? [];
     w.attachments = r.atts ?? [];
+    w.collection = (r.collection as Collection | null | undefined) ?? null;
     w.isXfa = r.xfa === true;
     w.xfaXml = r.xfaXml ?? "";
     // /P 비트. 규격이 정한 자리다(3=인쇄, 4=고침, 5=복사, 6=주석 …).

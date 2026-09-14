@@ -6756,6 +6756,122 @@ var att: struct {
     at: usize = 0,
 } = .{};
 
+/// 포트폴리오(파일 묶음) 문서인가.
+///
+/// /Collection 이 있으면 뷰어는 쪽 대신 파일 목록을 내야 한다(규격 §12.3.5).
+/// 파일 자체는 /EmbeddedFiles 로 이미 꺼내고 있었지만, "이 문서는 묶음이다"
+/// 를 알려 주지 않아 쓰는 쪽이 표지 한 장짜리 문서로 여겼다.
+///
+/// 칸 정의(/Schema)와 파일마다의 값(/CI)까지 담는다 — 그게 있어야 목록을
+/// 이름만이 아니라 문서가 정한 칸으로 보여 줄 수 있다.
+var coll: struct {
+    /// 있나
+    on: bool = false,
+    /// 보기 — 0 자세히(D) · 1 타일(T) · 2 숨김(H)
+    view: u8 = 0,
+    /// 처음 열 파일 이름 (/D). coll.buf 안의 자리.
+    first_off: u32 = 0,
+    first_len: u32 = 0,
+    /// 칸 정의. 열쇠·보일 이름·차례·갈래(0 글자 1 날짜 2 수)
+    key_off: Table(u32, 16) = .{},
+    key_len: Table(u32, 16) = .{},
+    lbl_off: Table(u32, 16) = .{},
+    lbl_len: Table(u32, 16) = .{},
+    ord: Table(i32, 16) = .{},
+    kind: Table(u8, 16) = .{},
+    n: u32 = 0,
+    /// 글자 곳간
+    buf: Table(u8, 4096) = .{},
+    used: u32 = 0,
+} = .{};
+
+/// 딕셔너리를 열쇠·값 쌍으로 걸어 그 열쇠의 글자열 값을 집는다.
+///
+/// find 나 keyPos 로는 안 된다 — 둘 다 앞에서부터 처음 맞는 것을 주므로
+/// << /Subtype /N /N (크기) >> 에서 /N 을 찾으면 Subtype 의 *값* 에 걸린다.
+/// 같은 까닭으로 /View /D /D (b.txt) 에서 /D 도 보기의 값에 걸렸다.
+fn dictStr(b: []const u8, ds: usize, de: usize, key: []const u8) ?usize {
+    var i = ds;
+    while (i < de and isSpace(b[i])) i += 1;
+    if (i + 1 < de and b[i] == '<' and b[i + 1] == '<') i += 2;
+    var guard: u32 = 0;
+    while (i < de and guard < 256) : (guard += 1) {
+        while (i < de and isSpace(b[i])) i += 1;
+        if (i >= de or b[i] != '/') return null;
+        const ks = i;
+        i += 1;
+        while (i < de and !isSpace(b[i]) and b[i] != '/' and b[i] != '<' and
+            b[i] != '[' and b[i] != '(' and b[i] != '>') i += 1;
+        const hit = txEq(b[ks..i], key);
+        while (i < de and isSpace(b[i])) i += 1;
+        if (i >= de) return null;
+        switch (b[i]) {
+            '(' => {
+                if (hit) return i;
+                i += 1;
+                while (i < de and b[i] != ')') : (i += 1) {
+                    if (b[i] == 92 and i + 1 < de) i += 1;
+                }
+                i += 1;
+            },
+            '<' => {
+                if (i + 1 < de and b[i + 1] == '<') {
+                    i = dictEnd(b, i, de);
+                } else {
+                    // 16진 글자열 — <FEFF…> 꼴로 아스키 밖 글자를 담는다
+                    if (hit) return i;
+                    while (i < de and b[i] != '>') i += 1;
+                    i += 1;
+                }
+            },
+            '[' => i = arrayEnd(b, i, de),
+            else => {
+                // 값이 이름(/S)이면 그 슬래시를 먼저 넘겨야 한다 — 안 그러면
+                // 제자리에 서서 한 칸도 못 나아간다.
+                if (b[i] == '/') i += 1;
+                while (i < de and !isSpace(b[i]) and b[i] != '/' and b[i] != '>') i += 1;
+            },
+        }
+    }
+    return null;
+}
+
+const CollSpan = struct { off: u32, len: u32 };
+
+/// PDF 글자열 하나를 곳간에 담는다. 16진·UTF-16·이스케이프를 다 푼다.
+fn collPutText(b: []const u8, at: usize, to: usize) CollSpan {
+    if (!coll.buf.room(coll.used + 1024)) return .{ .off = 0, .len = 0 };
+    const n = copyPdfText(b, at, to, coll.buf.all(), coll.used);
+    if (n == 0) return .{ .off = 0, .len = 0 };
+    const off = coll.used;
+    coll.used += n;
+    return .{ .off = off, .len = n };
+}
+
+fn collPut(t: []const u8) CollSpan {
+    const nl = @min(t.len, 512);
+    if (!coll.buf.room(coll.used + @as(u32, @intCast(nl)))) return .{ .off = 0, .len = 0 };
+    const dst = coll.buf.all();
+    var i: usize = 0;
+    while (i < nl) : (i += 1) dst[coll.used + i] = t[i];
+    const off = coll.used;
+    coll.used += @intCast(nl);
+    return .{ .off = off, .len = @intCast(nl) };
+}
+
+export fn isCollection() u32 { return if (coll.on) 1 else 0; }
+export fn collView() u32 { return coll.view; }
+export fn collTextPtr() usize { return (if (coll.buf.at == 0) heapBase() else coll.buf.at); }
+export fn collFirstOff() u32 { return coll.first_off; }
+export fn collFirstLen() u32 { return coll.first_len; }
+export fn collFieldCount() u32 { return coll.n; }
+export fn collKeyOff(i: u32) u32 { return if (i < coll.n) coll.key_off.all()[i] else 0; }
+export fn collKeyLen(i: u32) u32 { return if (i < coll.n) coll.key_len.all()[i] else 0; }
+export fn collLabelOff(i: u32) u32 { return if (i < coll.n) coll.lbl_off.all()[i] else 0; }
+export fn collLabelLen(i: u32) u32 { return if (i < coll.n) coll.lbl_len.all()[i] else 0; }
+export fn collOrder(i: u32) i32 { return if (i < coll.n) coll.ord.all()[i] else 0; }
+export fn collKind(i: u32) u32 { return if (i < coll.n) coll.kind.all()[i] else 0; }
+
 export fn attCount() u32 { return att.n; }
 export fn attTextPtr() usize { return (if (att.buf.at == 0) heapBase() else att.buf.at); }
 export fn attNameOff(i: u32) u32 { return if (i < att.n) att.name_off.all()[i] else 0; }
@@ -6932,7 +7048,108 @@ fn collectXfa(b: []const u8, as2: usize, ae: usize) void {
     }
 }
 
+/// 카탈로그의 /Collection 을 읽는다.
+fn collectCollection(b: []const u8) void {
+    coll.on = false;
+    coll.view = 0;
+    coll.n = 0;
+    coll.used = 0;
+    coll.first_off = 0;
+    coll.first_len = 0;
+    if (doc.root == 0) return;
+    const rb = findObj(b, doc.root) orelse return;
+    const re = objDictEnd(b, rb);
+    const ca = find(b[rb..re], "/Collection", 0) orelse return;
+    var p = rb + ca + 11;
+    while (p < re and isSpace(b[p])) p += 1;
+    // 딴 객체를 가리킬 수도 있고 그 자리에 적혀 있을 수도 있다
+    var cs = p;
+    var ce = re;
+    if (p < re and isDigit(b[p])) {
+        const n = readUint(b, &p);
+        const ob = findObj(b, n) orelse return;
+        cs = ob;
+        ce = objDictEnd(b, ob);
+    } else if (p < re and b[p] == '<') {
+        ce = dictEnd(b, p, re);
+    } else return;
+    coll.on = true;
+
+    // 보기 — /D 자세히 · /T 타일 · /H 숨김
+    var vname: [16]u8 = undefined;
+    const vn = nameAfter(b, cs, ce, "/View", &vname);
+    if (vn >= 1) coll.view = switch (vname[0]) {
+        'T' => 1,
+        'H' => 2,
+        else => 0,
+    };
+
+    // 처음 열 파일 (/D) — 글자열이다
+    if (dictStr(b, cs, ce, "/D")) |d| {
+        const put = collPutText(b, d, ce);
+        coll.first_off = put.off;
+        coll.first_len = put.len;
+    }
+
+    // 칸 정의 (/Schema) — 이름 → << /Subtype /S|/D|/N /N (보일 이름) /O 차례 >>
+    const sa = find(b[cs..ce], "/Schema", 0) orelse return;
+    var q = cs + sa + 7;
+    while (q < ce and isSpace(b[q])) q += 1;
+    var ss = q;
+    var se = ce;
+    if (q < ce and isDigit(b[q])) {
+        const n = readUint(b, &q);
+        const ob = findObj(b, n) orelse return;
+        ss = ob;
+        se = objDictEnd(b, ob);
+    } else if (q < ce and b[q] == '<') {
+        ss = q + 2;
+        se = dictEnd(b, q, ce);
+    } else return;
+
+    var i = ss;
+    var guard: u32 = 0;
+    while (i < se and guard < 64) : (guard += 1) {
+        while (i < se and isSpace(b[i])) i += 1;
+        if (i >= se or b[i] != '/') break;
+        const ks = i + 1;
+        var ke = ks;
+        while (ke < se and !isSpace(b[ke]) and b[ke] != '/' and b[ke] != '<') ke += 1;
+        i = ke;
+        while (i < se and isSpace(b[i])) i += 1;
+        if (i >= se or b[i] != '<') break;
+        const ds = i;
+        const de = dictEnd(b, i, se);
+        i = de;
+        if (!(coll.key_off.room(coll.n + 1) and coll.key_len.room(coll.n + 1) and
+            coll.lbl_off.room(coll.n + 1) and coll.lbl_len.room(coll.n + 1) and
+            coll.ord.room(coll.n + 1) and coll.kind.room(coll.n + 1))) break;
+        const kp = collPut(b[ks..ke]);
+        // 보일 이름 (/N) — 글자열
+        var lp = kp;
+        if (dictStr(b, ds, de, "/N")) |lab| {
+            const got = collPutText(b, lab, de);
+            if (got.len > 0) lp = got;
+        }
+        var sub: [16]u8 = undefined;
+        var kind: u8 = 0;
+        if (nameAfter(b, ds, de, "/Subtype", &sub) >= 1) kind = switch (sub[0]) {
+            'D' => 1,
+            'N' => 2,
+            else => 0,
+        };
+        coll.key_off.all()[coll.n] = kp.off;
+        coll.key_len.all()[coll.n] = kp.len;
+        coll.lbl_off.all()[coll.n] = lp.off;
+        coll.lbl_len.all()[coll.n] = lp.len;
+        coll.ord.all()[coll.n] = @intCast(intAfter(b, ds, de, "/O") orelse 0);
+        coll.kind.all()[coll.n] = kind;
+        coll.n += 1;
+    }
+}
+
 fn collectAttach(b: []const u8) void {
+    collectCollection(b);
     att.n = 0;
     att.used = 0;
     if (doc.root == 0) return;

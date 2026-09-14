@@ -49,6 +49,18 @@ type Exports = {
   drawLen: () => number;
   fontIsPua: (i: number) => number;
   fontKind?: (i: number) => number;
+  isCollection?: () => number;
+  collView?: () => number;
+  collTextPtr?: () => number;
+  collFirstOff?: () => number;
+  collFirstLen?: () => number;
+  collFieldCount?: () => number;
+  collKeyOff?: (i: number) => number;
+  collKeyLen?: (i: number) => number;
+  collLabelOff?: (i: number) => number;
+  collLabelLen?: (i: number) => number;
+  collOrder?: (i: number) => number;
+  collKind?: (i: number) => number;
   fontNamePtr?: (i: number) => number;
   fontBasePtr?: (i: number) => number;
   fontBaseLen?: (i: number) => number;
@@ -551,6 +563,35 @@ async function open(bytes: Uint8Array, pw: string) {
     });
   }
   // 딸린 파일 — 이름만 먼저 준다. 내용은 받겠다고 할 때 꺼낸다.
+  // 포트폴리오(파일 묶음) — /Collection 이 있으면 뷰어는 쪽 대신 파일 목록을 낸다
+  let collection: {
+    view: "details" | "tile" | "hidden";
+    first: string;
+    fields: { key: string; label: string; order: number; kind: "text" | "date" | "number" }[];
+  } | null = null;
+  if (e.isCollection?.() === 1) {
+    const base = e.collTextPtr?.() ?? 0;
+    const C = (o: number, l: number) =>
+      l ? dec.decode(new Uint8Array(e.memory.buffer, base + o, l)) : "";
+    const KIND = ["text", "date", "number"] as const;
+    const fields: { key: string; label: string; order: number; kind: "text" | "date" | "number" }[] = [];
+    for (let i = 0; i < (e.collFieldCount?.() ?? 0); i++) {
+      fields.push({
+        key: C(e.collKeyOff!(i), e.collKeyLen!(i)),
+        label: C(e.collLabelOff!(i), e.collLabelLen!(i)),
+        order: e.collOrder!(i),
+        kind: KIND[e.collKind!(i)] ?? "text",
+      });
+    }
+    fields.sort((x, y) => x.order - y.order);
+    const VIEW = ["details", "tile", "hidden"] as const;
+    collection = {
+      view: VIEW[e.collView?.() ?? 0] ?? "details",
+      first: C(e.collFirstOff?.() ?? 0, e.collFirstLen?.() ?? 0),
+      fields,
+    };
+  }
+
   const atts = [];
   for (let i = 0; i < (e.attCount?.() ?? 0); i++) {
     atts.push({
@@ -643,7 +684,7 @@ async function open(bytes: Uint8Array, pw: string) {
     pages: e.pageCount(), locked: (e.isEncrypted?.() ?? 0) === 1,
     // 쪽이 너무 많아 뒤를 잘랐는가 — 조용히 잘라 놓고 다 보여 주는 척하지 않는다
     truncated: (e.pagesTruncated?.() ?? 0) === 1,
-    outline: marks, info, sigs, layers, atts,
+    outline: marks, info, sigs, layers, atts, collection,
     xfa: (e.isXfa?.() ?? 0) === 1,
     // XFA 양식의 XML — 있으면 통째로 넘긴다. 뜯는 것은 xfa.ts 몫이다.
     xfaXml: (e.xfaXmlLen?.() ?? 0) > 0

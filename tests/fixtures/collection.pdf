@@ -1,0 +1,64 @@
+%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles 10 0 R >> /Collection 11 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 46 >>
+stream
+BT /F1 14 Tf 40 150 Td (Portfolio cover) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+6 0 obj
+<< /Type /EmbeddedFile /Subtype /text#2Fplain /Length 11 >>
+stream
+first file
+
+endstream
+endobj
+7 0 obj
+<< /Type /EmbeddedFile /Subtype /text#2Fplain /Length 12 >>
+stream
+second file
+
+endstream
+endobj
+8 0 obj
+<< /Type /Filespec /F (a.txt) /UF (a.txt) /EF << /F 6 0 R >> /Desc <FEFFCCABC9F8> /CI << /desc <FEFFCCABC9F80020D30CC77C> /size 11 >> >>
+endobj
+9 0 obj
+<< /Type /Filespec /F (b.txt) /UF (b.txt) /EF << /F 7 0 R >> /Desc <FEFFB458C9F8> /CI << /desc <FEFFB458C9F80020D30CC77C> /size 12 >> >>
+endobj
+10 0 obj
+<< /Names [(a.txt) 8 0 R (b.txt) 9 0 R] >>
+endobj
+11 0 obj
+<< /Type /Collection /View /D /D (b.txt) /Schema << /desc << /Subtype /S /N <FEFFC124BA85> /O 1 >> /size << /Subtype /N /N <FEFFD06CAE30> /O 2 >> >> >>
+endobj
+xref
+0 12
+0000000000 65535 f 
+0000000009 00000 n 
+0000000112 00000 n 
+0000000169 00000 n 
+0000000295 00000 n 
+0000000391 00000 n 
+0000000461 00000 n 
+0000000565 00000 n 
+0000000670 00000 n 
+0000000822 00000 n 
+0000000974 00000 n 
+0000001033 00000 n 
+trailer
+<< /Size 12 /Root 1 0 R >>
+startxref
+1201
+%%EOF

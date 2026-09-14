@@ -86,6 +86,12 @@ export type OpenMsg = {
   info?: string[];
   layers?: { name: string; on: boolean }[];
   atts?: { name: string }[];
+  /** 파일 묶음(포트폴리오)이면 그 얼개 */
+  collection?: {
+    view: "details" | "tile" | "hidden";
+    first: string;
+    fields: { key: string; label: string; order: number; kind: "text" | "date" | "number" }[];
+  } | null;
   /** XFA 양식인가 */
   xfa?: boolean;
   /** XFA 양식의 XML 원문. 아니면 빈 문자열 */

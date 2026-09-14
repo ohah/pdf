@@ -527,6 +527,30 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
 }
 
 {
+  // 파일 묶음(포트폴리오).
+  //
+  // /Collection 이 있으면 이 문서의 쪽은 표지일 뿐이고, 뷰어는 딸린 파일을
+  // 목록으로 보여 줘야 한다. 파일 자체는 /EmbeddedFiles 로 이미 꺼내고
+  // 있었지만 "이 문서는 묶음이다" 를 안 알려 줘서, 쓰는 쪽이 표지 한 장짜리
+  // 문서로 여겼다.
+  const r = await load('collection.pdf');
+  const T = (o, l) => (l ? dec.decode(new Uint8Array(r.ex.memory.buffer, r.ex.collTextPtr() + o, l)) : '');
+  ok('묶음: 묶음이라고 알려 준다', r && r.ex.isCollection() === 1, r && r.ex.isCollection());
+  ok('묶음: 보기는 자세히(/View /D)', r && r.ex.collView() === 0, r && r.ex.collView());
+  ok('묶음: 처음 열 파일 (/D)', T(r.ex.collFirstOff(), r.ex.collFirstLen()) === 'b.txt',
+    T(r.ex.collFirstOff(), r.ex.collFirstLen()));
+  ok('묶음: 칸 둘', r && r.ex.collFieldCount() === 2, r && r.ex.collFieldCount());
+  // /N 은 /Subtype /N 의 값과 이름이 겹친다. 앞에서부터 찾으면 그 값에 걸려
+  // 이름표가 열쇠로 되돌아간다 — 열쇠·값 쌍으로 걸어야 한다.
+  ok('묶음: 이름표가 열쇠가 아니다', T(r.ex.collLabelOff(0), r.ex.collLabelLen(0)) === '설명',
+    T(r.ex.collLabelOff(0), r.ex.collLabelLen(0)));
+  ok('묶음: 아스키 밖 이름표(UTF-16)', T(r.ex.collLabelOff(1), r.ex.collLabelLen(1)) === '크기',
+    T(r.ex.collLabelOff(1), r.ex.collLabelLen(1)));
+  ok('묶음: 수 갈래를 가른다', r && r.ex.collKind(1) === 2, r && r.ex.collKind(1));
+  ok('묶음: 파일도 함께 꺼낸다', r && r.ex.attCount() === 2, r && r.ex.attCount());
+}
+
+{
   // 범위가 뒤로 물러나는 표.
   //
   // 표를 줄여 실으면서(CM2) 범위를 앞 범위로부터의 차이로 적는다. 그 차이는
