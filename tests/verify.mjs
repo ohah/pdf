@@ -654,6 +654,34 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   }
 }
 
+// --- 겉모습 없는 주석 — 규격의 기본 모양으로 그린다
+{
+  // pdf.js 와 poppler 는 이 견본을 1% 안에서 같게 그린다. 우리는 안 그려
+  // 16.36% 였고, 그리고 나서 0.77% 다(tests/triage.mjs noap.pdf).
+  const r = await loadNoForm('noap.pdf');
+  const c = r ? r.counts : {};
+  ok('맨주석: 네모·다각형은 속과 테두리', (c[8] || 0) === 2, c[8]);
+  // 채움 셋 = 바탕 사각형 하나 + 형광펜 두 줄
+  ok('맨주석: 형광펜 두 줄은 채움', (c[6] || 0) === 3, c[6]);
+  ok('맨주석: 동그라미·선·잉크 둘·밑줄·취소선·물결·꺾은선은 획', (c[7] || 0) === 8, c[7]);
+  // 형광펜은 곱하기로 얹는다 — 안 그러면 글자를 덮는다
+  let mul = 0, dash2 = 0, yellow = 0;
+  for (let i = 0; i < r.ops.length;) {
+    const k = r.ops[i], n = r.ops[i + 1];
+    if (k === 26 && r.ops[i + 2] === 1) mul++;
+    if (k === 24 && r.ops[i + 2] === 2 && r.ops[i + 3] === 4 && r.ops[i + 4] === 2) dash2++;
+    if (k === 11 && r.ops[i + 2] === 1 && r.ops[i + 3] === 1 && r.ops[i + 4] === 0) yellow++;
+    i += 2 + n;
+  }
+  ok('맨주석: 형광펜은 곱하기', mul === 1, mul);
+  ok('맨주석: 꺾은선은 점선 [4 2]', dash2 === 1, dash2);
+  ok('맨주석: 노랑 속·형광펜', yellow === 2, yellow);
+  // /BS 도 /Border 도 없으면 규격 기본 1pt — pdf.js 는 안 그리지만 poppler 는 그린다
+  const r2 = await loadNoForm('annots.pdf');
+  const c2 = r2 ? r2.counts : {};
+  ok('맨주석: 테두리 기본 굵기 1 로 네모를 그림', (c2[7] || 0) >= 1 && (c2[13] || 0) >= 1, JSON.stringify([c2[7], c2[13]]));
+}
+
 // --- 쪽마다 회전
 {
   const r = await load('pdf/multi.pdf');

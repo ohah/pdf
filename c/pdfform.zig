@@ -9,6 +9,7 @@
 
 const std = @import("std");
 const core = @import("pdf.zig");
+const pdfbare = @import("pdfbare.zig");
 
 // ===== 입력 칸 (AcroForm) =====
 //
@@ -538,8 +539,12 @@ pub fn drawAnnots(b: []const u8, body: usize, end: usize) void {
         if (rect[2] < rect[0]) { const t = rect[0]; rect[0] = rect[2]; rect[2] = t; }
         if (rect[3] < rect[1]) { const t = rect[1]; rect[1] = rect[3]; rect[3] = t; }
 
-        // /AP /N — 상태별 딕셔너리면 /AS 로 고른다
-        const apa = core.find(b[ab..abe], "/AP", 0) orelse continue;
+        // /AP /N — 상태별 딕셔너리면 /AS 로 고른다.
+        // 겉모습이 아예 없으면 규격의 기본 모양으로 대신 그린다.
+        const apa = core.find(b[ab..abe], "/AP", 0) orelse {
+            _ = pdfbare.draw(b, ab, abe, rect);
+            continue;
+        };
         var ap = ab + apa + 3;
         while (ap < abe and core.isSpace(b[ap])) ap += 1;
         var aps = ap;

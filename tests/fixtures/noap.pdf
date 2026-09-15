@@ -1,0 +1,68 @@
+%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 400] /Resources << >> /Contents 4 0 R /Annots [5 0 R 6 0 R 7 0 R 8 0 R 9 0 R 10 0 R 11 0 R 12 0 R 13 0 R 14 0 R] >>
+endobj
+4 0 obj
+<< /Length 34 >>
+stream
+0.97 0.97 0.97 rg 0 0 400 400 re f
+endstream
+endobj
+5 0 obj
+<< /Type /Annot /Subtype /Square /Rect [20 300 140 380] /C [0 0 1] /IC [1 1 0] /BS << /W 3 >> /F 4 >>
+endobj
+6 0 obj
+<< /Type /Annot /Subtype /Circle /Rect [160 300 280 380] /C [1 0 0] /BS << /W 2 >> /CA 0.5 /F 4 >>
+endobj
+7 0 obj
+<< /Type /Annot /Subtype /Line /Rect [300 300 390 380] /L [305 305 385 375] /C [0 0.6 0] /BS << /W 4 >> /F 4 >>
+endobj
+8 0 obj
+<< /Type /Annot /Subtype /Ink /Rect [20 180 140 280] /InkList [[25 190 50 270 80 200 110 260] [30 230 130 230]] /C [0.5 0 0.5] /BS << /W 2 >> /F 4 >>
+endobj
+9 0 obj
+<< /Type /Annot /Subtype /Highlight /Rect [160 180 280 280] /QuadPoints [165 270 275 270 165 250 275 250  165 230 275 230 165 210 275 210] /C [1 1 0] /F 4 >>
+endobj
+10 0 obj
+<< /Type /Annot /Subtype /Underline /Rect [300 240 390 280] /QuadPoints [305 275 385 275 305 250 385 250] /C [0 0 1] /F 4 >>
+endobj
+11 0 obj
+<< /Type /Annot /Subtype /StrikeOut /Rect [300 180 390 230] /QuadPoints [305 225 385 225 305 195 385 195] /C [1 0 0] /F 4 >>
+endobj
+12 0 obj
+<< /Type /Annot /Subtype /Squiggly /Rect [20 100 140 160] /QuadPoints [25 150 135 150 25 120 135 120] /C [0 0.5 0] /F 4 >>
+endobj
+13 0 obj
+<< /Type /Annot /Subtype /Polygon /Rect [160 20 280 160] /Vertices [170 30 270 60 250 150 180 140] /C [0 0 0] /IC [0.6 0.8 1] /BS << /W 2 >> /F 4 >>
+endobj
+14 0 obj
+<< /Type /Annot /Subtype /PolyLine /Rect [300 20 390 160] /Vertices [305 30 385 60 310 100 380 150] /C [0.3 0.3 0.3] /BS << /W 2 /S /D /D [4 2] >> /F 4 >>
+endobj
+xref
+0 15
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000294 00000 n 
+0000000378 00000 n 
+0000000495 00000 n 
+0000000609 00000 n 
+0000000736 00000 n 
+0000000901 00000 n 
+0000001074 00000 n 
+0000001215 00000 n 
+0000001356 00000 n 
+0000001495 00000 n 
+0000001660 00000 n 
+trailer
+<< /Size 15 /Root 1 0 R >>
+startxref
+1831
+%%EOF
