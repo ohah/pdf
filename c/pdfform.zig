@@ -300,14 +300,7 @@ pub fn collectFields(b: []const u8, body: usize, end: usize) void {
     // 붙은 쪽에서는 뒤에 있는 입력 칸까지 차례가 안 갔다(링크 300 + 주석
     // 400 이 앞서면 칸은 324 개까지만 걷혔다).
     while (q < ae and count < 1 << 20) {
-        while (q < ae and core.isSpace(b[q])) q += 1;
-        if (q >= ae or b[q] == ']') break;
-        if (!core.isDigit(b[q])) { q += 1; continue; }
-        const num = core.readUint(b, &q);
-        while (q < ae and core.isSpace(b[q])) q += 1;
-        if (q < ae and core.isDigit(b[q])) _ = core.readUint(b, &q);
-        while (q < ae and core.isSpace(b[q])) q += 1;
-        if (q < ae and b[q] == 'R') q += 1;
+        const num = core.nextRef(b, &q, ae) orelse break;
         count += 1;
 
         const ab = core.findObj(b, num) orelse continue;
@@ -330,15 +323,7 @@ pub fn collectFields(b: []const u8, body: usize, end: usize) void {
             while (q2 < abe and core.isSpace(b[q2])) q2 += 1;
             if (q2 < abe and core.isDigit(b[q2])) f.parent = core.readUint(b, &q2);
         }
-        if (core.find(b[ab..abe], "/Rect", 0)) |ra| {
-            var rp = ab + ra + 5;
-            while (rp < abe and b[rp] != '[') rp += 1;
-            rp += 1;
-            var i: u32 = 0;
-            while (i < 4 and rp < abe) : (i += 1) f.rect[i] = core.readFloat(b, &rp);
-        } else continue;
-        if (f.rect[2] < f.rect[0]) { const t = f.rect[0]; f.rect[0] = f.rect[2]; f.rect[2] = t; }
-        if (f.rect[3] < f.rect[1]) { const t = f.rect[1]; f.rect[1] = f.rect[3]; f.rect[3] = t; }
+        if (!core.rectAt(b, ab, abe, &f.rect)) continue;
         if (f.rect[2] - f.rect[0] < 1 or f.rect[3] - f.rect[1] < 1) continue;
 
         // 갈래
@@ -516,14 +501,7 @@ pub fn drawAnnots(b: []const u8, body: usize, end: usize) void {
     var q = arr.s;
     var count: u32 = 0;
     while (q < ae and count < 256) {
-        while (q < ae and core.isSpace(core.q_at(b, q))) q += 1;
-        if (q >= ae or b[q] == ']') break;
-        if (!core.isDigit(b[q])) { q += 1; continue; }
-        const num = core.readUint(b, &q);
-        while (q < ae and core.isSpace(b[q])) q += 1;
-        if (q < ae and core.isDigit(b[q])) _ = core.readUint(b, &q);
-        while (q < ae and core.isSpace(b[q])) q += 1;
-        if (q < ae and b[q] == 'R') q += 1;
+        const num = core.nextRef(b, &q, ae) orelse break;
         count += 1;
 
         const ab = core.findObj(b, num) orelse continue;
@@ -537,15 +515,7 @@ pub fn drawAnnots(b: []const u8, body: usize, end: usize) void {
             if ((fl & 2) != 0 or (fl & 32) != 0) continue;
         }
         var rect: [4]f32 = .{ 0, 0, 0, 0 };
-        if (core.find(b[ab..abe], "/Rect", 0)) |ra| {
-            var rp = ab + ra + 5;
-            while (rp < abe and b[rp] != '[') rp += 1;
-            rp += 1;
-            var i: u32 = 0;
-            while (i < 4 and rp < abe) : (i += 1) rect[i] = core.readFloat(b, &rp);
-        } else continue;
-        if (rect[2] < rect[0]) { const t = rect[0]; rect[0] = rect[2]; rect[2] = t; }
-        if (rect[3] < rect[1]) { const t = rect[1]; rect[1] = rect[3]; rect[3] = t; }
+        if (!core.rectAt(b, ab, abe, &rect)) continue;
 
         // /AP /N — 상태별 딕셔너리면 /AS 로 고른다.
         // 겉모습이 아예 없으면 규격의 기본 모양으로 대신 그린다.
@@ -605,21 +575,9 @@ pub fn drawAnnots(b: []const u8, body: usize, end: usize) void {
         const fe2 = core.objDictEnd(b, fb);
 
         var mat: [6]f32 = .{ 1, 0, 0, 1, 0, 0 };
-        if (core.find(b[fb..fe2], "/Matrix", 0)) |ma| {
-            var mp = fb + ma + 7;
-            while (mp < fe2 and b[mp] != '[') mp += 1;
-            mp += 1;
-            var i: u32 = 0;
-            while (i < 6 and mp < fe2) : (i += 1) mat[i] = core.readFloat(b, &mp);
-        }
+        _ = core.readArr(b, fb, fe2, "/Matrix", &mat);
         var bbox: [4]f32 = .{ 0, 0, 1, 1 };
-        if (core.find(b[fb..fe2], "/BBox", 0)) |ba| {
-            var bp = fb + ba + 5;
-            while (bp < fe2 and b[bp] != '[') bp += 1;
-            bp += 1;
-            var i: u32 = 0;
-            while (i < 4 and bp < fe2) : (i += 1) bbox[i] = core.readFloat(b, &bp);
-        }
+        _ = core.readArr(b, fb, fe2, "/BBox", &bbox);
         // BBox 네 모서리를 Matrix 로 옮겨 감싸는 상자를 구한다
         var minx: f32 = 1e30;
         var miny: f32 = 1e30;

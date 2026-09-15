@@ -9,6 +9,7 @@
 
 const std = @import("std");
 const core = @import("pdf.zig");
+const pdfbare = @import("pdfbare.zig");
 
 // ===== 주석 =====
 //
@@ -64,14 +65,7 @@ pub fn collectAnnots(b: []const u8, body: usize, end: usize) void {
     var q = arr.s;
     while (q < ae) {
         if (!ann.room(ann_n)) break;
-        while (q < ae and core.isSpace(b[q])) q += 1;
-        if (q >= ae or b[q] == ']') break;
-        if (!core.isDigit(b[q])) { q += 1; continue; }
-        const num = core.readUint(b, &q);
-        while (q < ae and core.isSpace(b[q])) q += 1;
-        if (q < ae and core.isDigit(b[q])) _ = core.readUint(b, &q);
-        while (q < ae and core.isSpace(b[q])) q += 1;
-        if (q < ae and b[q] == 'R') q += 1;
+        const num = core.nextRef(b, &q, ae) orelse break;
 
         const ab = core.findObj(b, num) orelse continue;
         const abe = core.objDictEnd(b, ab);
@@ -87,41 +81,13 @@ pub fn collectAnnots(b: []const u8, body: usize, end: usize) void {
             @memcpy(ann_buf.all()[ann_used..][0..nn], name[0..nn]);
             ann_used += nn;
         }
-        if (core.find(b[ab..abe], "/Rect", 0)) |ra| {
-            var rp = ab + ra + 5;
-            while (rp < abe and b[rp] != '[') rp += 1;
-            rp += 1;
-            var i: u32 = 0;
-            while (i < 4 and rp < abe) : (i += 1) a.rect[i] = core.readFloat(b, &rp);
-            if (a.rect[2] < a.rect[0]) { const t = a.rect[0]; a.rect[0] = a.rect[2]; a.rect[2] = t; }
-            if (a.rect[3] < a.rect[1]) { const t = a.rect[1]; a.rect[1] = a.rect[3]; a.rect[3] = t; }
-        }
+        _ = core.rectAt(b, ab, abe, &a.rect);
         if (core.intAfter(b, ab, abe, "/F")) |fl| a.flags = fl;
         // /C [r g b] — 회색 하나나 CMYK 넷으로 적히기도 한다
-        if (core.keyPos(b, ab, abe, "/C")) |ca| {
-            var cp = ca + 2;
-            {
-                while (cp < abe and b[cp] != '[' and b[cp] != '/' and b[cp] != '>') cp += 1;
-                if (cp < abe and b[cp] == '[') {
-                    cp += 1;
-                    var vals: [4]f32 = .{ 0, 0, 0, 0 };
-                    var n2: u32 = 0;
-                    while (n2 < 4 and cp < abe) {
-                        while (cp < abe and core.isSpace(b[cp])) cp += 1;
-                        if (cp >= abe or b[cp] == ']') break;
-                        vals[n2] = core.readFloat(b, &cp);
-                        n2 += 1;
-                    }
-                    if (n2 == 1) { a.color = .{ vals[0], vals[0], vals[0] }; a.has_color = true; }
-                    if (n2 == 3) { a.color = .{ vals[0], vals[1], vals[2] }; a.has_color = true; }
-                    if (n2 == 4) {
-                        var rgb6: [3]f32 = .{ 0, 0, 0 };
-                        core.cmykRgb(vals[0], vals[1], vals[2], vals[3], &rgb6);
-                        a.color = rgb6;
-                        a.has_color = true;
-                    }
-                }
-            }
+        {
+            var vals: [4]f32 = .{ 0, 0, 0, 0 };
+            const n2 = pdfbare.colorArray(b, ab, abe, "/C", &vals);
+            if (n2 != 0) { a.color = pdfbare.toRgb(vals, n2); a.has_color = true; }
         }
         // 글(/Contents) · 쓴 이(/T) · 날짜(/M)
         if (core.find(b[ab..abe], "/Contents", 0)) |ta| {
@@ -166,28 +132,13 @@ pub fn collectLinks(b: []const u8, body: usize, end: usize) void {
 
     var q = as2;
     while (q < ae) {
-        while (q < ae and core.isSpace(b[q])) q += 1;
-        if (q >= ae or b[q] == ']') break;
-        if (!core.isDigit(b[q])) { q += 1; continue; }
-        const num = core.readUint(b, &q);
-        while (q < ae and core.isSpace(b[q])) q += 1;
-        if (q < ae and core.isDigit(b[q])) _ = core.readUint(b, &q);
-        while (q < ae and core.isSpace(b[q])) q += 1;
-        if (q < ae and b[q] == 'R') q += 1;
+        const num = core.nextRef(b, &q, ae) orelse break;
 
         const ab = core.findObj(b, num) orelse continue;
         const abe = core.find(b, "endobj", ab) orelse b.len;
         if (core.find(b[ab..abe], "/Link", 0) == null) continue;
         var rect: [4]f32 = .{ 0, 0, 0, 0 };
-        if (core.find(b[ab..abe], "/Rect", 0)) |ra| {
-            var rp = ab + ra + 5;
-            while (rp < abe and b[rp] != '[') rp += 1;
-            rp += 1;
-            var i: u32 = 0;
-            while (i < 4 and rp < abe) : (i += 1) rect[i] = core.readFloat(b, &rp);
-        } else continue;
-        if (rect[2] < rect[0]) { const t = rect[0]; rect[0] = rect[2]; rect[2] = t; }
-        if (rect[3] < rect[1]) { const t = rect[1]; rect[1] = rect[3]; rect[3] = t; }
+        if (!core.rectAt(b, ab, abe, &rect)) continue;
 
         var uoff: u32 = 0;
         var ulen: u32 = 0;

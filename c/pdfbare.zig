@@ -18,50 +18,46 @@ const core = @import("pdf.zig");
 
 const Color = struct { rgb: [3]f32 = .{ 0, 0, 0 }, on: bool = false };
 
-/// /C [..] 꼴의 색. 회색 하나·RGB 셋·CMYK 넷. 빈 배열은 "칠하지 않음".
-fn colorAt(b: []const u8, from: usize, to: usize, key: []const u8) Color {
-    const ca = core.keyPos(b, from, to, key) orelse return .{};
+/// /Key [..] 꼴의 색 배열 성분을 out 에 담고 개수를 준다 — 1 회색 · 3 RGB · 4 CMYK.
+/// 없거나 빈 배열이면 0. 주석 목록(pdfannot)·기본 모양·칸 틀이 다 이걸 쓴다.
+pub fn colorArray(b: []const u8, from: usize, to: usize, key: []const u8, out: *[4]f32) u32 {
+    const ca = core.keyPos(b, from, to, key) orelse return 0;
     var cp = ca + key.len;
     while (cp < to and core.isSpace(b[cp])) cp += 1;
-    if (cp >= to or b[cp] != '[') return .{};
+    if (cp >= to or b[cp] != '[') return 0;
     cp += 1;
-    var vals: [4]f32 = .{ 0, 0, 0, 0 };
     var n: u32 = 0;
     while (n < 4 and cp < to) {
         while (cp < to and core.isSpace(b[cp])) cp += 1;
         if (cp >= to or b[cp] == ']') break;
-        vals[n] = core.readFloat(b, &cp);
+        out[n] = core.readFloat(b, &cp);
         n += 1;
     }
-    return switch (n) {
-        1 => .{ .rgb = .{ vals[0], vals[0], vals[0] }, .on = true },
-        3 => .{ .rgb = .{ vals[0], vals[1], vals[2] }, .on = true },
-        4 => blk: {
-            var rgb: [3]f32 = .{ 0, 0, 0 };
-            core.cmykRgb(vals[0], vals[1], vals[2], vals[3], &rgb);
-            break :blk .{ .rgb = rgb, .on = true };
-        },
-        else => .{},
-    };
+    return if (n == 1 or n == 3 or n == 4) n else 0;
+}
+
+/// 색 배열 성분을 RGB 로. n 이 0 이면 "칠하지 않음".
+pub fn toRgb(vals: [4]f32, n: u32) [3]f32 {
+    if (n == 1) return .{ vals[0], vals[0], vals[0] };
+    if (n == 4) {
+        var rgb: [3]f32 = .{ 0, 0, 0 };
+        core.cmykRgb(vals[0], vals[1], vals[2], vals[3], &rgb);
+        return rgb;
+    }
+    return .{ vals[0], vals[1], vals[2] };
+}
+
+fn colorAt(b: []const u8, from: usize, to: usize, key: []const u8) Color {
+    var vals: [4]f32 = .{ 0, 0, 0, 0 };
+    const n = colorArray(b, from, to, key, &vals);
+    return .{ .rgb = toRgb(vals, n), .on = n != 0 };
 }
 
 /// /Key [n n n …] 의 수들을 out 에 담고 개수를 돌려준다.
 fn numsAt(b: []const u8, from: usize, to: usize, key: []const u8, out: []f32) u32 {
+    // keyPos 로 찾는다 — find 는 /L 을 /LE 에서도 잡는다
     const ka = core.keyPos(b, from, to, key) orelse return 0;
-    var p = ka + key.len;
-    while (p < to and core.isSpace(b[p])) p += 1;
-    if (p >= to or b[p] != '[') return 0;
-    const e = core.arrayEnd(b, p, to);
-    p += 1;
-    var n: u32 = 0;
-    while (n < out.len and p < e) {
-        while (p < e and (core.isSpace(b[p]) or b[p] == '[' or b[p] == ']')) p += 1;
-        if (p >= e) break;
-        if (!(core.isDigit(b[p]) or b[p] == '-' or b[p] == '.' or b[p] == '+')) { p += 1; continue; }
-        out[n] = core.readFloat(b, &p);
-        n += 1;
-    }
-    return n;
+    return core.readArrFrom(b, ka + key.len, to, out);
 }
 
 /// 획 굵기와 점선. /BS << /W 2 /S /D /D [3 2] >> 가 먼저, 없으면 /Border [h v w [d]].
@@ -157,20 +153,9 @@ const Pen = struct {
     }
     /// /MK 의 색 배열을 rg·g·k 연산자로. 빈 배열이면 false.
     fn color(self: *Pen, b: []const u8, from: usize, to: usize, key: []const u8, fill: bool) bool {
-        const ca = core.keyPos(b, from, to, key) orelse return false;
-        var p = ca + key.len;
-        while (p < to and core.isSpace(b[p])) p += 1;
-        if (p >= to or b[p] != '[') return false;
-        p += 1;
-        var vals: [4]f32 = undefined;
-        var n: u32 = 0;
-        while (n < 4 and p < to) {
-            while (p < to and core.isSpace(b[p])) p += 1;
-            if (p >= to or b[p] == ']') break;
-            vals[n] = core.readFloat(b, &p);
-            n += 1;
-        }
-        if (n != 1 and n != 3 and n != 4) return false;
+        var vals: [4]f32 = .{ 0, 0, 0, 0 };
+        const n = colorArray(b, from, to, key, &vals);
+        if (n == 0) return false;
         var i: u32 = 0;
         while (i < n) : (i += 1) self.f(vals[i]);
         self.s(if (n == 1) (if (fill) "g " else "G ") else if (n == 3) (if (fill) "rg " else "RG ") else (if (fill) "k " else "K "));

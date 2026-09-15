@@ -209,38 +209,9 @@ fn readSimpleWidths(f: *core.FontMap, b: []const u8, s: usize, e: usize, first: 
 }
 
 /// CID 글꼴의 /W — "c [w ...]" 또는 "c1 c2 w" 가 섞여 나온다
-fn readCidWidths(f: *core.FontMap, b: []const u8, s: usize, e: usize) void {
-    var p = s;
-    while (p < e) {
-        while (p < e and core.isSpace(b[p])) p += 1;
-        if (p >= e or b[p] == ']') break;
-        if (!core.isDigit(b[p])) { p += 1; continue; }
-        const c1: u32 = @intFromFloat(@max(0, core.readFloat(b, &p)));
-        while (p < e and core.isSpace(b[p])) p += 1;
-        if (p < e and b[p] == '[') {
-            p += 1;
-            var code = c1;
-            while (p < e) {
-                while (p < e and core.isSpace(b[p])) p += 1;
-                if (p >= e or b[p] == ']') { p += 1; break; }
-                if (!(core.isDigit(b[p]) or b[p] == '-' or b[p] == '.')) { p += 1; continue; }
-                core.pushWidth(f, code, core.readFloat(b, &p));
-                code += 1;
-            }
-        } else {
-            if (p >= e or !core.isDigit(b[p])) continue;
-            const c2: u32 = @intFromFloat(@max(0, core.readFloat(b, &p)));
-            while (p < e and core.isSpace(b[p])) p += 1;
-            if (p >= e or !(core.isDigit(b[p]) or b[p] == '-' or b[p] == '.')) continue;
-            const v = core.readFloat(b, &p);
-            var c = c1;
-            while (c <= c2 and c - c1 < 65535) : (c += 1) core.pushWidth(f, c, v);
-        }
-    }
-}
-
-/// /W2 배열. 두 꼴이 섞인다: c [w1y vx vy w1y vx vy …] 와 c1 c2 w1y vx vy.
-fn readCidVMetrics(f: *core.FontMap, b: []const u8, s: usize, e: usize) void {
+/// /W 와 /W2 는 같은 꼴이다 — c [v v v …] 와 c1 c2 v. 한 항목이 폭은 수 하나,
+/// 세로쓰기 자리는 셋(w1y vx vy). 따로 두 벌 두었더니 400 바이트가 겹쳤다.
+fn readCidTable(f: *core.FontMap, b: []const u8, s: usize, e: usize, per: u32) void {
     var p = s;
     const num = struct {
         fn n(bb: []const u8, pp: *usize, ee: usize) ?f32 {
@@ -249,31 +220,39 @@ fn readCidVMetrics(f: *core.FontMap, b: []const u8, s: usize, e: usize) void {
             return core.readFloat(bb, pp);
         }
     }.n;
+    const put = struct {
+        fn g(ff: *core.FontMap, code: u32, v: [3]f32, k: u32) void {
+            if (k == 1) core.pushWidth(ff, code, v[0]) else core.pushVMetric(ff, code, v[0], v[1], v[2]);
+        }
+    }.g;
     while (p < e) {
         while (p < e and core.isSpace(b[p])) p += 1;
         if (p >= e or b[p] == ']') break;
         if (!core.isDigit(b[p])) { p += 1; continue; }
         const c1: u32 = @intFromFloat(@max(0, core.readFloat(b, &p)));
         while (p < e and core.isSpace(b[p])) p += 1;
+        var v: [3]f32 = .{ 0, 0, 0 };
         if (p < e and b[p] == '[') {
             p += 1;
             var code = c1;
             while (p < e) {
                 while (p < e and core.isSpace(b[p])) p += 1;
                 if (p >= e or b[p] == ']') { p += 1; break; }
-                const w1y = num(b, &p, e) orelse { p += 1; continue; };
-                const vx = num(b, &p, e) orelse break;
-                const vy = num(b, &p, e) orelse break;
-                core.pushVMetric(f, code, w1y, vx, vy);
+                var k: u32 = 0;
+                var ok = true;
+                while (k < per) : (k += 1) v[k] = num(b, &p, e) orelse { ok = false; break; };
+                if (!ok) { if (k == 0) { p += 1; continue; } else break; }
+                put(f, code, v, per);
                 code += 1;
             }
         } else {
             const c2: u32 = @intFromFloat(@max(0, num(b, &p, e) orelse continue));
-            const w1y = num(b, &p, e) orelse continue;
-            const vx = num(b, &p, e) orelse continue;
-            const vy = num(b, &p, e) orelse continue;
+            var k: u32 = 0;
+            var ok = true;
+            while (k < per) : (k += 1) v[k] = num(b, &p, e) orelse { ok = false; break; };
+            if (!ok) continue;
             var c = c1;
-            while (c <= c2 and c - c1 < 65535) : (c += 1) core.pushVMetric(f, c, w1y, vx, vy);
+            while (c <= c2 and c - c1 < 65535) : (c += 1) put(f, c, v, per);
         }
     }
 }
@@ -380,12 +359,12 @@ pub fn attachWidths(b: []const u8, fbody: usize) void {
         if (core.keyPos(b, db, de, "/W2")) |wa| {
             var p = wa + 3;
             while (p < de and core.isSpace(b[p])) p += 1;
-            if (p < de and b[p] == '[') readCidVMetrics(f, b, p + 1, arrayEnd(b, p, de));
+            if (p < de and b[p] == '[') readCidTable(f, b, p + 1, arrayEnd(b, p, de), 3);
         }
         if (core.find(b[db..de], "/W", 0)) |wa| {
             var p = db + wa + 2;
             while (p < de and core.isSpace(b[p])) p += 1;
-            if (p < de and b[p] == '[') readCidWidths(f, b, p + 1, arrayEnd(b, p, de));
+            if (p < de and b[p] == '[') readCidTable(f, b, p + 1, arrayEnd(b, p, de), 1);
         }
         if (f.dw == 0) f.dw = 1000; // 규격 기본값
         return;

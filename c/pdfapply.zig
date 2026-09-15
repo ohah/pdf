@@ -346,13 +346,7 @@ fn radioParents(b: []const u8, pos0: usize, new_nums: []u32, new_offsets: []usiz
         const ke = core.arrayEnd(b, q, pe);
         q += 1;
         while (q < ke and new_n.* + 1 < new_nums.len and core.outRoom(pos, 4096)) {
-            while (q < ke and core.isSpace(b[q])) q += 1;
-            if (q >= ke or !core.isDigit(b[q])) break;
-            const kid = core.readUint(b, &q);
-            while (q < ke and core.isSpace(b[q])) q += 1;
-            if (q < ke and core.isDigit(b[q])) _ = core.readUint(b, &q);
-            while (q < ke and core.isSpace(b[q])) q += 1;
-            if (q < ke and b[q] == 'R') q += 1;
+            const kid = core.nextRef(b, &q, ke) orelse break;
             if (written(new_nums, new_n.*, kid)) continue;
             const kb = core.findObj(b, kid) orelse continue;
             const kend = core.objDictEnd(b, kb);
@@ -1288,15 +1282,7 @@ pub fn apply() usize {
                 // 표준 글꼴에 없는 글자가 섞였다 — 화면 글꼴로 그린 그림을
                 // 그대로 심는다. 1비트 마스크라 지금 색으로 칠해진다.
                 var rect: [4]f32 = .{ 0, 0, 0, 0 };
-                if (core.find(b[ob..oe], "/Rect", 0)) |ra| {
-                    var rp = ob + ra + 5;
-                    while (rp < oe and b[rp] != '[') rp += 1;
-                    rp += 1;
-                    var ii: u32 = 0;
-                    while (ii < 4 and rp < oe) : (ii += 1) rect[ii] = core.readFloat(b, &rp);
-                }
-                if (rect[2] < rect[0]) { const t = rect[0]; rect[0] = rect[2]; rect[2] = t; }
-                if (rect[3] < rect[1]) { const t = rect[1]; rect[1] = rect[3]; rect[3] = t; }
+                _ = core.rectAt(b, ob, oe, &rect);
                 const bw = rect[2] - rect[0];
                 const bh = rect[3] - rect[1];
                 if (bw > 1 and bh > 1 and new_n + 3 < new_nums.len and core.outRoom(pos, e.mlen + 1024)) {
@@ -1357,15 +1343,7 @@ pub fn apply() usize {
                 }
             } else if (e.kind == 0) {
                 var rect: [4]f32 = .{ 0, 0, 0, 0 };
-                if (core.find(b[ob..oe], "/Rect", 0)) |ra| {
-                    var rp = ob + ra + 5;
-                    while (rp < oe and b[rp] != '[') rp += 1;
-                    rp += 1;
-                    var ax: u32 = 0;
-                    while (ax < 4 and rp < oe) : (ax += 1) rect[ax] = core.readFloat(b, &rp);
-                }
-                if (rect[2] < rect[0]) { const t = rect[0]; rect[0] = rect[2]; rect[2] = t; }
-                if (rect[3] < rect[1]) { const t = rect[1]; rect[1] = rect[3]; rect[3] = t; }
+                _ = core.rectAt(b, ob, oe, &rect);
                 const bw = rect[2] - rect[0];
                 const bh = rect[3] - rect[1];
                 if (bw > 1 and bh > 1) {
@@ -1471,32 +1449,13 @@ pub fn apply() usize {
                 }
             }
 
-            // 위젯을 다시 쓴다 — 원본 딕셔너리에서 /V·/AS·/AP 만 갈아 끼운다
+            // 위젯을 다시 쓴다 — 원본 딕셔너리에서 /V·/AS·/AP 만 갈아 끼운다.
+            // 이름만 바꿀 때는 값을 건드리지 않는다 — /T 만 걷어 낸다.
             new_offsets[new_n] = pos;
             new_nums[new_n] = e.obj;
             new_n += 1;
-            core.appendNum(&pos, e.obj);
-            core.appendStr(&pos, " 0 obj\n<<");
-            var fx = ds2 + 2;
-            const inner_end = de2 - 2;
-            while (fx < inner_end and core.outRoom(pos, 8)) {
-                // 이름만 바꿀 때는 값을 건드리지 않는다 — /T 만 걷어 낸다
-                const drop = if (e.kind == 3)
-                    keyIs(b, fx, inner_end, "/T")
-                else
-                    (keyIs(b, fx, inner_end, "/V") or keyIs(b, fx, inner_end, "/AS") or
-                        (e.kind == 0 and keyIs(b, fx, inner_end, "/AP")));
-                if (b[fx] == '/' and drop) {
-                    var kq = fx + 1;
-                    while (kq < inner_end and !core.isSpace(b[kq]) and b[kq] != '/' and b[kq] != '(' and
-                        b[kq] != '<' and b[kq] != '[' and !core.isDigit(b[kq])) kq += 1;
-                    fx = skipVal(b, kq, inner_end);
-                    continue;
-                }
-                core.outBuf()[pos] = b[fx];
-                pos += 1;
-                fx += 1;
-            }
+            const drop: []const []const u8 = if (e.kind == 3) &.{"/T"} else if (e.kind == 0) &.{ "/V", "/AS", "/AP" } else &.{ "/V", "/AS" };
+            if (!copyDictDropping(b, e.obj, &pos, drop)) { new_n -= 1; continue; }
             if (e.kind == 3) {
                 core.appendStr(&pos, " /T ");
                 core.appendTextStr(&pos, val);

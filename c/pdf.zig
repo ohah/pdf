@@ -1418,6 +1418,36 @@ var cur: struct {
     font: i32 = -1,
 } = .{};
 
+/// 배열 안에서 다음 참조 "n 0 R" 의 n 을 꺼낸다. 참조가 아닌 것은 건너뛰고,
+/// 끝(`]`)이면 null. 주석·입력 칸·라디오 형제 순회가 같은 고리를 들고 있었다.
+pub fn nextRef(b: []const u8, p: *usize, end: usize) ?u32 {
+    while (true) {
+        while (p.* < end and isSpace(b[p.*])) p.* += 1;
+        if (p.* >= end or b[p.*] == ']') return null;
+        if (!isDigit(b[p.*])) { p.* += 1; continue; }
+        const num = readUint(b, p);
+        while (p.* < end and isSpace(b[p.*])) p.* += 1;
+        if (p.* < end and isDigit(b[p.*])) _ = readUint(b, p);
+        while (p.* < end and isSpace(b[p.*])) p.* += 1;
+        if (p.* < end and b[p.*] == 'R') p.* += 1;
+        return num;
+    }
+}
+
+/// /Rect [x0 y0 x1 y1] 를 읽고 작은 쪽이 앞에 오게 맞춘다. 없으면 false.
+/// 여섯 군데가 같은 고리를 들고 있었다 — 주석 목록·그리기·입력 칸·저장 둘.
+pub fn rectAt(b: []const u8, from: usize, to: usize, out: *[4]f32) bool {
+    const ra = find(b[from..to], "/Rect", 0) orelse return false;
+    var rp = from + ra + 5;
+    while (rp < to and b[rp] != '[') rp += 1;
+    rp += 1;
+    var i: u32 = 0;
+    while (i < 4 and rp < to) : (i += 1) out[i] = readFloat(b, &rp);
+    if (out[2] < out[0]) { const t = out[0]; out[0] = out[2]; out[2] = t; }
+    if (out[3] < out[1]) { const t = out[1]; out[1] = out[3]; out[3] = t; }
+    return true;
+}
+
 /// 글 한 줄을 지금 채움색으로 낸다 — 겉모습 없는 글상자 주석(pdfbare)이 쓴다.
 /// 글꼴 번호 0 은 "문서 글꼴 아님" 이라 화면 쪽이 시스템 글꼴로 그린다.
 pub fn emitText(x: f32, y: f32, size: f32, utf8: []const u8) void {
@@ -4192,13 +4222,7 @@ fn scanShadings(b: []const u8, rs: usize, re_: usize) void {
                         t2.mat = .{ 1, 0, 0, 1, 0, 0 };
                         t2.xstep = 0;
                         t2.ystep = 0;
-                        if (find(b[ds..de3], "/Matrix", 0)) |ma2| {
-                            var mp2 = ds + ma2 + 7;
-                            while (mp2 < de3 and b[mp2] != '[') mp2 += 1;
-                            mp2 += 1;
-                            var mi2: u32 = 0;
-                            while (mi2 < 6 and mp2 < de3) : (mi2 += 1) t2.mat[mi2] = readFloat(b, &mp2);
-                        }
+                        _ = readArr(b, ds, de3, "/Matrix", &t2.mat);
                         if (find(b[ds..de3], "/XStep", 0)) |xa| {
                             var xp2 = ds + xa + 6;
                             while (xp2 < de3 and isSpace(b[xp2])) xp2 += 1;
@@ -4671,21 +4695,8 @@ fn scanXObjects(b: []const u8, rs: usize, re_: usize, depth: u32) void {
                             fo.has_bbox = false;
                             // 투명 그룹인가 — 통째로 한 판에 그려 겹쳐야 한다
                             fo.group = find(b[ob..oe], "/Transparency", 0) != null;
-                            if (find(b[ob..oe], "/Matrix", 0)) |ma| {
-                                var mp = ob + ma + 7;
-                                while (mp < oe and b[mp] != '[') mp += 1;
-                                mp += 1;
-                                var mi: u32 = 0;
-                                while (mi < 6 and mp < oe) : (mi += 1) fo.mat[mi] = readFloat(b, &mp);
-                            }
-                            if (find(b[ob..oe], "/BBox", 0)) |ba| {
-                                var bp = ob + ba + 5;
-                                while (bp < oe and b[bp] != '[') bp += 1;
-                                bp += 1;
-                                var bi: u32 = 0;
-                                while (bi < 4 and bp < oe) : (bi += 1) fo.bbox[bi] = readFloat(b, &bp);
-                                fo.has_bbox = true;
-                            }
+                            _ = readArr(b, ob, oe, "/Matrix", &fo.mat);
+                            if (readArr(b, ob, oe, "/BBox", &fo.bbox) > 0) fo.has_bbox = true;
                             formn.n2 += 1;
                             // 폼 안의 글꼴·그림도 등록해 둔다
                             if (depth < 2) scanFormResources(b, ob, oe, depth);
@@ -7478,7 +7489,12 @@ fn findShade(name: []const u8) i32 {
 /// 딕셔너리의 숫자 배열을 읽는다. 읽은 개수를 준다.
 pub fn readArr(b: []const u8, ds: usize, de: usize, key: []const u8, dst: []f32) u32 {
     const a = find(b[ds..de], key, 0) orelse return 0;
-    var p = ds + a + key.len;
+    return readArrFrom(b, ds + a + key.len, de, dst);
+}
+
+/// 열쇠 바로 뒤 자리부터 [ … ] 의 수를 읽는다. 열쇠를 keyPos 로 찾은 쪽(pdfbare)도 쓴다.
+pub fn readArrFrom(b: []const u8, p0: usize, de: usize, dst: []f32) u32 {
+    var p = p0;
     while (p < de and isSpace(b[p])) p += 1;
     if (p >= de or b[p] != '[') return 0;
     p += 1;
