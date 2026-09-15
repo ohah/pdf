@@ -52,6 +52,14 @@ export type PageMsg = {
     calc: string;
     /** 보이는 꼴을 정하는 스크립트 (/AA /F) */
     format: string;
+    /**
+     * 부모 칸의 객체 번호. 없으면 0.
+     *
+     * 라디오는 부모 하나에 위젯 여럿이 달려 값을 나눠 갖는다 — 같은 `parent`
+     * 면 한 묶음이고, 하나만 켜진다. 고쳐 저장할 때는 엔진이 부모의 /V 와
+     * 형제의 /AS 까지 맞춘다.
+     */
+    parent: number;
   }[];
   fonts: {
     bytes: Uint8Array | null; pua: boolean;

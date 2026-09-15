@@ -42,4 +42,19 @@ fs.writeFileSync(`${S}/form.pdf`, build([
   '<< /Fields [5 0 R 6 0 R 7 0 R 8 0 R] /DR << /Font << /Helv 11 0 R >> >> /DA (/Helv 0 Tf 0 g) >>',
   '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
 ]));
-console.log('form.pdf 만듦');
+// 라디오 묶음 — 부모 하나(/FT /Btn, /Ff 의 15번 비트)에 위젯 둘이 /Kids 로
+// 달려 값을 나눠 갖는다. 값(/V)은 부모가 들고, 위젯은 /AS 로 켜짐만 든다.
+fs.writeFileSync(`${S}/radio.pdf`, build([
+  '<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] /DA (0 g /Helv 10 Tf) >> >>',
+  '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+  '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Annots [6 0 R 7 0 R] /Contents 4 0 R >>',
+  stream('', B('0.98 0.98 0.98 rg 0 0 200 200 re f\n')),
+  '<< /FT /Btn /Ff 49152 /T (pick) /V /a /Kids [6 0 R 7 0 R] >>',
+  '<< /Type /Annot /Subtype /Widget /Parent 5 0 R /Rect [30 120 60 150] /F 4 /AS /a'
+    + ' /AP << /N << /a 8 0 R /Off 9 0 R >> >> /MK << /BC [0 0 0] >> >>',
+  '<< /Type /Annot /Subtype /Widget /Parent 5 0 R /Rect [110 120 140 150] /F 4 /AS /Off'
+    + ' /AP << /N << /b 8 0 R /Off 9 0 R >> >> /MK << /BC [0 0 0] >> >>',
+  stream('/Type /XObject /Subtype /Form /BBox [0 0 30 30]', B('0 0 0 rg 8 8 14 14 re f 0 0 0 RG 1 w 0.5 0.5 29 29 re S')),
+  stream('/Type /XObject /Subtype /Form /BBox [0 0 30 30]', B('0 0 0 RG 1 w 0.5 0.5 29 29 re S')),
+]));
+console.log('form.pdf·radio.pdf 만듦');

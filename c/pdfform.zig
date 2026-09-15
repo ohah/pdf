@@ -42,6 +42,9 @@ const FieldT = struct {
     calc_len: u32,
     fmt_off: u32,
     fmt_len: u32,
+    /// 위젯의 /Parent 객체. 라디오 묶음은 한 부모 아래 위젯 여럿이 값을 나눠
+    /// 갖는다 — 같은 부모면 같은 묶음이고, 하나만 켜져야 한다. 없으면 0.
+    parent: u32,
 };
 pub var field_n: u32 = 0;
 /// fld_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
@@ -61,6 +64,7 @@ pub fn fieldCalcLen(i: u32) u32 { return if (i < field_n) field.all()[i].calc_le
 pub fn fieldFmtOff(i: u32) u32 { return if (i < field_n) field.all()[i].fmt_off else 0; }
 pub fn fieldFmtLen(i: u32) u32 { return if (i < field_n) field.all()[i].fmt_len else 0; }
 pub fn fieldChecked(i: u32) u32 { return if (i < field_n and field.all()[i].checked) 1 else 0; }
+pub fn fieldParent(i: u32) u32 { return if (i < field_n) field.all()[i].parent else 0; }
 pub fn fieldTextPtr() [*]u8 { return @ptrFromInt(if (fld_buf.at == 0) core.heapBase() else fld_buf.at); }
 pub fn fieldNameOff(i: u32) u32 { return if (i < field_n) field.all()[i].name_off else 0; }
 pub fn fieldNameLen(i: u32) u32 { return if (i < field_n) field.all()[i].name_len else 0; }
@@ -315,7 +319,13 @@ pub fn collectFields(b: []const u8, body: usize, end: usize) void {
             .size = 0, .align_ = 0, .name_off = 0, .name_len = 0, .val_off = 0,
             .val_len = 0, .on_off = 0, .on_len = 0, .opts_off = 0, .opts_len = 0,
             .checked = false, .calc_off = 0, .calc_len = 0, .fmt_off = 0, .fmt_len = 0,
+            .parent = 0,
         };
+        if (core.find(b[ab..abe], "/Parent", 0)) |pa| {
+            var q2 = ab + pa + 7;
+            while (q2 < abe and core.isSpace(b[q2])) q2 += 1;
+            if (q2 < abe and core.isDigit(b[q2])) f.parent = core.readUint(b, &q2);
+        }
         if (core.find(b[ab..abe], "/Rect", 0)) |ra| {
             var rp = ab + ra + 5;
             while (rp < abe and b[rp] != '[') rp += 1;

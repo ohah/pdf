@@ -227,6 +227,7 @@ type Exports = {
   fieldObj?: (i: number) => number;
   fieldRect?: (i: number, k: number) => number;
   fieldKind?: (i: number) => number;
+  fieldParent?: (i: number) => number;
   fieldFlags?: (i: number) => number;
   fieldMaxLen?: (i: number) => number;
   fieldSize?: (i: number) => number;
@@ -878,6 +879,9 @@ async function page(i: number, formOn: boolean, light = false) {
       calc: S(e.fieldCalcOff?.(k) ?? 0, e.fieldCalcLen?.(k) ?? 0),
       format: S(e.fieldFmtOff?.(k) ?? 0, e.fieldFmtLen?.(k) ?? 0),
       checked: e.fieldChecked!(k) === 1,
+      // 위젯의 부모 칸(객체 번호). 라디오는 같은 부모끼리 한 묶음이라 하나만
+      // 켜진다 — 쓰는 쪽이 이 값으로 묶는다. 없으면 0.
+      parent: e.fieldParent?.(k) ?? 0,
     });
   }
   return {

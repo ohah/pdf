@@ -75,6 +75,7 @@ async function load(file, page = 0, feed = true, formOn = true) {
       on: S2(ex.fieldOnOff(i), ex.fieldOnLen(i)),
       opts: S2(ex.fieldOptsOff(i), ex.fieldOptsLen(i)),
       checked: ex.fieldChecked(i) === 1,
+      parent: ex.fieldParent?.(i) ?? 0,
     });
   }
   const drew = [...dec.decode(new Uint8Array(ex.memory.buffer, ex.drawPtr(), ex.drawLen()))]
@@ -710,6 +711,41 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
     // 겉모습도 새로 그려졌는지 — 양식 층을 끄고 본문을 뽑는다
     const r3 = await loadNoForm('.form2.pdf');
     ok('양식: 겉모습도 새로 그림', r3 && r3.text.includes('Luigi & Co'), r3 && JSON.stringify(r3.text));
+  }
+
+  // 라디오 묶음 — 값은 부모가 들고, 하나만 켜진다.
+  //
+  // 위젯 하나에만 /AS 를 적으면 부모 /V 는 옛 값이고 형제는 켜진 채라, pdf.js
+  // 는 고치기 전 것을 그대로 켜진 것으로 읽었다(실측: V=a, 6R 켜짐).
+  {
+    const rr = await load('radio.pdf');
+    ok('라디오: 위젯 둘이 같은 부모', rr && rr.fld.length === 2 && rr.fld[0].parent === 5 && rr.fld[1].parent === 5,
+      rr && JSON.stringify(rr.fld.map((f) => f.parent)));
+    ok('라디오: 갈래 2, 첫째만 켜짐', rr && rr.fld[0].kind === 2 && rr.fld[0].checked && !rr.fld[1].checked,
+      rr && JSON.stringify(rr.fld.map((f) => f.checked)));
+    // 둘째만 켠다 — 첫째는 건드리지 않는다. 엔진이 부모와 형제를 맞춰야 한다.
+    const er = rr.ex;
+    er.clearPick(); er.addPick(0);
+    er.setRotate(0); er.clearWatermark(); er.clearLabels(); er.clearFieldEdits();
+    er.addFieldEdit(7, 1);
+    for (const ch of 'b') er.addFieldEditChar(ch.codePointAt(0));
+    const nr = er.apply();
+    ok('라디오: 만들어짐', nr > 0, nr);
+    if (nr > 0) {
+      const out = Buffer.from(new Uint8Array(er.memory.buffer, er.outputPtr(), nr).slice());
+      fs.writeFileSync(`${S}/.radio2.pdf`, out);
+      const r2 = await load('.radio2.pdf');
+      ok('라디오: 둘째만 켜짐', r2 && !r2.fld[0].checked && r2.fld[1].checked,
+        r2 && JSON.stringify(r2.fld.map((f) => f.checked)));
+      ok('라디오: 부모 값이 바뀜', r2 && r2.fld[0].value === 'b' && r2.fld[1].value === 'b',
+        r2 && JSON.stringify(r2.fld.map((f) => f.value)));
+      // 마지막 상호참조가 가리키는 객체를 본다 — 옛 사본이 남아 있어도 안 속게
+      const txt = out.toString('latin1');
+      const last = (n) => { const all = [...txt.matchAll(new RegExp(`\\n${n} 0 obj\\n(<<.*?>>)\\n`, 'gs'))]; return all[all.length - 1]?.[1] ?? ''; };
+      ok('라디오: 부모 /V /b', /\/V \/b\b/.test(last(5)), last(5).slice(0, 80));
+      ok('라디오: 첫째 /AS /Off', /\/AS \/Off\b/.test(last(6)), last(6).slice(-60));
+      ok('라디오: 둘째 /AS /b', /\/AS \/b\b/.test(last(7)), last(7).slice(-60));
+    }
   }
 
   // 한글은 표준 글꼴에 없다. 값은 UTF-16 으로 담고, 겉모습은 화면 글꼴로

@@ -5129,6 +5129,7 @@ export fn fieldCalcLen(i: u32) u32 { return pdfform.fieldCalcLen(i); }
 export fn fieldFmtOff(i: u32) u32 { return pdfform.fieldFmtOff(i); }
 export fn fieldFmtLen(i: u32) u32 { return pdfform.fieldFmtLen(i); }
 export fn fieldChecked(i: u32) u32 { return pdfform.fieldChecked(i); }
+export fn fieldParent(i: u32) u32 { return pdfform.fieldParent(i); }
 export fn fieldTextPtr() [*]u8 { return pdfform.fieldTextPtr(); }
 export fn fieldNameOff(i: u32) u32 { return pdfform.fieldNameOff(i); }
 export fn fieldNameLen(i: u32) u32 { return pdfform.fieldNameLen(i); }

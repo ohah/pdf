@@ -239,6 +239,146 @@ pub fn keyIs(b: []const u8, p: usize, end: usize, key: []const u8) bool {
     return core.isSpace(c) or c == '/' or c == '(' or c == '<' or c == '[' or c == '>';
 }
 
+/// 객체 딕셔너리를 `<<` 부터 `>>` 앞까지 베끼되 `drop` 에 든 열쇠는 뺀다.
+/// 뒤에 새 값을 덧붙이고 `>>` 를 닫는 것은 부르는 쪽 몫이다. 못 찾으면 false.
+fn copyDictDropping(b: []const u8, obj: u32, pos: *usize, drop: []const []const u8) bool {
+    const ob = core.findObj(b, obj) orelse return false;
+    const oe = core.objDictEnd(b, ob);
+    var ds = ob;
+    while (ds < oe and b[ds] != '<') ds += 1;
+    if (ds >= oe) return false;
+    const de = pdfenc.dictEnd(b, ds, oe);
+    if (de <= ds + 2) return false;
+    core.appendNum(pos, obj);
+    core.appendStr(pos, " 0 obj\n<<");
+    var fx = ds + 2;
+    const inner_end = de - 2;
+    while (fx < inner_end and core.outRoom(pos.*, 8)) {
+        var hit = false;
+        if (b[fx] == '/') for (drop) |k| { if (keyIs(b, fx, inner_end, k)) { hit = true; break; } };
+        if (hit) {
+            var kq = fx + 1;
+            while (kq < inner_end and !core.isSpace(b[kq]) and b[kq] != '/' and b[kq] != '(' and
+                b[kq] != '<' and b[kq] != '[' and !core.isDigit(b[kq])) kq += 1;
+            fx = skipVal(b, kq, inner_end);
+            continue;
+        }
+        core.outBuf()[pos.*] = b[fx];
+        pos.* += 1;
+        fx += 1;
+    }
+    return true;
+}
+
+/// 라디오 묶음의 값을 맞춘다.
+///
+/// 라디오는 부모 칸(/FT /Btn, /Ff 의 15번 비트) 하나에 위젯 여럿이 /Kids 로
+/// 달려 있고, 값(/V)은 **부모**가 든다. 위젯 하나를 켜면서 그 위젯에만
+/// /AS 를 적으면 부모 /V 는 옛 값이고 형제 위젯은 켜진 채라, 다른 뷰어는
+/// 옛 것을 켜진 것으로 보이거나 둘 다 켜진 채 보인다.
+///
+/// 그래서 고친 위젯의 부모마다: 이번 고침에서 켠 이름을 /V 로(하나도 안
+/// 켰으면 /Off), 고치지 않은 형제 위젯은 /AS /Off 로 다시 쓴다.
+fn radioParents(b: []const u8, pos0: usize, new_nums: []u32, new_offsets: []usize, new_n: *usize) usize {
+    var pos = pos0;
+    var par: [32]u32 = undefined;
+    var on_off: [32]u32 = undefined;
+    var on_len: [32]u32 = undefined;
+    var n: usize = 0;
+    var ei: u32 = 0;
+    while (ei < core.edit.n) : (ei += 1) {
+        const e = core.edits.all()[ei];
+        if (e.kind != 1 and e.kind != 2) continue;
+        const ob = core.findObj(b, e.obj) orelse continue;
+        const oe = core.objDictEnd(b, ob);
+        const pa = core.find(b[ob..oe], "/Parent", 0) orelse continue;
+        var q = ob + pa + 7;
+        while (q < oe and core.isSpace(b[q])) q += 1;
+        if (q >= oe or !core.isDigit(b[q])) continue;
+        const pobj = core.readUint(b, &q);
+        // 라디오인가 — 확인란 묶음(/Kids 가 있는 확인란)은 저마다 켜져도 된다
+        var radio = false;
+        if (pdfform.fieldLookup(b, e.obj, "/Ff", 0)) |r| {
+            var vp = r[0];
+            while (vp < r[1] and core.isSpace(b[vp])) vp += 1;
+            if (vp < r[1] and core.isDigit(b[vp])) radio = (core.readUint(b, &vp) & (1 << 15)) != 0;
+        }
+        if (!radio) continue;
+        var k: usize = 0;
+        while (k < n and par[k] != pobj) k += 1;
+        if (k == n) {
+            if (n == par.len) continue;
+            par[n] = pobj;
+            on_off[n] = 0;
+            on_len[n] = 0;
+            n += 1;
+        }
+        if (e.kind == 1 and e.len > 0) {
+            on_off[k] = e.off;
+            on_len[k] = e.len;
+        }
+    }
+    var k: usize = 0;
+    while (k < n) : (k += 1) {
+        const pobj = par[k];
+        const on: []const u8 = if (on_len[k] > 0) core.edit.buf[on_off[k]..][0..on_len[k]] else "Off";
+        // 부모 — /V 만 갈아 끼운다
+        if (new_n.* + 1 < new_nums.len and core.outRoom(pos, 4096) and !written(new_nums, new_n.*, pobj)) {
+            const at = pos;
+            if (copyDictDropping(b, pobj, &pos, &.{"/V"})) {
+                new_offsets[new_n.*] = at;
+                new_nums[new_n.*] = pobj;
+                new_n.* += 1;
+                core.appendStr(&pos, " /V /");
+                if (!core.outRoom(pos, on.len)) return pos;
+                @memcpy(core.outBuf()[pos..][0..on.len], on);
+                pos += on.len;
+                core.appendStr(&pos, " >>\nendobj\n");
+            } else pos = at;
+        }
+        // 고치지 않은 형제 — /AS /Off
+        const pb = core.findObj(b, pobj) orelse continue;
+        const pe = core.objDictEnd(b, pb);
+        const ka = core.find(b[pb..pe], "/Kids", 0) orelse continue;
+        var q = pb + ka + 5;
+        while (q < pe and b[q] != '[') q += 1;
+        const ke = core.arrayEnd(b, q, pe);
+        q += 1;
+        while (q < ke and new_n.* + 1 < new_nums.len and core.outRoom(pos, 4096)) {
+            while (q < ke and core.isSpace(b[q])) q += 1;
+            if (q >= ke or !core.isDigit(b[q])) break;
+            const kid = core.readUint(b, &q);
+            while (q < ke and core.isSpace(b[q])) q += 1;
+            if (q < ke and core.isDigit(b[q])) _ = core.readUint(b, &q);
+            while (q < ke and core.isSpace(b[q])) q += 1;
+            if (q < ke and b[q] == 'R') q += 1;
+            if (written(new_nums, new_n.*, kid)) continue;
+            const kb = core.findObj(b, kid) orelse continue;
+            const kend = core.objDictEnd(b, kb);
+            // 이미 꺼져 있으면 건드리지 않는다
+            if (core.find(b[kb..kend], "/AS", 0)) |sa| {
+                var sp = kb + sa + 3;
+                while (sp < kend and core.isSpace(b[sp])) sp += 1;
+                if (sp + 3 < kend and b[sp] == '/' and b[sp + 1] == 'O' and b[sp + 2] == 'f' and b[sp + 3] == 'f') continue;
+            } else continue;
+            const at = pos;
+            if (copyDictDropping(b, kid, &pos, &.{ "/AS", "/V" })) {
+                new_offsets[new_n.*] = at;
+                new_nums[new_n.*] = kid;
+                new_n.* += 1;
+                core.appendStr(&pos, " /AS /Off >>\nendobj\n");
+            } else pos = at;
+        }
+    }
+    return pos;
+}
+
+fn written(nums: []const u32, n: usize, obj: u32) bool {
+    var i: usize = 0;
+    while (i < n) : (i += 1) if (nums[i] == obj) return true;
+    return false;
+}
+
 /// 값 하나를 건너뛴다 — 이름·수·문자열·배열·딕셔너리·참조를 다 받는다.
 pub fn skipVal(b: []const u8, from: usize, end: usize) usize {
     var p = from;
@@ -383,7 +523,8 @@ pub fn apply() usize {
     // 하나가 객체 여럿을 낳는다 — 주석은 겉모습 스트림까지 둘, 새 칸도
     // 마찬가지다. 넉넉히 잡지 않으면 뒤가 조용히 빠진다(주석 2000개 중
     // 1038개만 나갔다).
-    const xr = xrefTables(core.pick.n * 4 + @as(usize, core.edit.n) * 2 + core.note.n * 3 + core.newf.n * 3 + 128) orelse return 0;
+    // 라디오 하나를 고치면 부모와 형제 위젯까지 다시 쓴다 — 고침당 여덟 자리.
+    const xr = xrefTables(core.pick.n * 4 + @as(usize, core.edit.n) * 8 + core.note.n * 3 + core.newf.n * 3 + 128) orelse return 0;
     const new_offsets = xr.offs;
     const new_nums = xr.nums;
     var new_n: usize = 0;
@@ -1429,6 +1570,7 @@ pub fn apply() usize {
             }
             core.appendStr(&pos, " >>\nendobj\n");
         }
+        pos = radioParents(b, pos, new_nums, new_offsets, &new_n);
         // 겉모습을 다시 그릴 줄 아는 뷰어는 제 글꼴로 다시 그리게 한다 —
         // 우리가 넣은 겉모습은 표준 글꼴이라 한글이 빠진다.
         if (core.doc.root != 0) {

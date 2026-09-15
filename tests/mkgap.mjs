@@ -125,17 +125,6 @@ page("g-ti.pdf", "0.98 0.98 0.98 rg 0 0 200 200 re f\n",
 // 우리 엔진은 파일 전체를 훑으므로 선형화를 안 봐도 되고, 필요해지면
 // 그때 제대로 만든다.
 
-// ⑦ 라디오 그룹 — /Kids 가 값을 나눠 갖는 꼴
-page("g-radio.pdf", "0.98 0.98 0.98 rg 0 0 200 200 re f\n",
-  { annots: " /Annots [6 0 R 7 0 R]",
-    cat: " /AcroForm << /Fields [5 0 R] /DA (0 g /Helv 10 Tf) >>",
-    extra: [
-      "<< /FT /Btn /Ff 49152 /T (pick) /V /a /Kids [6 0 R 7 0 R] >>",
-      "<< /Type /Annot /Subtype /Widget /Parent 5 0 R /Rect [30 120 60 150] /F 4 /AS /a" +
-      " /AP << /N << /a 8 0 R /Off 9 0 R >> >> /MK << /BC [0 0 0] >> >>",
-      "<< /Type /Annot /Subtype /Widget /Parent 5 0 R /Rect [110 120 140 150] /F 4 /AS /Off" +
-      " /AP << /N << /b 8 0 R /Off 9 0 R >> >> /MK << /BC [0 0 0] >> >>",
-      stream("/Type /XObject /Subtype /Form /BBox [0 0 30 30]", "0 0 0 rg 8 8 14 14 re f 0 0 0 RG 1 w 0.5 0.5 29 29 re S"),
-      stream("/Type /XObject /Subtype /Form /BBox [0 0 30 30]", "0 0 0 RG 1 w 0.5 0.5 29 29 re S")] });
+// 라디오 묶음은 만들어졌다 — tests/mkform.mjs 의 radio.pdf 와 verify.mjs 로 갔다.
 
-console.log("g-bs·g-ti·g-vert-w2·g-matte·g-interp·g-radio 만듦");
+console.log("g-bs·g-ti·g-vert-w2·g-matte·g-interp 만듦");
