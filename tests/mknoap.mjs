@@ -31,6 +31,14 @@ const notes = [
   // 꺾은선 — 열림, 점선
   '<< /Type /Annot /Subtype /PolyLine /Rect [300 20 390 160] /Vertices [305 30 385 60 310 100 380 150] /C [0.3 0.3 0.3] /BS << /W 2 /S /D /D [4 2] >> /F 4 >>',
 ];
+// 글상자 주석(/FreeText) — 따로 둔다. 글꼴이 뷰어마다 달라 화소로는 못 맞대고,
+// 자리·색·줄 수만 본다.
+const free = [
+  // 파란 12pt 두 줄, 테두리 1pt
+  '<< /Type /Annot /Subtype /FreeText /Rect [20 300 220 380] /DA (0 0 1 rg /Helv 12 Tf) /Contents (Hello free text\\nsecond line) /C [1 1 0.8] /F 4 >>',
+  // 크기 0(자동) — 기본 크기, 빨강, 테두리 2pt
+  '<< /Type /Annot /Subtype /FreeText /Rect [240 300 380 380] /DA (1 0 0 rg /Helv 0 Tf) /Contents (auto size) /BS << /W 2 >> /F 4 >>',
+];
 const content = '0.97 0.97 0.97 rg 0 0 400 400 re f';
 const objs = [
   '<< /Type /Catalog /Pages 2 0 R >>',
@@ -47,4 +55,21 @@ out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
 for (const o of offs) out += String(o).padStart(10, '0') + ' 00000 n \n';
 out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
 fs.writeFileSync(`${S}/noap.pdf`, out, 'latin1');
-console.log('noap.pdf 만듦');
+{
+  const objs2 = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 400] /Resources << >> /Contents 4 0 R /Annots [${free.map((_, i) => `${5 + i} 0 R`).join(' ')}] >>`,
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    ...free,
+  ];
+  let o2 = '%PDF-1.7\n';
+  const offs2 = [];
+  objs2.forEach((o, i) => { offs2.push(Buffer.byteLength(o2, 'latin1')); o2 += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const x2 = Buffer.byteLength(o2, 'latin1');
+  o2 += `xref\n0 ${objs2.length + 1}\n0000000000 65535 f \n`;
+  for (const o of offs2) o2 += String(o).padStart(10, '0') + ' 00000 n \n';
+  o2 += `trailer\n<< /Size ${objs2.length + 1} /Root 1 0 R >>\nstartxref\n${x2}\n%%EOF\n`;
+  fs.writeFileSync(`${S}/freetext.pdf`, o2, 'latin1');
+}
+console.log('noap.pdf·freetext.pdf 만듦');

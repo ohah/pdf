@@ -6,9 +6,9 @@
 // 그런 주석을 종류마다 기본 모양으로 그린다(둘이 1% 안에서 같다). 우리만
 // 빈자리로 두면 형광펜·네모·잉크가 통째로 사라진다.
 //
-// 그리는 것: 네모·동그라미·선·잉크·형광펜·밑줄·취소선·물결·다각형·꺾은선.
-// 안 그리는 것: 글자가 드는 /FreeText 와 아이콘인 /Text — 글꼴과 아이콘 그림은
-// 뷰어마다 달라 맞댈 기준이 없다. 위젯은 양식 층이 맡는다.
+// 그리는 것: 네모·동그라미·선·잉크·형광펜·밑줄·취소선·물결·다각형·꺾은선,
+// 글상자(/FreeText — 시스템 글꼴로), 위젯의 틀(/MK·/BS).
+// 안 그리는 것: 메모 아이콘 /Text — 아이콘 그림이 뷰어마다 다르다.
 //
 // 값은 규격 12.5.6 대로다. 테두리 색 /C, 속 색 /IC(둘 다 빈 배열이면 안
 // 칠함), 굵기·점선 /BS(없으면 /Border, 그것도 없으면 1), 투명도 /CA.
@@ -261,6 +261,92 @@ fn drawWidget(b: []const u8, ab: usize, abe: usize, rect: [4]f32) void {
     core.emitOp(15, &[_]f32{});
 }
 
+/// /DA "0 0 1 rg /Helv 12 Tf" 에서 글자 크기와 색을 읽는다. 크기 0(자동)은 10.
+fn parseDA(da: []const u8, size: *f32, rgb: *[3]f32) void {
+    var nums: [4]f32 = .{ 0, 0, 0, 0 };
+    var nn: u32 = 0;
+    var p: usize = 0;
+    while (p < da.len) {
+        while (p < da.len and core.isSpace(da[p])) p += 1;
+        if (p >= da.len) break;
+        const c = da[p];
+        if (core.isDigit(c) or c == '-' or c == '.') {
+            const v = core.readFloat(da, &p);
+            if (nn < 4) { nums[nn] = v; nn += 1; } else { nums[0] = nums[1]; nums[1] = nums[2]; nums[2] = nums[3]; nums[3] = v; }
+            continue;
+        }
+        var q = p;
+        while (q < da.len and !core.isSpace(da[q])) q += 1;
+        const tok = da[p..q];
+        if (core.std_mem_eq(tok, "Tf") and nn >= 1) size.* = nums[nn - 1]
+        else if (core.std_mem_eq(tok, "g") and nn >= 1) rgb.* = .{ nums[nn - 1], nums[nn - 1], nums[nn - 1] }
+        else if (core.std_mem_eq(tok, "rg") and nn >= 3) rgb.* = .{ nums[nn - 3], nums[nn - 2], nums[nn - 1] }
+        else if (core.std_mem_eq(tok, "k") and nn >= 4) core.cmykRgb(nums[0], nums[1], nums[2], nums[3], rgb);
+        if (tok.len > 0 and tok[0] != '/') nn = 0;
+        p = q;
+    }
+    if (size.* <= 0) size.* = 10;
+}
+
+/// 겉모습 없는 글상자 주석(/FreeText). poppler·Acrobat 꼴: /C 로 바탕을 칠하고,
+/// /DA 의 색으로 테두리(/BS 굵기, 기본 1)와 글을 그린다. 글은 왼쪽 위부터
+/// 줄바꿈대로 — 줄 간격은 크기의 1.15 (poppler 1.0 과 pdf.js 1.35 사이).
+/// pdf.js 는 바탕·테두리를 안 그리지만 규격의 /C 는 FreeText 의 채움색이다.
+fn drawFreeText(b: []const u8, ab: usize, abe: usize, rect: [4]f32) void {
+    var size: f32 = 0;
+    var rgb: [3]f32 = .{ 0, 0, 0 };
+    var da: [256]u8 = undefined;
+    if (core.keyPos(b, ab, abe, "/DA")) |d| {
+        const n = core.copyPdfText(b, d + 3, abe, &da, 0);
+        parseDA(da[0..n], &size, &rgb);
+    } else size = 10;
+    const bg = colorAt(b, ab, abe, "/C");
+    var dash: [6]f32 = .{ 0, 0, 0, 0, 0, 0 };
+    var dash_n: u32 = 0;
+    const bw = strokeStyle(b, ab, abe, &dash, &dash_n);
+
+    core.emitOp(14, &[_]f32{});
+    core.emitOp(21, &[_]f32{1});
+    core.emitOp(23, &[_]f32{1});
+    core.emitOp(26, &[_]f32{0});
+    core.emitOp(24, &[_]f32{ @floatFromInt(dash_n), dash[0], dash[1], dash[2], dash[3], dash[4], dash[5], 0 });
+    core.emitOp(9, &[_]f32{});
+    const w = rect[2] - rect[0];
+    const h = rect[3] - rect[1];
+    if (bg.on) {
+        core.emitOp(11, &[_]f32{ bg.rgb[0], bg.rgb[1], bg.rgb[2] });
+        core.emitOp(5, &[_]f32{ rect[0], rect[1], w, h });
+        core.emitOp(6, &[_]f32{0});
+    }
+    if (bw > 0) {
+        core.emitOp(12, &[_]f32{ rgb[0], rgb[1], rgb[2] });
+        core.emitOp(13, &[_]f32{bw});
+        core.emitOp(5, &[_]f32{ rect[0] + bw / 2, rect[1] + bw / 2, w - bw, h - bw });
+        core.emitOp(7, &[_]f32{});
+    }
+    // 글은 상자 안으로 자른다
+    core.emitOp(5, &[_]f32{ rect[0], rect[1], w, h });
+    core.emitOp(10, &[_]f32{0});
+    core.emitOp(9, &[_]f32{});
+    core.emitOp(11, &[_]f32{ rgb[0], rgb[1], rgb[2] });
+    var txt: [1024]u8 = undefined;
+    var tn: u32 = 0;
+    if (core.keyPos(b, ab, abe, "/Contents")) |c| tn = core.copyPdfText(b, c + 9, abe, &txt, 0);
+    const pad = bw + 2;
+    var y = rect[3] - pad - size * 0.9;
+    var s0: usize = 0;
+    var i: usize = 0;
+    while (i <= tn) : (i += 1) {
+        if (i < tn and txt[i] != '\n' and txt[i] != '\r') continue;
+        if (i > s0) core.emitText(rect[0] + pad, y, size, txt[s0..i]);
+        if (i < tn and txt[i] == '\r' and i + 1 < tn and txt[i + 1] == '\n') i += 1;
+        s0 = i + 1;
+        y -= size * 1.15;
+        if (y < rect[1] - size) break;
+    }
+    core.emitOp(15, &[_]f32{});
+}
+
 /// 주석 딕셔너리 [ab, abe) 를 기본 모양으로 그린다. 아는 종류가 아니면 false.
 pub fn draw(b: []const u8, ab: usize, abe: usize, rect: [4]f32) bool {
     var st: [16]u8 = undefined;
@@ -280,6 +366,7 @@ pub fn draw(b: []const u8, ab: usize, abe: usize, rect: [4]f32) bool {
         else .none;
     if (kind == .none) {
         if (core.std_mem_eq(sub, "Widget")) { drawWidget(b, ab, abe, rect); return true; }
+        if (core.std_mem_eq(sub, "FreeText")) { drawFreeText(b, ab, abe, rect); return true; }
         return false;
     }
 

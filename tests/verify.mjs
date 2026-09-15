@@ -692,6 +692,28 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
   }
 }
 
+// --- 겉모습 없는 글상자 주석 (/FreeText)
+{
+  // poppler 와 0.82% (pdf.js 는 바탕·테두리를 안 그려 10.66%). 규격의 /C 는 FreeText 의 채움색.
+  const r = await loadNoForm('freetext.pdf');
+  // 본문 글자(text)가 아니라 그리는 글자층(drew)에 든다 — pdf.js 의 textContent 도 주석은 안 준다
+  const txt = String.fromCodePoint(...r.drew.map((c) => c + 0xe000));
+  ok('글상자: 글이 나온다', txt.includes('Hello free text') && txt.includes('second line') && txt.includes('auto size'), JSON.stringify(txt));
+  let runs = [], fills = [], strokes = 0, clips = 0;
+  for (let i = 0; i < r.ops.length;) {
+    const k = r.ops[i], n = r.ops[i + 1];
+    if (k === 17) runs.push([+r.ops[i + 2].toFixed(1), +r.ops[i + 3].toFixed(1), r.ops[i + 4]]);
+    if (k === 11) fills.push([r.ops[i + 2], r.ops[i + 3], r.ops[i + 4]].map((v) => +v.toFixed(2)).join());
+    if (k === 7) strokes++;
+    if (k === 10) clips++;
+    i += 2 + n;
+  }
+  // 12pt 두 줄: 왼쪽 위(20+3, 380-3-10.8)부터 1.15 배 간격. 0(자동)은 10pt.
+  ok('글상자: 줄 자리와 크기', JSON.stringify(runs) === '[[23,366.2,12],[23,352.4,12],[244,367,10]]', JSON.stringify(runs));
+  ok('글상자: /C 바탕과 /DA 색', fills.includes('1,1,0.8') && fills.includes('0,0,1') && fills.includes('1,0,0'), JSON.stringify(fills));
+  ok('글상자: 테두리 둘, 자르기 둘', strokes === 2 && clips === 2, JSON.stringify([strokes, clips]));
+}
+
 // --- 세로쓰기 자리 (9.7.4.3)
 {
   // 글자는 현재 점에서 v = (vx, vy) 만큼 빼서 놓고 w1y 만큼 내려간다.

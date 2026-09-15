@@ -1418,6 +1418,25 @@ var cur: struct {
     font: i32 = -1,
 } = .{};
 
+/// 글 한 줄을 지금 채움색으로 낸다 — 겉모습 없는 글상자 주석(pdfbare)이 쓴다.
+/// 글꼴 번호 0 은 "문서 글꼴 아님" 이라 화면 쪽이 시스템 글꼴로 그린다.
+pub fn emitText(x: f32, y: f32, size: f32, utf8: []const u8) void {
+    const off = dtext.n;
+    const roff = rtext.n;
+    var i: usize = 0;
+    while (i < utf8.len) {
+        const cu = utf8At(utf8, i);
+        i += cu[1];
+        putDraw(cu[0]);
+        putRead(if (cu[0] >= 0x20) cu[0] else ' ');
+    }
+    if (dtext.n <= off) return;
+    emitOp(17, &[_]f32{
+        x, y, size, @floatFromInt(off), @floatFromInt(dtext.n - off), 0,
+        1, 0, 0, 1, 0, 0, @floatFromInt(roff), @floatFromInt(rtext.n - roff),
+    });
+}
+
 fn runFlush() void {
     if (!trun.on) return;
     trun.on = false;
