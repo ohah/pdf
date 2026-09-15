@@ -239,6 +239,45 @@ fn readCidWidths(f: *core.FontMap, b: []const u8, s: usize, e: usize) void {
     }
 }
 
+/// /W2 배열. 두 꼴이 섞인다: c [w1y vx vy w1y vx vy …] 와 c1 c2 w1y vx vy.
+fn readCidVMetrics(f: *core.FontMap, b: []const u8, s: usize, e: usize) void {
+    var p = s;
+    const num = struct {
+        fn n(bb: []const u8, pp: *usize, ee: usize) ?f32 {
+            while (pp.* < ee and core.isSpace(bb[pp.*])) pp.* += 1;
+            if (pp.* >= ee or !(core.isDigit(bb[pp.*]) or bb[pp.*] == '-' or bb[pp.*] == '.')) return null;
+            return core.readFloat(bb, pp);
+        }
+    }.n;
+    while (p < e) {
+        while (p < e and core.isSpace(b[p])) p += 1;
+        if (p >= e or b[p] == ']') break;
+        if (!core.isDigit(b[p])) { p += 1; continue; }
+        const c1: u32 = @intFromFloat(@max(0, core.readFloat(b, &p)));
+        while (p < e and core.isSpace(b[p])) p += 1;
+        if (p < e and b[p] == '[') {
+            p += 1;
+            var code = c1;
+            while (p < e) {
+                while (p < e and core.isSpace(b[p])) p += 1;
+                if (p >= e or b[p] == ']') { p += 1; break; }
+                const w1y = num(b, &p, e) orelse { p += 1; continue; };
+                const vx = num(b, &p, e) orelse break;
+                const vy = num(b, &p, e) orelse break;
+                core.pushVMetric(f, code, w1y, vx, vy);
+                code += 1;
+            }
+        } else {
+            const c2: u32 = @intFromFloat(@max(0, num(b, &p, e) orelse continue));
+            const w1y = num(b, &p, e) orelse continue;
+            const vx = num(b, &p, e) orelse continue;
+            const vy = num(b, &p, e) orelse continue;
+            var c = c1;
+            while (c <= c2 and c - c1 < 65535) : (c += 1) core.pushVMetric(f, c, w1y, vx, vy);
+        }
+    }
+}
+
 /// "[" 로 시작하는 배열의 끝을 찾는다 (안쪽 배열까지 센다)
 pub fn arrayEnd(b: []const u8, s: usize, limit: usize) usize {
     var p = s;
@@ -326,6 +365,23 @@ pub fn attachWidths(b: []const u8, fbody: usize) void {
             }
         }
         if (core.intAfter(b, db, de, "/DW")) |dw| f.dw = @floatFromInt(dw);
+        // 세로쓰기 자리 — /DW2 [vy w1y] 와 /W2 [c [w1y vx vy …] | c1 c2 w1y vx vy]
+        if (core.keyPos(b, db, de, "/DW2")) |da| {
+            var p = da + 4;
+            while (p < de and core.isSpace(b[p])) p += 1;
+            if (p < de and b[p] == '[') {
+                p += 1;
+                while (p < de and core.isSpace(b[p])) p += 1;
+                f.dw2[0] = core.readFloat(b, &p);
+                while (p < de and core.isSpace(b[p])) p += 1;
+                f.dw2[1] = core.readFloat(b, &p);
+            }
+        }
+        if (core.keyPos(b, db, de, "/W2")) |wa| {
+            var p = wa + 3;
+            while (p < de and core.isSpace(b[p])) p += 1;
+            if (p < de and b[p] == '[') readCidVMetrics(f, b, p + 1, arrayEnd(b, p, de));
+        }
         if (core.find(b[db..de], "/W", 0)) |wa| {
             var p = db + wa + 2;
             while (p < de and core.isSpace(b[p])) p += 1;

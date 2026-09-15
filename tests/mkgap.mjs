@@ -50,39 +50,9 @@ function page(name, content, { w = 200, h = 200, res = "", extra = [], annots = 
   ]));
 }
 
-// ① /BS — 입력칸 테두리 굵기·모양 (파선·밑줄·도드라짐)
-{
-  const mk = (n, y, s, wdt) =>
-    `<< /Type /Annot /Subtype /Widget /FT /Tx /T (t${n}) /Rect [20 ${y} 180 ${y + 28}] /F 4` +
-    ` /BS << /W ${wdt} /S /${s}${s === "D" ? " /D [3 2]" : ""} >>` +
-    ` /MK << /BC [0 0 0] /BG [0.95 0.95 0.95] >> /DA (0 g /Helv 10 Tf) >>`;
-  page("g-bs.pdf", "0.98 0.98 0.98 rg 0 0 200 200 re f\n",
-    { annots: " /Annots [5 0 R 6 0 R 7 0 R 8 0 R]",
-      // 입력칸은 /AcroForm /Fields 에 들어 있어야 양식이다. 빼면 뷰어가
-      // 그냥 주석으로 본다 — 겨누려던 길을 안 밟는다.
-      cat: " /AcroForm << /Fields [5 0 R 6 0 R 7 0 R 8 0 R] /DA (0 g /Helv 10 Tf) >>",
-      extra: [mk(0, 160, "S", 1), mk(1, 120, "D", 2), mk(2, 80, "U", 3), mk(3, 40, "B", 2)] });
-}
-// ② /TI — 리스트박스가 몇 번째 줄부터 보이나
-page("g-ti.pdf", "0.98 0.98 0.98 rg 0 0 200 200 re f\n",
-  { annots: " /Annots [5 0 R]",
-    cat: " /AcroForm << /Fields [5 0 R] /DA (0 g /Helv 10 Tf) >>",
-    extra: ["<< /Type /Annot /Subtype /Widget /FT /Ch /Ff 0 /T (list) /Rect [20 40 180 160] /F 4" +
-      " /Opt [(하나) (둘) (셋) (넷) (다섯) (여섯)] /TI 3 /I [3] /V (넷)" +
-      " /MK << /BC [0 0 0] /BG [1 1 1] >> /DA (0 g /Helv 10 Tf) >>"] });
-// ③ /W2 · /DW2 — 세로쓰기의 세로 이동량
-{
-  const cid = "<< /Type /Font /Subtype /Type0 /BaseFont /KoPubBatang-V /Encoding /Identity-V" +
-    " /DescendantFonts [6 0 R] >>";
-  const desc = "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /KoPubBatang" +
-    " /CIDSystemInfo << /Registry (Adobe) /Ordering (Korea1) /Supplement 2 >>" +
-    " /FontDescriptor 7 0 R /DW 1000 /DW2 [880 -1000] /W2 [1 [-500 500 -880] 2 [-300 300 -600]] >>";
-  const fd = "<< /Type /FontDescriptor /FontName /KoPubBatang /Flags 4 /ItalicAngle 0" +
-    " /Ascent 880 /Descent -120 /CapHeight 700 /StemV 80 /FontBBox [-100 -200 1000 900] >>";
-  page("g-vert-w2.pdf",
-    "BT /F1 24 Tf 100 170 Td <0001000200010002> Tj ET\n0 0 0 rg 10 10 20 20 re f\n",
-    { res: "/Font << /F1 5 0 R >>", extra: [cid, desc, fd] });
-}
+// /BS 는 만들어졌다 — tests/mkform.mjs 의 bs.pdf 와 verify.mjs 로 갔다.
+// /TI 는 만들어졌다 — tests/mkform.mjs 의 list.pdf 와 verify.mjs·앱 시험으로 갔다.
+// /W2·/DW2 세로쓰기는 만들어졌다 — tests/mkfeat3.mjs 의 v-vert-w2·v-vert-dw2 와 verify.mjs 로 갔다.
 // /Matte·/Interpolate 는 만들어졌다 — tests/mkfeat3.mjs 의 v-matte·v-interp 와 node.mjs 로 갔다.
 
 // 선형화(/Linearized)는 만들지 않는다.
@@ -96,4 +66,4 @@ page("g-ti.pdf", "0.98 0.98 0.98 rg 0 0 200 200 re f\n",
 
 // 라디오 묶음은 만들어졌다 — tests/mkform.mjs 의 radio.pdf 와 verify.mjs 로 갔다.
 
-console.log("g-bs·g-ti·g-vert-w2 만듦");
+console.log("지금은 빈틈 견본이 없다 — 새 빈틈이 생기면 여기에 만든다");

@@ -214,4 +214,30 @@ page("v-cmyk-fill.pdf",
       extra: [stream(`/Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Interpolate true`, g),
         stream(`/Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Interpolate false`, g)] });
 }
-console.log("v-ccitt-k·v-ccitt-black·v-cal·v-bpc16·v-ccitt-align·v-cmyk-fill·v-matte·v-interp 만듦");
+// /W2 · /DW2 — 세로쓰기의 자리와 이동량 (pdf.zig vmetric)
+{
+  const cid = "<< /Type /Font /Subtype /Type0 /BaseFont /KoPubBatang-V /Encoding /Identity-V" +
+    " /DescendantFonts [6 0 R] >>";
+  const desc = "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /KoPubBatang" +
+    " /CIDSystemInfo << /Registry (Adobe) /Ordering (Korea1) /Supplement 2 >>" +
+    " /FontDescriptor 7 0 R /DW 1000 /DW2 [880 -1000] /W2 [1 [-500 500 -880] 2 [-300 300 -600]] >>";
+  const fd = "<< /Type /FontDescriptor /FontName /KoPubBatang /Flags 4 /ItalicAngle 0" +
+    " /Ascent 880 /Descent -120 /CapHeight 700 /StemV 80 /FontBBox [-100 -200 1000 900] >>";
+  page("v-vert-w2.pdf",
+    "BT /F1 24 Tf 100 170 Td <0001000200010002> Tj ET\n0 0 0 rg 10 10 20 20 re f\n",
+    { res: "/Font << /F1 5 0 R >>", extra: [cid, desc, fd] });
+}
+// 같은 글꼴에서 /DW2·/W2 를 뺀 것 — 규격 기본 [880 −1000] 과 vx = w0/2 를 써야 한다
+{
+  const cid = "<< /Type /Font /Subtype /Type0 /BaseFont /KoPubBatang-V /Encoding /Identity-V" +
+    " /DescendantFonts [6 0 R] >>";
+  const desc = "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /KoPubBatang" +
+    " /CIDSystemInfo << /Registry (Adobe) /Ordering (Korea1) /Supplement 2 >>" +
+    " /FontDescriptor 7 0 R /DW 1000 >>";
+  const fd = "<< /Type /FontDescriptor /FontName /KoPubBatang /Flags 4 /ItalicAngle 0" +
+    " /Ascent 880 /Descent -120 /CapHeight 700 /StemV 80 /FontBBox [-100 -200 1000 900] >>";
+  page("v-vert-dw2.pdf",
+    "BT /F1 24 Tf 100 170 Td <0001000200010002> Tj ET\n0 0 0 rg 10 10 20 20 re f\n",
+    { res: "/Font << /F1 5 0 R >>", extra: [cid, desc, fd] });
+}
+console.log("v-ccitt-k·v-ccitt-black·v-cal·v-bpc16·v-ccitt-align·v-cmyk-fill·v-matte·v-interp·v-vert-w2·v-vert-dw2 만듦");

@@ -60,6 +60,8 @@ export type PageMsg = {
      * 형제의 /AS 까지 맞춘다.
      */
     parent: number;
+    /** 목록 상자에서 처음 보이는 항목 번호(/TI). 기본 0 */
+    topIndex: number;
   }[];
   fonts: {
     bytes: Uint8Array | null; pua: boolean;

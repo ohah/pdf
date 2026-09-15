@@ -6,7 +6,7 @@ endobj
 << /Type /Pages /Kids [3 0 R] /Count 1 >>
 endobj
 3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources <<  >> /Annots [5 0 R] /Contents 4 0 R >>
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Annots [5 0 R] /Contents 4 0 R >>
 endobj
 4 0 obj
 <<  /Length 35 >>
@@ -16,7 +16,7 @@ stream
 endstream
 endobj
 5 0 obj
-<< /Type /Annot /Subtype /Widget /FT /Ch /Ff 0 /T (list) /Rect [20 40 180 160] /F 4 /Opt [(X˜) (X) (K) (7) (ä/) (ì/)] /TI 3 /I [3] /V (7) /MK << /BC [0 0 0] /BG [1 1 1] >> /DA (0 g /Helv 10 Tf) >>
+<< /Type /Annot /Subtype /Widget /FT /Ch /Ff 0 /T (list) /Rect [20 100 180 140] /F 4 /Opt [(one) (two) (three) (four) (five) (six)] /TI 3 /I [3] /V (four) /MK << /BC [0 0 0] /BG [1 1 1] >> /DA (0 g /Helv 10 Tf) >>
 endobj
 xref
 0 6
@@ -24,10 +24,10 @@ xref
 0000000009 00000 n 
 0000000112 00000 n 
 0000000169 00000 n 
-0000000290 00000 n 
-0000000376 00000 n 
+0000000289 00000 n 
+0000000375 00000 n 
 trailer
 << /Size 6 /Root 1 0 R >>
 startxref
-588
+604
 %%EOF

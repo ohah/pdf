@@ -11,6 +11,7 @@ const std = @import("std");
 const core = @import("pdf.zig");
 const pdfform = @import("pdfform.zig");
 const pdfenc = @import("pdfenc.zig");
+const pdfbare = @import("pdfbare.zig");
 
 // ===== 라벨 =====
 //
@@ -1319,8 +1320,9 @@ pub fn apply() usize {
                     pos += e.mlen;
                     core.appendStr(&pos, "\nendstream\nendobj\n");
                     // 겉모습 — 그림을 상자에 꽉 채워 그린다
-                    var body3: [256]u8 = undefined;
-                    var b3: usize = 0;
+                    var body3: [1536]u8 = undefined;
+                    // 바탕·테두리(/MK·/BS)를 먼저 — 안 그러면 채운 칸의 틀이 사라진다
+                    var b3: usize = pdfbare.widgetFrame(b, ob, oe, bw, bh, &body3);
                     const put3 = struct {
                         fn f(d: []u8, at: *usize, t: []const u8) void {
                             if (at.* + t.len > d.len) return;
@@ -1405,7 +1407,8 @@ pub fn apply() usize {
                     const lead = size * 1.16;
 
                     var body2: [8192]u8 = undefined;
-                    var bl: usize = 0;
+                    // 바탕·테두리(/MK·/BS)를 먼저 — 안 그러면 채운 칸의 틀이 사라진다
+                    var bl: usize = pdfbare.widgetFrame(b, ob, oe, bw, bh, &body2);
                     const put = struct {
                         fn f(d: []u8, at: *usize, t: []const u8) void {
                             if (at.* + t.len > d.len) return;

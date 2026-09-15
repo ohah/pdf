@@ -57,4 +57,29 @@ fs.writeFileSync(`${S}/radio.pdf`, build([
   stream('/Type /XObject /Subtype /Form /BBox [0 0 30 30]', B('0 0 0 rg 8 8 14 14 re f 0 0 0 RG 1 w 0.5 0.5 29 29 re S')),
   stream('/Type /XObject /Subtype /Form /BBox [0 0 30 30]', B('0 0 0 RG 1 w 0.5 0.5 29 29 re S')),
 ]));
-console.log('form.pdf·radio.pdf 만듦');
+// /BS — 겉모습 없는 입력 칸 넷: 실선·점선·밑줄·도드라짐. /MK 로 바탕·테두리색.
+// 그릴 때는 틀을 기본 모양으로 그리고, 채워 저장할 때는 새 겉모습에 틀을 앞세운다.
+{
+  const mk = (n, y, s, wdt) =>
+    `<< /Type /Annot /Subtype /Widget /FT /Tx /T (t${n}) /Rect [20 ${y} 180 ${y + 28}] /F 4` +
+    ` /BS << /W ${wdt} /S /${s}${s === 'D' ? ' /D [3 2]' : ''} >>` +
+    ` /MK << /BC [0 0 0] /BG [0.95 0.95 0.95] >> /DA (0 g /Helv 10 Tf) >>`;
+  fs.writeFileSync(`${S}/bs.pdf`, build([
+    '<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R 6 0 R 7 0 R 8 0 R] /DA (0 g /Helv 10 Tf) >> >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Annots [5 0 R 6 0 R 7 0 R 8 0 R] /Contents 4 0 R >>',
+    stream('', B('0.98 0.98 0.98 rg 0 0 200 200 re f\n')),
+    mk(0, 160, 'S', 1), mk(1, 120, 'D', 2), mk(2, 80, 'U', 3), mk(3, 40, 'B', 2),
+  ]));
+}
+// /TI — 목록 상자에서 처음 보이는 항목. 40pt 높이에 여섯 항목이라 다 안 보인다.
+fs.writeFileSync(`${S}/list.pdf`, build([
+  '<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] /DA (0 g /Helv 10 Tf) >> >>',
+  '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+  '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Annots [5 0 R] /Contents 4 0 R >>',
+  stream('', B('0.98 0.98 0.98 rg 0 0 200 200 re f\n')),
+  '<< /Type /Annot /Subtype /Widget /FT /Ch /Ff 0 /T (list) /Rect [20 100 180 140] /F 4' +
+    ' /Opt [(one) (two) (three) (four) (five) (six)] /TI 3 /I [3] /V (four)' +
+    ' /MK << /BC [0 0 0] /BG [1 1 1] >> /DA (0 g /Helv 10 Tf) >>',
+]));
+console.log('form.pdf·radio.pdf·bs.pdf·list.pdf 만듦');

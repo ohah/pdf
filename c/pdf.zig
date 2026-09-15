@@ -1533,6 +1533,13 @@ pub const FontMap = struct {
     identity: bool,
     /// 세로쓰기
     vertical: bool,
+    /// 세로쓰기 글자 자리(9.7.4.3). /DW2 [vy w1y] — 기본 [880 −1000]. 글자는
+    /// 현재 점에서 v = (w0/2, vy) 만큼 왼쪽·아래로 놓이고, w1y 만큼 내려간다.
+    dw2: [2]f32,
+    /// /W2 — CID 마다 (w1y, vx, vy). 없으면 dw2 와 w0/2 를 쓴다.
+    w2n: u32,
+    w2codes: Table(u16, 64) = .{},
+    w2vals: Table([3]i16, 64) = .{},
     /// 미리 정의된 CMap 갈래.
     /// 0 한 바이트  1 Identity(두 바이트)  2 UCS2·UTF16(두 바이트)
     /// 3 EUC·UHC·Big5(앞바이트가 0x81 이상이면 두 바이트)
@@ -3033,6 +3040,8 @@ fn addFont(name: [*]const u8, name_len: u32, cmap: [*]const u8, cmap_len: u32, b
     f.std_w = null;
     f.identity = false;
     f.vertical = false;
+    f.dw2 = .{ 880, -1000 };
+    f.w2n = 0;
     f.cmap_kind = 0;
     f.cm = -1;
     f.uc = -1;
@@ -3494,7 +3503,10 @@ pub fn runOps(b: []const u8, depth: u32) void {
                 var ai: usize = 0;
                 while (ai < sp) : (ai += 1) adj += st[ai];
                 sp = 0;
-                tm = matMul(.{ .e = -adj / 1000 * tf_size * th, .f = 0 }, tm);
+                // 세로쓰기는 조정값이 세로로 먹는다(9.4.4: ty = (w1 − Tj/1000)·Tfs + …)
+                const vert_adj = cur.font >= 0 and fonts.all()[@intCast(cur.font)].vertical;
+                tm = if (vert_adj) matMul(.{ .e = 0, .f = -adj / 1000 * tf_size }, tm)
+                    else matMul(.{ .e = -adj / 1000 * tf_size * th, .f = 0 }, tm);
             }
             // ' 와 " 는 줄을 먼저 넘기고 글자를 찍는다. 우리는 글자를 만나는
             // 자리에서 바로 그리므로, 뒤에 오는 연산자를 미리 본다.
@@ -3541,15 +3553,28 @@ pub fn runOps(b: []const u8, depth: u32) void {
                     mode: i32, rise: f32,
                 ) void {
                     putUtf8(uni);
-                    const adv = step(ff, code, size, tc2, tw2, th2);
+                    var adv = step(ff, code, size, tc2, tw2, th2);
+                    // 세로쓰기(9.7.4.3): 글자는 현재 점에서 v = (vx, vy) 만큼
+                    // 왼쪽·아래로 놓이고, 이동량은 가로 폭이 아니라 w1y 다.
+                    // 여태 v 를 안 빼고 가로 폭으로 내려가, 글자가 오른쪽 위로
+                    // 치우치고 /W2 를 적은 글꼴은 줄 간격이 틀렸다.
+                    var vshift: [2]f32 = .{ 0, 0 };
+                    if (ff) |g0| if (g0.vertical) {
+                        const vm = vmetric(g0, code);
+                        const unit: f32 = 0.001;
+                        vshift = .{ -vm[1] * unit * size * th2, -vm[2] * unit * size };
+                        // w1y 는 음수(내려감). 이동량은 advance() 가 -adv 로 쓰므로 부호를 뒤집는다.
+                        const word: f32 = if (code == 32 and !g0.two_byte) tw2 else 0;
+                        adv = -(vm[0] * unit * size + tc2 + word);
+                    };
                     // Tr 3 은 안 보이는 글자, 7 은 오려 내기용이다. 둘 다
                     // 화면에는 안 그리지만 명령은 낸다 — 3 은 스캔 문서 위에
                     // 얹힌 OCR 결과라 긁어 복사할 수 있어야 하고, 7 은 글자
                     // 모양으로 오려 내려면 모양이 있어야 한다. 그리지 않는
                     // 것은 캔버스 쪽이 판단한다.
                     // Ts 는 글자를 기준선 위아래로 올린다
-                    const ex2 = m.e + m.c * rise;
-                    const ey2 = m.f + m.d * rise;
+                    const ex2 = m.e + m.c * rise + m.a * vshift[0] + m.c * vshift[1];
+                    const ey2 = m.f + m.d * rise + m.b * vshift[0] + m.d * vshift[1];
                     // Type1 은 글리프가 외곽선 프로그램이다. 그 자리에 그린다.
                     if (ff) |g| {
                         if (g.t1 and code < 256 and pdft1.t1_pool[g.t1_cs + code].len > 0) {
@@ -5182,6 +5207,7 @@ export fn fieldFmtOff(i: u32) u32 { return pdfform.fieldFmtOff(i); }
 export fn fieldFmtLen(i: u32) u32 { return pdfform.fieldFmtLen(i); }
 export fn fieldChecked(i: u32) u32 { return pdfform.fieldChecked(i); }
 export fn fieldParent(i: u32) u32 { return pdfform.fieldParent(i); }
+export fn fieldTopIndex(i: u32) u32 { return pdfform.fieldTopIndex(i); }
 export fn fieldTextPtr() [*]u8 { return pdfform.fieldTextPtr(); }
 export fn fieldNameOff(i: u32) u32 { return pdfform.fieldNameOff(i); }
 export fn fieldNameLen(i: u32) u32 { return pdfform.fieldNameLen(i); }
@@ -8058,6 +8084,24 @@ pub fn widthOf(f: *const FontMap, code: u32) f32 {
     if (f.dw > 0) return f.dw;
     // 폭을 모르면 라틴은 반각, 두 바이트 글꼴은 전각으로 본다
     return if (f.two_byte) 1000 else 500;
+}
+
+/// 세로쓰기 자리. (w1y, vx, vy) — /W2 에 있으면 그것, 없으면 /DW2 와 w0/2.
+pub fn vmetric(f: *const FontMap, code: u32) [3]f32 {
+    var i: u32 = 0;
+    while (i < f.w2n) : (i += 1) if (f.w2codes.all()[i] == code) {
+        const v = f.w2vals.all()[i];
+        return .{ @floatFromInt(v[0]), @floatFromInt(v[1]), @floatFromInt(v[2]) };
+    };
+    return .{ f.dw2[1], widthOf(f, code) / 2, f.dw2[0] };
+}
+
+pub fn pushVMetric(f: *FontMap, code: u32, w1y: f32, vx: f32, vy: f32) void {
+    if (code > 65535 or !f.w2codes.room(f.w2n + 1) or !f.w2vals.room(f.w2n + 1)) return;
+    const cl = struct { fn c(v: f32) i16 { return @intFromFloat(@max(-32767, @min(32767, v))); } }.c;
+    f.w2codes.all()[f.w2n] = @intCast(code);
+    f.w2vals.all()[f.w2n] = .{ cl(w1y), cl(vx), cl(vy) };
+    f.w2n += 1;
 }
 
 pub fn pushWidth(f: *FontMap, code: u32, v: f32) void {

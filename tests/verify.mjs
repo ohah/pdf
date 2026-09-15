@@ -76,6 +76,7 @@ async function load(file, page = 0, feed = true, formOn = true) {
       opts: S2(ex.fieldOptsOff(i), ex.fieldOptsLen(i)),
       checked: ex.fieldChecked(i) === 1,
       parent: ex.fieldParent?.(i) ?? 0,
+      topIndex: ex.fieldTopIndex?.(i) ?? 0,
     });
   }
   const drew = [...dec.decode(new Uint8Array(ex.memory.buffer, ex.drawPtr(), ex.drawLen()))]
@@ -652,6 +653,60 @@ for (const [f, want] of [['enc-rc4.pdf','ENCRYPTED OK'],['enc-aes.pdf','ENCRYPTE
     ok('주석: 겉모습이 그려짐', saves >= 10, saves);
     ok('주석: 원본 글자도 그대로', r2.text.includes('ABCabc123'), JSON.stringify(r2.text));
   }
+}
+
+// --- 목록 상자의 첫 보이는 항목 (/TI)
+{
+  const r = await load('list.pdf');
+  ok('목록: /TI 를 읽는다', r && r.fld.length === 1 && r.fld[0].kind === 3 && r.fld[0].topIndex === 3,
+    r && JSON.stringify(r.fld[0] && [r.fld[0].kind, r.fld[0].topIndex]));
+  ok('목록: 콤보 비트 없음(목록 상자)', r && (r.fld[0].flags & (1 << 17)) === 0, r && r.fld[0].flags);
+}
+
+// --- 입력 칸의 틀 (/MK·/BS) — 겉모습이 없어도 그리고, 채워 저장할 때 새 겉모습에 앞세운다
+{
+  // 넷: 실선 1·점선 2 [3 2]·밑줄 3·도드라짐 2. poppler 와 3.46% (pdf.js 는 캔버스에 안 그림 — 4.42%).
+  const r = await loadNoForm('bs.pdf');
+  const c = r ? r.counts : {};
+  ok('칸 틀: 테두리 넷을 긋는다', (c[7] || 0) === 4, c[7]);
+  // 채움 = 바탕 1 + 칸 바탕 4 + 도드라짐 띠 2
+  ok('칸 틀: 바탕과 도드라짐 띠를 칠한다', (c[6] || 0) === 7, c[6]);
+  let dash = 0;
+  for (let i = 0; i < r.ops.length;) { const k = r.ops[i], n = r.ops[i + 1]; if (k === 24 && r.ops[i + 2] === 2 && r.ops[i + 3] === 3 && r.ops[i + 4] === 2) dash++; i += 2 + n; }
+  ok('칸 틀: 점선 [3 2]', dash === 1, dash);
+  // 점선 칸(6)을 채워 저장 — 새 겉모습 앞에 바탕과 점선 테두리가 있어야 한다.
+  // 없으면 채운 칸의 틀이 다른 뷰어에서 사라진다.
+  const r2 = await load('bs.pdf');
+  const e2 = r2.ex;
+  e2.clearPick(); e2.addPick(0); e2.setRotate(0); e2.clearWatermark(); e2.clearLabels(); e2.clearFieldEdits();
+  e2.addFieldEdit(6, 0);
+  for (const ch of 'hello') e2.addFieldEditChar(ch.codePointAt(0));
+  const n2 = e2.apply();
+  ok('칸 틀: 만들어짐', n2 > 0, n2);
+  if (n2 > 0) {
+    const out = Buffer.from(new Uint8Array(e2.memory.buffer, e2.outputPtr(), n2).slice()).toString('latin1');
+    const at = out.lastIndexOf('/Tx BMC');
+    const ap = out.slice(out.lastIndexOf('stream\n', at), at);
+    ok('칸 틀: 새 겉모습에 바탕', /0\.95 0\.95 0\.95 rg 0 0 160\.00 28\.00 re f/.test(ap), ap.slice(0, 80));
+    ok('칸 틀: 새 겉모습에 점선 테두리', /\[3\.00 2\.00 \] 0 d .* re S/.test(ap), ap.slice(-90));
+  }
+}
+
+// --- 세로쓰기 자리 (9.7.4.3)
+{
+  // 글자는 현재 점에서 v = (vx, vy) 만큼 빼서 놓고 w1y 만큼 내려간다.
+  // /W2 [1 [-500 500 -880] 2 [-300 300 -600]], 24pt, 100 170 부터. 손으로 셈한 값이고
+  // pdf.js 도 같은 (w1y, vx, vy) 를 읽는다(getOperatorList 의 glyph.vmetric).
+  const at = (r) => {
+    const out = [];
+    for (let i = 0; i < r.ops.length;) { const k = r.ops[i], n = r.ops[i + 1]; if (k === 17) out.push([+r.ops[i + 2].toFixed(2), +r.ops[i + 3].toFixed(2)]); i += 2 + n; }
+    return out;
+  };
+  const w2 = at(await load('v-vert-w2.pdf'));
+  ok('세로쓰기: /W2 자리', JSON.stringify(w2) === '[[88,191.12],[92.8,172.4],[88,171.92],[92.8,153.2]]', JSON.stringify(w2));
+  // /DW2·/W2 가 없으면 [880 −1000] 과 vx = w0/2 — 12 왼쪽, 21.12 아래, 24 씩 내려감
+  const dw2 = at(await load('v-vert-dw2.pdf'));
+  ok('세로쓰기: 기본 [880 −1000]', JSON.stringify(dw2) === '[[88,148.88],[88,124.88],[88,100.88],[88,76.88]]', JSON.stringify(dw2));
 }
 
 // --- 겉모습 없는 주석 — 규격의 기본 모양으로 그린다

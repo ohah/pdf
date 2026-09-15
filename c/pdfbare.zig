@@ -130,6 +130,137 @@ fn paint(fill: Color, stroke: Color, w: f32) void {
     else core.emitOp(9, &[_]f32{});
 }
 
+/// 콘텐츠 스트림 글자를 쌓는 작은 붓.
+const Pen = struct {
+    d: []u8,
+    n: usize = 0,
+    fn s(self: *Pen, t: []const u8) void {
+        if (self.n + t.len > self.d.len) return;
+        @memcpy(self.d[self.n..][0..t.len], t);
+        self.n += t.len;
+    }
+    /// 소수 둘째 자리까지. 음수도 된다.
+    fn f(self: *Pen, v: f32) void {
+        if (self.n + 16 > self.d.len) return;
+        var x = v;
+        if (x < 0) { self.d[self.n] = '-'; self.n += 1; x = -x; }
+        const c: u32 = @intFromFloat(@min(1.0e8, x * 100 + 0.5));
+        self.n += core.putNum(self.d[self.n..], c / 100);
+        self.d[self.n] = '.';
+        self.n += 1;
+        const r = c % 100;
+        self.d[self.n] = @intCast('0' + r / 10);
+        self.d[self.n + 1] = @intCast('0' + r % 10);
+        self.n += 2;
+        self.d[self.n] = ' ';
+        self.n += 1;
+    }
+    /// /MK 의 색 배열을 rg·g·k 연산자로. 빈 배열이면 false.
+    fn color(self: *Pen, b: []const u8, from: usize, to: usize, key: []const u8, fill: bool) bool {
+        const ca = core.keyPos(b, from, to, key) orelse return false;
+        var p = ca + key.len;
+        while (p < to and core.isSpace(b[p])) p += 1;
+        if (p >= to or b[p] != '[') return false;
+        p += 1;
+        var vals: [4]f32 = undefined;
+        var n: u32 = 0;
+        while (n < 4 and p < to) {
+            while (p < to and core.isSpace(b[p])) p += 1;
+            if (p >= to or b[p] == ']') break;
+            vals[n] = core.readFloat(b, &p);
+            n += 1;
+        }
+        if (n != 1 and n != 3 and n != 4) return false;
+        var i: u32 = 0;
+        while (i < n) : (i += 1) self.f(vals[i]);
+        self.s(if (n == 1) (if (fill) "g " else "G ") else if (n == 3) (if (fill) "rg " else "RG ") else (if (fill) "k " else "K "));
+        return true;
+    }
+};
+
+/// 입력 칸의 틀 — 바탕(/MK /BG)과 테두리(/MK /BC, /BS 의 굵기·모양)를 콘텐츠
+/// 스트림 글자로 낸다. 자리는 (0,0)–(w,h). 규격 12.5.4·12.7.3.3, poppler 의
+/// AnnotWidget 과 같은 꼴: S 실선 · D 점선 · U 밑줄 · B 도드라짐 · I 파임.
+///
+/// 저장 때 새 겉모습에 앞세우고(pdfapply), 겉모습 없는 위젯을 그릴 때도 쓴다.
+/// 안 하면 채운 칸의 테두리가 다른 뷰어에서 사라진다.
+pub fn widgetFrame(b: []const u8, ab: usize, abe: usize, w: f32, h: f32, out: []u8) usize {
+    var pen = Pen{ .d = out };
+    var mk_s: usize = 0;
+    var mk_e: usize = 0;
+    if (core.keyPos(b, ab, abe, "/MK")) |ma| {
+        var p = ma + 3;
+        while (p < abe and core.isSpace(b[p])) p += 1;
+        if (p < abe and b[p] == '<') { mk_s = p; mk_e = core.dictEnd(b, p, abe); }
+    }
+    var dash: [6]f32 = .{ 0, 0, 0, 0, 0, 0 };
+    var dash_n: u32 = 0;
+    const bw = strokeStyle(b, ab, abe, &dash, &dash_n);
+    var st: [8]u8 = .{ 'S', 0, 0, 0, 0, 0, 0, 0 };
+    if (core.keyPos(b, ab, abe, "/BS")) |bs| {
+        var p = bs + 3;
+        while (p < abe and core.isSpace(b[p])) p += 1;
+        if (p < abe and b[p] == '<') {
+            var tmp: [8]u8 = undefined;
+            if (core.nameAfter(b, p, core.dictEnd(b, p, abe), "/S", &tmp) >= 1) st[0] = tmp[0];
+        }
+    }
+    pen.s("q ");
+    // 바탕
+    if (mk_e > mk_s and pen.color(b, mk_s, mk_e, "/BG", true)) {
+        pen.s("0 0 "); pen.f(w); pen.f(h); pen.s("re f\n");
+    }
+    // 테두리
+    if (mk_e > mk_s and bw > 0 and pen.color(b, mk_s, mk_e, "/BC", false)) {
+        pen.f(bw); pen.s("w ");
+        if (st[0] == 'D') {
+            pen.s("[");
+            var i: u32 = 0;
+            while (i < dash_n) : (i += 1) pen.f(dash[i]);
+            pen.s("] 0 d ");
+        }
+        const hw = bw / 2;
+        if (st[0] == 'U') {
+            pen.s("0 "); pen.f(hw); pen.s("m "); pen.f(w); pen.f(hw); pen.s("l S\n");
+        } else {
+            pen.f(hw); pen.f(hw); pen.f(w - bw); pen.f(h - bw); pen.s("re S\n");
+        }
+        // 도드라짐·파임 — 테두리 안쪽에 굵기만큼의 비스듬한 띠. 왼쪽 위와
+        // 오른쪽 아래가 밝기가 다르다(B: 흰·회색, I: 회색·밝은 회색).
+        if (st[0] == 'B' or st[0] == 'I') {
+            const lt: []const u8 = if (st[0] == 'B') "1 g " else "0.5 g ";
+            const rb: []const u8 = if (st[0] == 'B') "0.5 g " else "0.75 g ";
+            const o = bw; // 바깥 테두리 안쪽부터
+            const inn = bw * 2; // 띠 안쪽
+            pen.s(lt);
+            pen.f(o); pen.f(o); pen.s("m "); pen.f(o); pen.f(h - o); pen.s("l ");
+            pen.f(w - o); pen.f(h - o); pen.s("l "); pen.f(w - inn); pen.f(h - inn); pen.s("l ");
+            pen.f(inn); pen.f(h - inn); pen.s("l "); pen.f(inn); pen.f(inn); pen.s("l f\n");
+            pen.s(rb);
+            pen.f(w - o); pen.f(h - o); pen.s("m "); pen.f(w - o); pen.f(o); pen.s("l ");
+            pen.f(o); pen.f(o); pen.s("l "); pen.f(inn); pen.f(inn); pen.s("l ");
+            pen.f(w - inn); pen.f(inn); pen.s("l "); pen.f(w - inn); pen.f(h - inn); pen.s("l f\n");
+        }
+    }
+    pen.s("Q\n");
+    return pen.n;
+}
+
+/// 겉모습 없는 위젯 — 틀만 그린다. 값 글자는 글꼴이 없어 못 그린다(양식 층이 맡는다).
+fn drawWidget(b: []const u8, ab: usize, abe: usize, rect: [4]f32) void {
+    var buf: [1024]u8 = undefined;
+    const n = widgetFrame(b, ab, abe, rect[2] - rect[0], rect[3] - rect[1], &buf);
+    if (n <= 4) return; // "q Q" 뿐
+    core.emitOp(14, &[_]f32{});
+    core.emitOp(21, &[_]f32{1});
+    core.emitOp(23, &[_]f32{1});
+    core.emitOp(26, &[_]f32{0});
+    core.emitOp(24, &[_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 });
+    core.emitOp(16, &[_]f32{ 1, 0, 0, 1, rect[0], rect[1] });
+    core.runOps(buf[0..n], 1);
+    core.emitOp(15, &[_]f32{});
+}
+
 /// 주석 딕셔너리 [ab, abe) 를 기본 모양으로 그린다. 아는 종류가 아니면 false.
 pub fn draw(b: []const u8, ab: usize, abe: usize, rect: [4]f32) bool {
     var st: [16]u8 = undefined;
@@ -147,7 +278,10 @@ pub fn draw(b: []const u8, ab: usize, abe: usize, rect: [4]f32) bool {
         else if (core.std_mem_eq(sub, "Polygon")) .polygon
         else if (core.std_mem_eq(sub, "PolyLine")) .polyline
         else .none;
-    if (kind == .none) return false;
+    if (kind == .none) {
+        if (core.std_mem_eq(sub, "Widget")) { drawWidget(b, ab, abe, rect); return true; }
+        return false;
+    }
 
     const stroke = colorAt(b, ab, abe, "/C");
     const fill = colorAt(b, ab, abe, "/IC");
