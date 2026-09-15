@@ -74,6 +74,8 @@ export type PageMsg = {
    * 자리(Node)에서는 날 화소로 온다 — 그리는 쪽이 캔버스에 얹는다.
    */
   bitmaps: (ImageBitmap | { w: number; h: number; rgba: Uint8ClampedArray } | undefined)[];
+  /** 칸마다 /Interpolate true 인지 — 키워 그릴 때도 부드럽게 */
+  smooth: boolean[];
   stencils: ({ w: number; h: number; flip: boolean; bytes: Uint8Array; key: string } | undefined)[];
   bitmap?: ImageBitmap | { w: number; h: number; rgba: Uint8ClampedArray };
   images: number;

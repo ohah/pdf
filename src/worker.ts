@@ -76,6 +76,7 @@ type Exports = {
   slotLen?: (i: number) => number;
   slotFlip?: (i: number) => number;
   slotSMask?: (i: number) => number;
+  slotInterp?: (i: number) => number;
   pageWidth: () => number;
   pageOriginX?: () => number;
   pageOriginY?: () => number;
@@ -729,6 +730,8 @@ async function page(i: number, formOn: boolean, light = false) {
     new Uint8Array(e.memory.buffer, e.imageAreaPtr!() + e.slotOff!(si), e.slotLen!(si)).slice();
   const slots = light ? 0 : (e.imageSlots?.() ?? 0);
   const bitmaps: (ImageBitmap | RawImage | undefined)[] = [];
+  // /Interpolate true 인 그림 — 키워 그릴 때도 부드럽게 한다
+  const smooth: boolean[] = [];
   const stencils: ({ w: number; h: number; flip: boolean; bytes: Uint8Array; key: string } | undefined)[] = [];
   for (let si = 0; si < slots; si++) {
     const k = e.slotKind!(si);
@@ -759,6 +762,7 @@ async function page(i: number, formOn: boolean, light = false) {
       continue;
     }
     stencils.push(undefined);
+    smooth[si] = (e.slotInterp?.(si) ?? 0) === 1;
     const ms = e.slotSMask?.(si) ?? 0;
     const alpha = ms > 0
       ? { w: e.slotWidth!(ms - 1), h: e.slotHeight!(ms - 1), bytes: rawAt(ms - 1) }
@@ -887,7 +891,7 @@ async function page(i: number, formOn: boolean, light = false) {
   return {
     w: e.pageWidth(), h: e.pageHeight(), x0: e.pageOriginX?.() ?? 0, y0: e.pageOriginY?.() ?? 0,
     rot: e.pageRotate?.() ?? 0, items, ops, drw, rtx, links, annots, inline, fields,
-    fonts, bitmaps, stencils, bitmap, images: e.imageCount(), forms: e.formCount?.() ?? 0,
+    fonts, bitmaps, smooth, stencils, bitmap, images: e.imageCount(), forms: e.formCount?.() ?? 0,
     light,
   };
 }

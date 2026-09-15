@@ -1601,6 +1601,8 @@ const Img = struct {
     len: u32,
     flip: u8, // /Decode [1 0] — 켜고 끄는 값이 뒤집혀 있다
     smask: u8, // 부드러운 마스크가 든 칸 번호 + 1
+    /// /Interpolate true — 키워 그릴 때 부드럽게 하라는 표시. 기본은 또렷하게.
+    interp: u8,
 };
 /// 쪽에 놓인 그림 칸. 필요한 만큼 늘어난다(세는 상한 없음).
 var imgs: Table(Img, 16) = .{};
@@ -1840,6 +1842,7 @@ export fn slotOff(i: u32) u32 { return if (i < img.n) imgs.all()[i].off else 0; 
 export fn slotLen(i: u32) u32 { return if (i < img.n) imgs.all()[i].len else 0; }
 export fn slotFlip(i: u32) u32 { return if (i < img.n) imgs.all()[i].flip else 0; }
 export fn slotSMask(i: u32) u32 { return if (i < img.n) imgs.all()[i].smask else 0; }
+export fn slotInterp(i: u32) u32 { return if (i < img.n) imgs.all()[i].interp else 0; }
 
 /// Separation·DeviceN 배열에서 대체 색공간과 잉크 변환 함수를 찾는다.
 ///
@@ -1954,6 +1957,51 @@ fn expandLowBpc(dst: [*]u8, w: u32, h: u32, bpc: u32, room: usize, got: *u32) bo
 }
 
 /// 그림 객체 하나를 풀어 그림 표에 담는다. 담은 칸 번호를 준다.
+/// /Matte — 가리개가 "바탕색으로 미리 곱해 두었다" 고 알리는 것 (8.9.6.4).
+///
+/// 저장값 c' = m + a·(c − m) 이라 그대로 그리면 투명한 자리가 바탕색으로
+/// 물든다. c = m + (c' − m)/a 로 되돌린다. pdf.js 의 undoPreblend 와 같다.
+/// 크기가 다르면 규격 위반이라 손대지 않는다. 회색·RGB 8비트만 — JPEG 은
+/// 브라우저가 풀어 여기 바이트가 없다.
+fn undoMatte(b: []const u8, sb: usize, base: u32, ms: u32) void {
+    const se = objDictEnd(b, sb);
+    const ma = find(b[sb..se], "/Matte", 0) orelse return;
+    var q = sb + ma + 6;
+    while (q < se and isSpace(b[q])) q += 1;
+    if (q >= se or b[q] != '[') return;
+    q += 1;
+    var m: [4]f32 = .{ 0, 0, 0, 0 };
+    var n: u32 = 0;
+    while (n < 4 and q < se) {
+        while (q < se and isSpace(b[q])) q += 1;
+        if (q >= se or b[q] == ']') break;
+        m[n] = readFloat(b, &q);
+        n += 1;
+    }
+    const im = &imgs.all()[base];
+    const sm = &imgs.all()[ms];
+    if (sm.kind != 2 or sm.w != im.w or sm.h != im.h) return;
+    const comps: u32 = if (im.kind == 1) 3 else if (im.kind == 2) 1 else return;
+    if (n != comps) return;
+    const px = im.w * im.h;
+    if (im.len < px * comps or sm.len < px) return;
+    const area = imgArea();
+    const dst = @as([*]u8, @ptrFromInt(area + im.off))[0 .. px * comps];
+    const al = @as([*]const u8, @ptrFromInt(area + sm.off))[0..px];
+    var i: u32 = 0;
+    while (i < px) : (i += 1) {
+        const a = al[i];
+        if (a == 0 or a == 255) continue;
+        const k: f32 = 255.0 / @as(f32, @floatFromInt(a));
+        var c: u32 = 0;
+        while (c < comps) : (c += 1) {
+            const mm = m[c] * 255.0;
+            const v = mm + (@as(f32, @floatFromInt(dst[i * comps + c])) - mm) * k;
+            dst[i * comps + c] = @intFromFloat(@max(0, @min(255, v + 0.5)));
+        }
+    }
+}
+
 fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
     if (!imgs.room(img.n + 2)) return null;
     const oe = objDictEnd(b, ob);
@@ -2326,6 +2374,7 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
     im.len = got;
     im.flip = if (flip) 1 else 0;
     im.smask = 0;
+    im.interp = if (find(b[ob..oe], "/Interpolate true", 0) != null) 1 else 0;
     const slot = img.n;
     if (slot == 0) { img.kind = kind; img.w = w; img.h = h; img.off_first = img.used; img.len = got; }
     img.n += 1;
@@ -2338,7 +2387,10 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
         if (q < oe and isDigit(b[q])) {
             const sn = readUint(b, &q);
             if (findObj(b, sn)) |sb2| {
-                if (takeImage(b, sb2, "")) |ms| imgs.all()[slot].smask = @intCast(ms + 1);
+                if (takeImage(b, sb2, "")) |ms| {
+                    imgs.all()[slot].smask = @intCast(ms + 1);
+                    undoMatte(b, sb2, slot, ms);
+                }
             }
         }
     }
@@ -2409,7 +2461,7 @@ fn stencilAlpha(mi: u32) ?u32 {
     const slot2 = img.n;
     imgs.all()[slot2] = .{
         .name_len = 0, .name = undefined, .kind = 2, .w = im.w, .h = im.h,
-        .off = img.used, .len = @intCast(px), .flip = 0, .smask = 0,
+        .off = img.used, .len = @intCast(px), .flip = 0, .smask = 0, .interp = 0,
     };
     img.n += 1;
     img.used += @intCast((px + 3) & ~@as(usize, 3));
@@ -2439,7 +2491,7 @@ fn colorKeyMask(slot: u32, lo: []const u32, hi: []const u32) void {
     }
     imgs.all()[img.n] = .{
         .name_len = 0, .name = undefined, .kind = 2, .w = im.w, .h = im.h,
-        .off = img.used, .len = @intCast(px), .flip = 0, .smask = 0,
+        .off = img.used, .len = @intCast(px), .flip = 0, .smask = 0, .interp = 0,
     };
     imgs.all()[slot].smask = @intCast(img.n + 1);
     img.n += 1;
@@ -2469,7 +2521,7 @@ export fn jpegToRgb(i: u32) i32 {
     const slot = img.n;
     imgs.all()[slot] = .{
         .name_len = 0, .name = undefined, .kind = 1, .w = im.w, .h = im.h,
-        .off = img.used, .len = @intCast(need), .flip = 0, .smask = im.smask,
+        .off = img.used, .len = @intCast(need), .flip = 0, .smask = im.smask, .interp = im.interp,
     };
     img.n += 1;
     img.used += @intCast((need + 3) & ~@as(usize, 3));

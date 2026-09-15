@@ -144,8 +144,8 @@ for pass in $(seq 1 "$N"); do
   atleast "기능 단언" "$(printf '%s' "$fn" | grep -oE '기능 단언 [0-9]+' | grep -oE '[0-9]+')" 419
   atleast "적대적" "$n" 600
   atleast "메모리" "$(printf '%s' "$mm" | grep -oE '메모리 [0-9]+' | grep -oE '[0-9]+')" 6
-  atleast "Node" "$(printf '%s' "$nd" | grep -oE '통과 [0-9]+' | tail -1 | grep -oE '[0-9]+')" 76
-  atleast "빈틈" "$(printf '%s' "$gp" | grep -oE '빈틈 [0-9]+' | grep -oE '[0-9]+')" 15
+  atleast "Node" "$(printf '%s' "$nd" | grep -oE '통과 [0-9]+' | tail -1 | grep -oE '[0-9]+')" 82
+  atleast "빈틈" "$(printf '%s' "$gp" | grep -oE '빈틈 [0-9]+' | grep -oE '[0-9]+')" 9
   atleast "손자국" "$(printf '%s' "$sn" | grep -oE '손자국 [0-9]+' | grep -oE '[0-9]+')" 160
   atleast "글꼴 열쇠" "$(printf '%s' "$fk" | grep -oE '글꼴 열쇠 [0-9]+' | grep -oE '[0-9]+')" 5
   atleast "서명" "$(printf '%s' "$sg" | grep -oE '서명 [0-9]+' | grep -oE '[0-9]+')" 30

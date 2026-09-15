@@ -83,39 +83,8 @@ page("g-ti.pdf", "0.98 0.98 0.98 rg 0 0 200 200 re f\n",
     "BT /F1 24 Tf 100 170 Td <0001000200010002> Tj ET\n0 0 0 rg 10 10 20 20 re f\n",
     { res: "/Font << /F1 5 0 R >>", extra: [cid, desc, fd] });
 }
-// ④ /Matte — 부드러운 가리개의 프리멀티플라이 바탕색
-{
-  const w = 4, h = 4;
-  const a = Buffer.from([0, 80, 160, 255, 80, 160, 255, 0, 160, 255, 0, 80, 255, 0, 80, 160]);
-  // /Matte 는 "이 색으로 미리 곱해 두었다" 는 뜻이다 (8.9.6.4). 그냥
-  // /Matte 만 적고 원본 색을 두면 규격에 안 맞는 파일이 된다 — 그러면
-  // 차이가 우리 결함인지 견본 결함인지 못 가른다.
-  //   저장값 c' = m + a·(c − m),  바탕 m = [0.95 0.85 0.2]
-  const matte = [0.95, 0.85, 0.2];
-  const base = [40 / 255, 120 / 255, 220 / 255];
-  const rgb = Buffer.alloc(w * h * 3);
-  for (let i = 0; i < w * h; i++) {
-    const al = a[i] / 255;
-    for (let k = 0; k < 3; k++) {
-      const v = matte[k] + al * (base[k] - matte[k]);
-      rgb[i * 3 + k] = Math.max(0, Math.min(255, Math.round(v * 255)));
-    }
-  }
-  page("g-matte.pdf", "0.95 0.85 0.2 rg 0 0 200 200 re f\nq 120 0 0 120 40 40 cm /I Do Q\n",
-    { res: "/XObject << /I 5 0 R >>",
-      extra: [stream(`/Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /SMask 6 0 R`, rgb),
-        stream(`/Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Matte [0.95 0.85 0.2]`, a)] });
-}
-// ⑤ /Interpolate — 키워 그릴 때 부드럽게 하라는 표시
-{
-  const w = 4, h = 4;
-  const g = Buffer.alloc(w * h);
-  for (let i = 0; i < w * h; i++) g[i] = (i * 17) & 255;
-  page("g-interp.pdf", "q 80 0 0 80 15 100 cm /A Do Q\nq 80 0 0 80 105 100 cm /B Do Q\n",
-    { res: "/XObject << /A 5 0 R /B 6 0 R >>",
-      extra: [stream(`/Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Interpolate true`, g),
-        stream(`/Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Interpolate false`, g)] });
-}
+// /Matte·/Interpolate 는 만들어졌다 — tests/mkfeat3.mjs 의 v-matte·v-interp 와 node.mjs 로 갔다.
+
 // 선형화(/Linearized)는 만들지 않는다.
 //
 // 규격에 맞는 선형화 파일은 첫 쪽 객체를 앞으로 모으고, 힌트 스트림(/H)과
@@ -127,4 +96,4 @@ page("g-ti.pdf", "0.98 0.98 0.98 rg 0 0 200 200 re f\n",
 
 // 라디오 묶음은 만들어졌다 — tests/mkform.mjs 의 radio.pdf 와 verify.mjs 로 갔다.
 
-console.log("g-bs·g-ti·g-vert-w2·g-matte·g-interp 만듦");
+console.log("g-bs·g-ti·g-vert-w2 만듦");

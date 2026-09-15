@@ -95,6 +95,8 @@ export type DrawInput = {
   bitmap?: ImageBitmap | RawPix;
   /** 쪽이 쓰는 그림들. Do 가 번호로 고른다. */
   bitmaps?: (ImageBitmap | RawPix | undefined)[];
+  /** 칸마다 /Interpolate true 인지. 참이면 키워 그릴 때도 부드럽게 한다. */
+  smooth?: boolean[];
   /** 글꼴 번호 → CSS font-family. 없으면 시스템 글꼴로 그린다. */
   fontFamily?: (idx: number) => string | undefined;
   /** 글꼴 번호 → 문서가 적어 둔 글꼴 이름(BaseFont).
@@ -147,8 +149,13 @@ export type Stencil = { w: number; h: number; flip: boolean; bytes: Uint8Array; 
  * 부드럽게 하라는 것은 /Interpolate 가 참일 때뿐이고 기본은 아니다.
  *
  * 줄여 그릴 때는 켜 둔다. 끄면 원본 화소를 띄엄띄엄 집어 무아레가 진다.
+ *
+ * /Interpolate true 면 키울 때도 켠다 — 문서가 부드럽게 하라고 한 것이다.
+ * 4×4 회색 계단을 80pt 로 키운 견본(g-interp)에서 pdf.js·poppler 둘 다
+ * 그렇게 한다.
  */
-function smoothFor(g: CanvasRenderingContext2D, img: CanvasImageSource): void {
+function smoothFor(g: CanvasRenderingContext2D, img: CanvasImageSource, interp = false): void {
+  if (interp) { g.imageSmoothingEnabled = true; return; }
   // CanvasImageSource 에는 width 가 없는 갈래(VideoFrame)도 들어 있다.
   // 크기를 못 읽으면 예전대로 둔다.
   const q = img as { width?: number; height?: number };
@@ -888,7 +895,7 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
         const pick = asImage(slot > 0 ? input.bitmaps?.[slot - 1] : undefined, canvas);
         if (pick) {
           g.save();
-          smoothFor(g, pick);
+          smoothFor(g, pick, input.smooth?.[slot - 1] === true);
           g.transform(1, 0, 0, -1, 0, 1);
           g.drawImage(pick, 0, 0, 1, 1);
           g.restore();

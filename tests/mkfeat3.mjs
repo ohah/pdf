@@ -181,4 +181,37 @@ page("v-cmyk-fill.pdf",
   "0 0 0 0.5 k 105 50 85 40 re f\n" +        // 반 검정
   "0.9 0.1 0.1 0 K 6 w 15 15 170 20 re S\n"); // 선도 CMYK
 
-console.log("v-ccitt-k·v-ccitt-black·v-cal·v-bpc16·v-ccitt-align·v-cmyk-fill 만듦");
+// /Matte — 부드러운 가리개의 프리멀티플라이 바탕색 (되돌린다: pdf.zig undoMatte)
+{
+  const w = 4, h = 4;
+  const a = Buffer.from([0, 80, 160, 255, 80, 160, 255, 0, 160, 255, 0, 80, 255, 0, 80, 160]);
+  // /Matte 는 "이 색으로 미리 곱해 두었다" 는 뜻이다 (8.9.6.4). 그냥
+  // /Matte 만 적고 원본 색을 두면 규격에 안 맞는 파일이 된다 — 그러면
+  // 차이가 우리 결함인지 견본 결함인지 못 가른다.
+  //   저장값 c' = m + a·(c − m),  바탕 m = [0.95 0.85 0.2]
+  const matte = [0.95, 0.85, 0.2];
+  const base = [40 / 255, 120 / 255, 220 / 255];
+  const rgb = Buffer.alloc(w * h * 3);
+  for (let i = 0; i < w * h; i++) {
+    const al = a[i] / 255;
+    for (let k = 0; k < 3; k++) {
+      const v = matte[k] + al * (base[k] - matte[k]);
+      rgb[i * 3 + k] = Math.max(0, Math.min(255, Math.round(v * 255)));
+    }
+  }
+  page("v-matte.pdf", "0.95 0.85 0.2 rg 0 0 200 200 re f\nq 120 0 0 120 40 40 cm /I Do Q\n",
+    { res: "/XObject << /I 5 0 R >>",
+      extra: [stream(`/Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /SMask 6 0 R`, rgb),
+        stream(`/Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Matte [0.95 0.85 0.2]`, a)] });
+}
+// /Interpolate — 키워 그릴 때 부드럽게 하라는 표시 (draw.ts smoothFor)
+{
+  const w = 4, h = 4;
+  const g = Buffer.alloc(w * h);
+  for (let i = 0; i < w * h; i++) g[i] = (i * 17) & 255;
+  page("v-interp.pdf", "q 80 0 0 80 15 100 cm /A Do Q\nq 80 0 0 80 105 100 cm /B Do Q\n",
+    { res: "/XObject << /A 5 0 R /B 6 0 R >>",
+      extra: [stream(`/Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Interpolate true`, g),
+        stream(`/Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Interpolate false`, g)] });
+}
+console.log("v-ccitt-k·v-ccitt-black·v-cal·v-bpc16·v-ccitt-align·v-cmyk-fill·v-matte·v-interp 만듦");

@@ -583,7 +583,7 @@ export class PDFDocument {
     }
     const runs = drawOps(canvas, {
       ops: q.ops, text: q.drw, read: q.rtx, pageW: q.w, pageH: q.h,
-      bitmap: q.bitmap, bitmaps: q.bitmaps, stencils: q.stencils,
+      bitmap: q.bitmap, bitmaps: q.bitmaps, smooth: q.smooth, stencils: q.stencils,
       originX: q.x0, originY: q.y0, rotate: vp.rotation,
       background: opts.background,
       fontFamily: (i) => fams[i - 1],

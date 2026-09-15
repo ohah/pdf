@@ -196,6 +196,16 @@ const t = (name, cond, got) => {
       const four = await px("t-bpc.pdf", 130, 60);
       t("2비트 회색 그림을 그린다", near(two, [0, 0, 0]), two.join(","));
       t("4비트 회색 그림을 그린다", near(four, [170, 170, 170]), four.join(","));
+      // /Interpolate — 4×4 계단을 80pt 로 키운다. 참이면 칸 경계가 섞이고(136|153
+      // 사이 ≈145), 거짓이면 어느 한쪽 값이다. pdf.js 와 0.00% (poppler 는 안 섞는다).
+      const sm = await px("v-interp.pdf", 35, 70);
+      const bl = await px("v-interp.pdf", 125, 70);
+      t("/Interpolate true 는 키워도 부드럽다", sm[0] > 138 && sm[0] < 151, sm.join(","));
+      t("/Interpolate false 는 또렷하다", Math.abs(sm[0] - bl[0]) > 5 && (near(bl, [136, 136, 136], 3) || near(bl, [153, 153, 153], 3)), bl.join(","));
+      // /Matte — 바탕색으로 미리 곱한 가리개. 되돌리면 바탕 위에 저장값 그대로
+      // (α=80/255 칸: 179,186,104), 안 되돌리면 α² 로 물든다(222,207,68).
+      const mt = await px("v-matte.pdf", 85, 55);
+      t("/Matte 를 되돌린다", near(mt, [179, 186, 104]), mt.join(","));
       // 무색 무늬(/PaintType 2)는 칸 안에 색이 없다 — scn 이 준 색으로
       // 그려야 한다. 안 그러면 늘 같은 회색으로 나온다.
       const u1 = await px("t-uncolored.pdf", 20, 50);
