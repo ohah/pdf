@@ -1038,6 +1038,7 @@ function byColumn(runs: TextRun[]): TextRun[][] | null {
   // 골 양쪽에 다 있는 줄은, 글이 골을 이어서 지나가면(왼쪽 끝과 오른쪽 시작 사이가
   // 골 폭보다 좁으면) 걸친 줄이고, 골에서 끊겨 있으면 두 단의 줄이 y 로 합쳐진 것이다
   const left: TextRun[] = [], right: TextRun[] = [], wide: TextRun[] = [];
+  const table = tableLines(all, h);
   let wideLines = 0;
   for (const line of all) {
     // 조각 하나가 골 한가운데를 넘어가면(한 덩이 제목, 단 폭보다 긴 줄) 그 줄은 걸친
@@ -1049,6 +1050,9 @@ function byColumn(runs: TextRun[]): TextRun[][] | null {
       const lEnd = Math.max(...ls.map((r) => r.x + Math.max(r.w, 1)));
       const rStart = Math.min(...rs.map((r) => r.x));
       if (rStart - lEnd < (gR - gL) * 0.8) { wide.push(...line); wideLines++; continue; }
+      // 괘선 없는 표의 행(칸 셋 넘게 같은 자리에서 끊기는 줄들)은 골을 지나는 한 줄이다 —
+      // 갈라 놓으면 표가 왼쪽 칸들·오른쪽 칸들로 흩어진다
+      if (table.has(line)) { wide.push(...line); wideLines++; continue; }
     }
     left.push(...ls);
     right.push(...rs);
@@ -1056,9 +1060,11 @@ function byColumn(runs: TextRun[]): TextRun[][] | null {
   // 걸친 줄(제목·저자·초록)이 줄의 30% 를 넘으면 단이 아니라 한 단 문서다
   if (wideLines > Math.max(3, all.length * 0.3)) return null;
   // 양쪽이 저마다 여러 줄이어야 단이다 — "차례 ..... 3" 처럼 벌어진 한 줄이 아니라
+  // 넉 줄은 되어야 한다 — 석 줄짜리 "이름   소속" 저자 묶음이나 번호 붙은 수식 셋을
+  // 두 단으로 갈라 "(1) (2) (3)" 을 따로 읽지 않게
   const okGroup = (g: TextRun[]) => {
     if (g.length < 3) return false;
-    return new Set(g.map((r) => Math.round(r.y / Math.max(r.h, 1)))).size >= 2;
+    return new Set(g.map((r) => Math.round(r.y / Math.max(r.h, 1)))).size >= 4;
   };
   if (!okGroup(left) || !okGroup(right)) return null;
   if (wide.length === 0) return [left, right];
@@ -1074,6 +1080,39 @@ function byColumn(runs: TextRun[]): TextRun[][] | null {
     if (rr.length) out.push(rr);
     if (c < cuts.length) out.push(cuts[c]);
     top = bottom;
+  }
+  return out;
+}
+
+/**
+ * 표의 행처럼 생긴 줄들 — 글자 높이의 2.2배 넘는 틈으로 칸이 셋 넘게 나뉘고,
+ * 그런 줄이 세 줄 넘게 이어지며 칸 시작 x 가 서로 맞는 것.
+ */
+function tableLines(all: TextRun[][], h: number): Set<TextRun[]> {
+  const out = new Set<TextRun[]>();
+  // 칸 글이 40자 넘으면 표가 아니라 옆 단의 글줄이다 — 왼쪽 단의 표와 오른쪽 단의
+  // 그림 설명이 같은 기준선에 있으면 칸이 넷으로 보여 한 줄로 붙었다
+  const starts = (line: TextRun[]): number[] => {
+    const rs = [...line].sort((a, b) => a.x - b.x);
+    const xs: number[] = [];
+    let end = -Infinity;
+    let len = 0;
+    for (const r of rs) {
+      if (r.x - end > h * 2.2) { if (len > 40) return []; xs.push(r.x); len = 0; }
+      len += r.text.length;
+      end = Math.max(end, r.x + Math.max(r.w, 1));
+    }
+    return len > 40 ? [] : xs;
+  };
+  const lines = [...all].sort((a, b) => a[0].y - b[0].y);
+  const cells = lines.map(starts);
+  const fits = (a: number[], b: number[]) => a.length >= 3 && b.length >= 3 && a.filter((x) => b.some((y) => Math.abs(x - y) <= h)).length >= 3;
+  let i = 0;
+  while (i < lines.length) {
+    let j = i;
+    while (j + 1 < lines.length && fits(cells[i], cells[j + 1]) && lines[j + 1][0].y - lines[j][0].y < h * 2.5) j++;
+    if (j - i + 1 >= 3) for (let k = i; k <= j; k++) out.add(lines[k]);
+    i = j + 1;
   }
   return out;
 }

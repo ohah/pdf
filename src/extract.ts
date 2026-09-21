@@ -16,6 +16,8 @@ export type Piece = {
   base: string;
   /** 서술자가 굵다고 한 것. 이름에 Bold 가 없어도(LinLibertineTB) 안다 */
   bold?: boolean;
+  /** 태그 PDF 의 표시 구간 번호(/MCID). 없으면 -1, /Artifact 안이면 -2 */
+  mcid?: number;
   dir: "ltr" | "rtl" | "ttb";
 };
 

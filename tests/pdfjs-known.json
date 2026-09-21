@@ -68,5 +68,9 @@
   "freetext.pdf": {
     "max": 13,
     "why": "겉모습 없는 /FreeText — pdf.js 는 글만 그리고 바탕(/C)·테두리(/BS)를 안 그린다. 규격과 poppler(0.82%)를 따랐다."
+  },
+  "bare.pdf": {
+    "max": 5,
+    "why": "글자만 있는 쪽 — 표준 Helvetica 를 시스템 글꼴로 대신 그려 글자 테두리가 다르다. 본문 아홉 줄이 꽉 차 md.pdf(1.6%)보다 크다"
   }
 }

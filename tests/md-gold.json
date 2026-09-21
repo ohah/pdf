@@ -50,6 +50,16 @@
         "Transformer (big)",
         "28.4",
         "41.8"
+      ],
+      [
+        "Parser",
+        "Training",
+        "WSJ 23 F1"
+      ],
+      [
+        "Dyer et al.",
+        "WSJ only, discriminative",
+        "91.7"
       ]
     ],
     "order": [
@@ -224,6 +234,18 @@
       [
         "1. Introduction",
         "2. Related Work"
+      ]
+    ],
+    "table": [
+      [
+        "VGG-16 [41]",
+        "28.07",
+        "9.33"
+      ],
+      [
+        "18 layers",
+        "27.94",
+        "27.88"
       ]
     ]
   }

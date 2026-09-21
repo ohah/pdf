@@ -1379,7 +1379,9 @@ export fn apply() usize { return pdfapply.apply(); }
 /// 자간인지는 이 끝점이 있어야 안다 — 없으면 "Pro vided" 처럼 낱말이 갈라진다.
 /// ang — 글이 나아가는 방향(라디안, 장치 좌표). 0 이 보통 가로. arXiv 스탬프처럼
 /// 옆으로 누운 글은 ±π/2 — 본문에 섞이면 안 된다.
-const Item = struct { x: f32, y: f32, size: f32, off: u32, len: u32, font: i32 = -1, vert: bool = false, w: f32 = 0, ang: f32 = 0 };
+/// 글자 조각. mcid 는 태그 PDF 의 표시 구간 번호(/MCID) — 구조 나무가 이 번호로
+/// "이건 제목, 이건 문단" 을 가리킨다. 없으면 -1, /Artifact(머리글·쪽 번호) 안이면 -2.
+const Item = struct { x: f32, y: f32, size: f32, off: u32, len: u32, font: i32 = -1, vert: bool = false, w: f32 = 0, ang: f32 = 0, mcid: i32 = -1 };
 /// 글자 조각. 필요한 만큼 늘어난다(세는 상한 없음).
 var items: Table(Item, 4096) = .{};
 var item_n: u32 = 0;
@@ -2820,6 +2822,9 @@ export fn itemY(i: u32) f32 { return items.all()[i].y; }
 export fn itemSize(i: u32) f32 { return items.all()[i].size; }
 export fn itemWidth(i: u32) f32 { return if (i < item_n) items.all()[i].w else 0; }
 export fn itemAngle(i: u32) f32 { return if (i < item_n) items.all()[i].ang else 0; }
+export fn itemMcid(i: u32) i32 { return if (i < item_n) items.all()[i].mcid else -1; }
+/// 지금 그리는 표시 구간(/MCID). 폼 XObject 안에서도 바깥 구간을 물려받는다.
+var cur_mcid: i32 = -1;
 export fn itemOff(i: u32) u32 { return items.all()[i].off; }
 /// 이 항목을 그린 글꼴 번호(1부터, 없으면 0). 이름은 fontNamePtr 로 읽는다.
 export fn itemFont(i: u32) u32 {
@@ -3161,6 +3166,7 @@ fn resetPage(w: f32, h: f32) void {
     ops.n = 0;
     dev = .{};
     dev_n = 0;
+    cur_mcid = -1;
     fontarea.n = 0;
     fontarea.used = 0;
     c2g.used = 0;
@@ -3613,8 +3619,23 @@ pub fn runOps(b: []const u8, depth: u32) void {
     var tw: f32 = 0; // 낱말 사이
     var th: f32 = 1; // 가로 비율
     var in_arr = false; // TJ 배열 안인가
+    // 글자 상태(Tc·Tw·Tz·TL·Ts·Tr·글꼴)는 그래픽 상태의 일부라 q/Q 에 함께 묻고
+    // 되살린다. 안 하면 앞 q…Q 안에서 준 "0.396 Tc" 가 다음 글에 새어 글자마다
+    // 0.4pt 씩 벌어지고, 줄 뒤쪽 글자 자리가 13pt 밀려 다른 글꼴 조각과 겹쳤다(Word)
+    const TState = struct { tc: f32, tw: f32, th: f32, lead: f32, rise: f32, render: i32, font: i32, size: f32 };
+    var ts_stack: [32]TState = undefined;
+    var ts_n: u32 = 0;
     var mc_depth: u32 = 0; // 표시 구간 깊이
     var hide_at: u32 = 0; // 숨기기 시작한 깊이 (0 이면 안 숨김)
+    // 표시 구간마다 바깥 MCID 를 쌓아 두었다가 EMC 에서 되돌린다
+    var mc_stack: [64]i32 = undefined;
+    const mc_saved = cur_mcid;
+    defer cur_mcid = mc_saved;
+    // 마지막으로 건너뛴 << >> — BDC 의 /MCID 는 그 안에 있다. op_n 이 같아야 이 연산자의 것이다
+    var dict_s: usize = 0;
+    var dict_e: usize = 0;
+    var dict_op: u32 = 0;
+    var op_n: u32 = 1;
     var cur_cs_f: i32 = -1;
     var cur_cs_s: i32 = -1;
     var t_render: i32 = 0; // Tr — 3·7 은 안 보이는 글자다
@@ -3914,6 +3935,7 @@ pub fn runOps(b: []const u8, depth: u32) void {
                     // 어떤 글꼴로 그렸는지·세로쓰기인지도 함께 남긴다
                     .font = cur.font,
                     .vert = cur.font >= 0 and fonts.all()[@intCast(cur.font)].vertical,
+                    .mcid = cur_mcid,
                 };
                 item_n += 1;
             }
@@ -3931,7 +3953,7 @@ pub fn runOps(b: []const u8, depth: u32) void {
         // 안쪽 값도 글자가 아니다 — << /Lang (en-US) /ActualText <FEFF…> >> BDC 의
         // (en-US) 와 hex 가 본문에 섞여 "담당자敮ⵕS en-US" 가 됐다(한은 보고서).
         // 짝 >> 까지 통째로 건너뛴다.
-        if (c == '<' and p + 1 < b.len and b[p + 1] == '<') { p = dictEnd(b, p, b.len); continue; }
+        if (c == '<' and p + 1 < b.len and b[p + 1] == '<') { dict_s = p; p = dictEnd(b, p, b.len); dict_e = p; dict_op = op_n; continue; }
         if (c == '>' and p + 1 < b.len and b[p + 1] == '>') { p += 2; continue; }
         if (c == '<' or c == '>') { p += 1; continue; }
         if (c == '{' or c == '}') { p += 1; continue; }
@@ -3949,6 +3971,7 @@ pub fn runOps(b: []const u8, depth: u32) void {
         if (opl == 0) { p += 1; continue; }
         const op = opb[0..opl];
         p = q;
+        op_n += 1;
 
         const eqs = struct {
             fn f(a: []const u8, x: []const u8) bool {
@@ -3958,8 +3981,19 @@ pub fn runOps(b: []const u8, depth: u32) void {
             }
         }.f;
 
-        if (eqs(op, "q")) emitOp(14, &[_]f32{})
-        else if (eqs(op, "Q")) emitOp(15, &[_]f32{})
+        if (eqs(op, "q")) {
+            if (ts_n < ts_stack.len) { ts_stack[ts_n] = .{ .tc = tc, .tw = tw, .th = th, .lead = lead, .rise = t_rise, .render = t_render, .font = cur.font, .size = tf_size }; ts_n += 1; }
+            emitOp(14, &[_]f32{});
+        }
+        else if (eqs(op, "Q")) {
+            if (ts_n > 0) {
+                ts_n -= 1;
+                const t = ts_stack[ts_n];
+                tc = t.tc; tw = t.tw; th = t.th; lead = t.lead; t_rise = t.rise; t_render = t.render; tf_size = t.size;
+                if (t.font >= 0) cur.font = t.font;
+            }
+            emitOp(15, &[_]f32{});
+        }
         else if (eqs(op, "cm") and sp >= 6)
             emitOp(16, &[_]f32{ st[0], st[1], st[2], st[3], st[4], st[5] })
         else if (eqs(op, "m") and sp >= 2) { pathTouch(st[0], st[1]); emitOp(1, &[_]f32{ st[0], st[1] }); }
@@ -4048,7 +4082,17 @@ pub fn runOps(b: []const u8, depth: u32) void {
             tm = tlm;
         }
         else if (eqs(op, "BDC") or eqs(op, "BMC")) {
+            if (mc_depth < mc_stack.len) mc_stack[mc_depth] = cur_mcid;
             mc_depth += 1;
+            // /Artifact 는 본문이 아니다(머리글·쪽 번호·표 줄). /P <</MCID n>> BDC 면
+            // n 이 구조 나무의 잎 번호다. 딕셔너리가 자원(/Properties)에 있으면 거기서 찾는다.
+            if (name_len == 8 and eqs(name_buf[0..8], "Artifact")) cur_mcid = -2
+            else if (dict_op == op_n - 1 and dict_e > dict_s) {
+                if (intAfter(b, dict_s, dict_e, "/MCID")) |m| cur_mcid = @intCast(@min(m, 1 << 30));
+            } else if (name_len > 0 and eqs(op, "BDC")) {
+                const pm = propMcid(name_buf[0..name_len]);
+                if (pm >= 0) cur_mcid = pm;
+            }
             // /OC /이름 BDC — 꺼 놓은 레이어면 EMC 까지 그리지 않는다
             if (hide_at == 0 and name_len > 0) {
                 const ob8 = propObj(name_buf[0..name_len]);
@@ -4064,6 +4108,7 @@ pub fn runOps(b: []const u8, depth: u32) void {
                 emit_mute = false;
             }
             if (mc_depth > 0) mc_depth -= 1;
+            cur_mcid = if (mc_depth < mc_stack.len) mc_stack[mc_depth] else -1;
         }
         else if (eqs(op, "sh")) {
             const si = findShade(name_buf[0..name_len]);
@@ -4559,14 +4604,21 @@ fn scanProperties(b: []const u8, rs: usize, re_: usize) void {
             while (nq < pe2 and !isSpace(b[nq]) and b[nq] != '/' and b[nq] != '>') nq += 1;
             var vp = nq;
             while (vp < pe2 and isSpace(b[vp])) vp += 1;
-            if (vp < pe2 and isDigit(b[vp])) {
-                const on6 = readUint(b, &vp);
+            const inline_dict = vp + 1 < pe2 and b[vp] == '<' and b[vp + 1] == '<';
+            if ((vp < pe2 and isDigit(b[vp])) or inline_dict) {
                 const pr = &props.all()[prop_n];
                 const nl6 = @min(nq - q - 1, 24);
                 var k6: usize = 0;
                 while (k6 < nl6) : (k6 += 1) pr.name[k6] = b[q + 1 + k6];
                 pr.name_len = @intCast(nl6);
-                pr.obj = on6;
+                pr.mcid = -1;
+                if (inline_dict) {
+                    // /MC0 << /MCID 9 >> — 태그 PDF(Illustrator·Quartz)가 이렇게 적는다. 안쪽 이름이 이름표로 잡히지 않게 통째로 넘긴다
+                    const de = dictEnd(b, vp, pe2);
+                    pr.obj = 0;
+                    if (intAfter(b, vp, de, "/MCID")) |m| pr.mcid = @intCast(@min(m, 1 << 30));
+                    nq = de;
+                } else pr.obj = readUint(b, &vp);
                 prop_n += 1;
             }
             q = nq;
@@ -6658,6 +6710,9 @@ var stru: struct {
     /// st_buf — 글자 곳간. 필요한 만큼 늘어난다(세는 상한 없음).
     buf: Table(u8, 32768) = .{},
     used: u32 = 0,
+    /// /RoleMap 딕셔너리의 자리(파일 안). 없으면 둘 다 0
+    rm_s: usize = 0,
+    rm_e: usize = 0,
 } = .{};
 
 export fn structCount() u32 { return stru.n; }
@@ -6686,7 +6741,17 @@ fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) vo
     var node: StructNode = .{ .depth = depth, .page = page_hint };
 
     var tmp: [64]u8 = undefined;
-    const rn = nameAfter(b, ob, oe, "/S", &tmp);
+    var rn = nameAfter(b, ob, oe, "/S", &tmp);
+    // 문서가 지은 이름(InDesign 의 Story·NormalParagraphStyle, 한글의 "_본문")은
+    // /RoleMap 이 표준 역할로 잇는다. 두어 단계 거치는 것도 있다
+    var hop: u8 = 0;
+    while (rn > 0 and stru.rm_e > stru.rm_s and hop < 4) : (hop += 1) {
+        var tmp2: [64]u8 = undefined;
+        const rn2 = roleMapped(b, tmp[0..rn], &tmp2);
+        if (rn2 == 0 or (rn2 == rn and txEq(tmp[0..rn], tmp2[0..rn2]))) break;
+        @memcpy(tmp[0..rn2], tmp2[0..rn2]);
+        rn = rn2;
+    }
     if (rn > 0) {
         const put = stPut(tmp[0..rn]);
         node.role_off = put.off;
@@ -6715,6 +6780,8 @@ fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) vo
         if (q < oe and isDigit(b[q])) page = pageIndexOf(readUint(b, &q));
     }
     node.page = page;
+    // /K 에 << /Type /MCR /Pg … /MCID n >> 꼴로 오는 잎 — /S 는 없고 번호만 있다
+    if (rn == 0 and depth > 0) if (intAfter(b, ob, oe, "/MCID")) |m| { node.mcid = @intCast(@min(m, 1 << 30)); };
     const me = stru.n;
     stru.items.all()[stru.n] = node;
     stru.n += 1;
@@ -6731,7 +6798,9 @@ fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) vo
         const v = readUint(b, &q2);
         var q3 = q2;
         while (q3 < oe and isSpace(b[q3])) q3 += 1;
-        const is_ref = q3 < oe and isDigit(b[q3]);
+        var q4 = q3;
+        if (q4 < oe and isDigit(b[q4])) { _ = readUint(b, &q4); while (q4 < oe and isSpace(b[q4])) q4 += 1; }
+        const is_ref = q4 > q3 and q4 < oe and b[q4] == 'R';
         if (is_ref) {
             if (findObj(b, v)) |kb| walkStruct(b, kb, objDictEnd(b, kb), depth + 1, page);
         } else {
@@ -6754,15 +6823,20 @@ fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) vo
             const v = readUint(b, &q);
             var q3 = q;
             while (q3 < end and isSpace(b[q3])) q3 += 1;
-            if (q3 < end and isDigit(b[q3])) {
-                // "n 0 R" — 딴 객체
-                _ = readUint(b, &q3);
-                while (q3 < end and isSpace(b[q3])) q3 += 1;
-                if (q3 < end and b[q3] == 'R') q3 += 1;
-                q = q3;
+            // "n 0 R" 이어야 딴 객체다. "[4 17 0 R]" 은 MCID 4 와 참조 17 — 숫자 둘만 보고
+            // 참조로 읽으면 글꼴 객체를 구조 요소로 훑어 목록 본문이 제목 글로 바뀌었다
+            var q4 = q3;
+            if (q4 < end and isDigit(b[q4])) {
+                _ = readUint(b, &q4);
+                while (q4 < end and isSpace(b[q4])) q4 += 1;
+            }
+            if (q4 < end and q4 > q3 and b[q4] == 'R') {
+                q = q4 + 1;
                 if (findObj(b, v)) |kb| walkStruct(b, kb, objDictEnd(b, kb), depth + 1, page);
             } else {
-                // 그냥 MCID — 잎으로 담는다
+                // 그냥 MCID — 잎으로 담는다. 자리를 안 늘리고 담으면 다음 표(역할 글자
+                // 곳간)를 덮어 첫 마디들의 역할이 쓰레기가 됐다(한은 보고서 7만 마디)
+                if (!stru.items.room(stru.n)) break;
                 var leaf: StructNode = .{ .depth = depth + 1, .page = page, .mcid = @intCast(v) };
                 leaf.role_off = stru.items.all()[me].role_off;
                 leaf.role_len = stru.items.all()[me].role_len;
@@ -6781,19 +6855,67 @@ fn walkStruct(b: []const u8, ob: usize, oe: usize, depth: u8, page_hint: i32) vo
     }
 }
 
+/// /RoleMap << /Story /Sect /Head1 /H1 >> 에서 이름의 짝을 찾는다. 열쇠·값이
+/// 번갈아 오므로 열쇠 자리만 본다 — 통째로 찾으면 값에 걸려 엉뚱한 역할이 된다
+fn roleMapped(b: []const u8, name: []const u8, out: []u8) u32 {
+    const e = stru.rm_e;
+    var p = stru.rm_s;
+    while (p + 1 < e and !(b[p] == '<' and b[p + 1] == '<')) p += 1;
+    p += 2;
+    var guard: u32 = 0;
+    while (p < e and guard < 4096) : (guard += 1) {
+        while (p < e and isSpace(b[p])) p += 1;
+        if (p >= e or b[p] != '/') break;
+        const ks = p + 1;
+        var q = ks;
+        while (q < e and !isSpace(b[q]) and b[q] != '/' and b[q] != '>') q += 1;
+        const key = b[ks..q];
+        while (q < e and isSpace(b[q])) q += 1;
+        if (q >= e or b[q] != '/') break;
+        const vs = q + 1;
+        var r = vs;
+        while (r < e and !isSpace(b[r]) and b[r] != '/' and b[r] != '>') r += 1;
+        if (txEq(key, name)) {
+            const n: u32 = @intCast(@min(r - vs, out.len));
+            @memcpy(out[0..n], b[vs .. vs + n]);
+            return n;
+        }
+        p = r;
+    }
+    return 0;
+}
+
 fn collectStruct(b: []const u8) void {
     stru.n = 0;
     stru.used = 0;
+    stru.rm_s = 0;
+    stru.rm_e = 0;
     const cat = catalogRange(b) orelse return;
     const sa = keyPos(b, cat.s, cat.e, "/StructTreeRoot") orelse return;
     var q = sa + 15;
     while (q < cat.e and isSpace(b[q])) q += 1;
+    var rs: usize = 0;
+    var re: usize = 0;
     if (q < cat.e and isDigit(b[q])) {
         const n = readUint(b, &q);
-        if (findObj(b, n)) |ob| walkStruct(b, ob, objDictEnd(b, ob), 0, -1);
+        if (findObj(b, n)) |ob| { rs = ob; re = objDictEnd(b, ob); }
     } else if (q < cat.e and b[q] == '<') {
-        walkStruct(b, q, dictEnd(b, q, cat.e), 0, -1);
+        rs = q;
+        re = dictEnd(b, q, cat.e);
     }
+    if (re <= rs) return;
+    if (keyPos(b, rs, re, "/RoleMap")) |ra| {
+        var p = ra + 8;
+        while (p < re and isSpace(b[p])) p += 1;
+        if (p < re and isDigit(b[p])) {
+            const n = readUint(b, &p);
+            if (findObj(b, n)) |ob| { stru.rm_s = ob; stru.rm_e = objDictEnd(b, ob); }
+        } else if (p + 1 < re and b[p] == '<' and b[p + 1] == '<') {
+            stru.rm_s = p;
+            stru.rm_e = dictEnd(b, p, re);
+        }
+    }
+    walkStruct(b, rs, re, 0, -1);
 }
 
 // ===== 이름 붙은 목적지·뷰어 설정·XMP (c/pdfdest.zig) =====
@@ -7566,7 +7688,8 @@ var ocg: struct {
     off_n: u32 = 0,
 } = .{};
 /// 이름 → 레이어 객체 (/Properties)
-const Prop = struct { name: [24]u8, name_len: u8, obj: u32 };
+/// obj 가 0 이면 값이 자리에 바로 적힌 딕셔너리다 — mcid 에 그 /MCID 를 미리 읽어 둔다
+const Prop = struct { name: [24]u8, name_len: u8, obj: u32, mcid: i32 = -1 };
 /// 이름 붙은 레이어(/Properties). 필요한 만큼 늘어난다(세는 상한 없음).
 var props: Table(Prop, 16) = .{};
 var prop_n: u32 = 0;
@@ -7615,6 +7738,20 @@ fn propObj(name: []const u8) u32 {
     while (i < prop_n) : (i += 1)
         if (txEq(props.all()[i].name[0..props.all()[i].name_len], name)) return props.all()[i].obj;
     return 0;
+}
+
+/// 이름표(/Properties)의 /MCID — 자리에 적힌 것이면 읽어 둔 값, 객체면 거기서 찾는다
+fn propMcid(name: []const u8) i32 {
+    var i: u32 = 0;
+    while (i < prop_n) : (i += 1) {
+        const pr = props.all()[i];
+        if (!txEq(pr.name[0..pr.name_len], name)) continue;
+        if (pr.obj == 0) return pr.mcid;
+        const ob = findObj(doc.items, pr.obj) orelse return -1;
+        if (intAfter(doc.items, ob, objDictEnd(doc.items, ob), "/MCID")) |m| return @intCast(@min(m, 1 << 30));
+        return -1;
+    }
+    return -1;
 }
 
 fn findTile(name: []const u8) i32 {

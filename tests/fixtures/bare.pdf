@@ -1,0 +1,54 @@
+%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 3197 >>
+stream
+BT /F1 16 Tf 72 740 Td (Borderless Table Fixture) Tj ET
+BT /F1 10 Tf 72 700 Td (Model) Tj ET BT /F1 10 Tf 200 700 Td (Layers) Tj ET BT /F1 10 Tf 300 700 Td (Params) Tj ET BT /F1 10 Tf 400 700 Td (Top-1) Tj ET
+BT /F1 10 Tf 72 686 Td (ViT-Base) Tj ET BT /F1 10 Tf 200 686 Td (12) Tj ET BT /F1 10 Tf 300 686 Td (86M) Tj ET BT /F1 10 Tf 400 686 Td (84.2) Tj ET
+BT /F1 10 Tf 72 672 Td (ViT-Large) Tj ET BT /F1 10 Tf 200 672 Td (24) Tj ET BT /F1 10 Tf 300 672 Td (307M) Tj ET BT /F1 10 Tf 400 672 Td (85.3) Tj ET
+BT /F1 10 Tf 72 658 Td (ViT-Huge) Tj ET BT /F1 10 Tf 200 658 Td (32) Tj ET BT /F1 10 Tf 300 658 Td (632M) Tj ET BT /F1 10 Tf 400 658 Td (85.1) Tj ET
+BT /F1 10 Tf 72 620 Td (Ada Lovelace) Tj ET BT /F1 10 Tf 300 620 Td (Analytical Engine Co.) Tj ET
+BT /F1 10 Tf 72 606 Td (Alan Turing) Tj ET BT /F1 10 Tf 300 606 Td (Bletchley Park) Tj ET
+BT /F1 10 Tf 72 592 Td (Grace Hopper) Tj ET BT /F1 10 Tf 300 592 Td (Harvard University) Tj ET
+BT /F1 10 Tf 150 560 Td (y = ax + b) Tj ET BT /F1 10 Tf 480 560 Td (\(1\)) Tj ET
+BT /F1 10 Tf 150 546 Td (z = cy + d) Tj ET BT /F1 10 Tf 480 546 Td (\(2\)) Tj ET
+BT /F1 10 Tf 150 532 Td (w = ez + f) Tj ET BT /F1 10 Tf 480 532 Td (\(3\)) Tj ET
+BT /F1 10 Tf 72 500 Td (Justified) Tj ET BT /F1 10 Tf 124 500 Td (text) Tj ET BT /F1 10 Tf 176 500 Td (with) Tj ET BT /F1 10 Tf 228 500 Td (wide) Tj ET BT /F1 10 Tf 280 500 Td (gaps) Tj ET BT /F1 10 Tf 332 500 Td (line) Tj ET BT /F1 10 Tf 384 500 Td (1) Tj ET BT /F1 10 Tf 436 500 Td (here) Tj ET
+BT /F1 10 Tf 72 488 Td (Justified) Tj ET BT /F1 10 Tf 124 488 Td (text) Tj ET BT /F1 10 Tf 176 488 Td (with) Tj ET BT /F1 10 Tf 228 488 Td (wide) Tj ET BT /F1 10 Tf 280 488 Td (gaps) Tj ET BT /F1 10 Tf 332 488 Td (line) Tj ET BT /F1 10 Tf 384 488 Td (2) Tj ET BT /F1 10 Tf 436 488 Td (here) Tj ET
+BT /F1 10 Tf 72 476 Td (Justified) Tj ET BT /F1 10 Tf 124 476 Td (text) Tj ET BT /F1 10 Tf 176 476 Td (with) Tj ET BT /F1 10 Tf 228 476 Td (wide) Tj ET BT /F1 10 Tf 280 476 Td (gaps) Tj ET BT /F1 10 Tf 332 476 Td (line) Tj ET BT /F1 10 Tf 384 476 Td (3) Tj ET BT /F1 10 Tf 436 476 Td (here) Tj ET
+BT /F1 10 Tf 72 440 Td (Body paragraph line 1 runs the full width of the page so that no column gutter is found here.) Tj ET
+BT /F1 10 Tf 72 428 Td (Body paragraph line 2 runs the full width of the page so that no column gutter is found here.) Tj ET
+BT /F1 10 Tf 72 416 Td (Body paragraph line 3 runs the full width of the page so that no column gutter is found here.) Tj ET
+BT /F1 10 Tf 72 404 Td (Body paragraph line 4 runs the full width of the page so that no column gutter is found here.) Tj ET
+BT /F1 10 Tf 72 392 Td (Body paragraph line 5 runs the full width of the page so that no column gutter is found here.) Tj ET
+BT /F1 10 Tf 72 380 Td (Body paragraph line 6 runs the full width of the page so that no column gutter is found here.) Tj ET
+BT /F1 10 Tf 72 368 Td (Body paragraph line 7 runs the full width of the page so that no column gutter is found here.) Tj ET
+BT /F1 10 Tf 72 356 Td (Body paragraph line 8 runs the full width of the page so that no column gutter is found here.) Tj ET
+BT /F1 10 Tf 72 344 Td (Body paragraph line 9 runs the full width of the page so that no column gutter is found here.) Tj ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000338 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+3587
+%%EOF

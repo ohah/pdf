@@ -41,6 +41,7 @@ type Exports = {
   itemSize: (i: number) => number;
   itemWidth?: (i: number) => number;
   itemAngle?: (i: number) => number;
+  itemMcid?: (i: number) => number;
   itemOff: (i: number) => number;
   itemLen: (i: number) => number;
   textPtr: () => number;
@@ -725,7 +726,7 @@ async function page(i: number, formOn: boolean, light = false) {
     // 글꼴 이름과 쓰는 방향까지 함께 — pdf.js 의 TextItem 이 주는 것들이다.
     const fi = e.itemFont?.(k) ?? 0;
     items.push({
-      x: e.itemX(k), y: e.itemY(k), size: e.itemSize(k), w: e.itemWidth?.(k) ?? 0, ang: e.itemAngle?.(k) ?? 0, text: t,
+      x: e.itemX(k), y: e.itemY(k), size: e.itemSize(k), w: e.itemWidth?.(k) ?? 0, ang: e.itemAngle?.(k) ?? 0, mcid: e.itemMcid?.(k) ?? -1, text: t,
       font: fi > 0 && e.fontNamePtr && e.fontNameLen
         ? dec.decode(new Uint8Array(e.memory.buffer, e.fontNamePtr(fi - 1), e.fontNameLen(fi - 1)))
         : "",

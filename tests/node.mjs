@@ -62,6 +62,60 @@ const t = (name, cond, got) => {
   pdf.close();
 }
 
+// 태그 PDF 를 Markdown 으로 — 구조 나무를 따른다(크기·굵기로 어림하지 않는다)
+{
+  const pdf = await PDFDocument.open(`${FX}/tagged.pdf`);
+  const md = await pdf.markdown();
+  t("태그 제목(본문 크기)", md.includes("# Plain Sized Heading\n"), JSON.stringify(md.slice(0, 40)));
+  t("태그 20pt 문단은 제목 아님", md.includes("\nBig but just a paragraph\n"));
+  t("태그 두 줄 문단 잇기", md.includes("First paragraph line one and line two of it."));
+  t("태그 안긴 목록", md.includes("- Alpha item\n  - 1. Numbered child\n- Beta item"), JSON.stringify(md.match(/- Alpha[^]*?Beta item/)?.[0]));
+  t("태그 괘선 없는 표", md.includes("| Name | Score |\n| --- | --- |\n| Ann | 9 |"));
+  t("태그 코드(고정폭 아님)", md.includes("```\nlet x = 1;\n```"));
+  t("태그 두 쪽 걸친 문단", md.includes("This paragraph starts on page one and ends on page two."));
+  t("태그 /Artifact 머리글 뺌", !md.includes("Running head"));
+  t("태그 자원(/Properties) MCID", md.includes("Property paragraph"));
+  t("태그 그림 대체 글", md.includes("A chart of scores"));
+  t("태그 Sect 깊이 제목", md.includes("## Section Heading"));
+  t("태그 안 붙은 줄도 남김", md.includes("Loose untagged line"));
+  t("태그 문단 안의 표", md.includes("Intro before nested table\n\n| Left cell | Right cell |"), JSON.stringify(md.match(/Intro[^]*?Right cell.*/)?.[0]));
+  t("태그 칸 하나 표는 문단", md.includes("\nBoxed Title\n") && !md.includes("| Boxed Title"), JSON.stringify(md.match(/.*Boxed Title.*/)?.[0]));
+  const bl = await pdf.blocks();
+  const cross = bl.find((b) => b.kind === "para" && b.text.startsWith("This paragraph starts"));
+  t("태그 덩이 쪽·자리", cross?.page === 1 && cross.bbox[3] < 400, JSON.stringify(cross));
+  const kinds = bl.map((b) => b.kind).join(",");
+  t("태그 덩이 차례", kinds === "heading,para,para,list,para,table,para,code,para,para,heading,para,para,para,table", kinds);
+  const ls = await pdf.lines(1);
+  t("조각의 mcid", ls[0].pieces[0].mcid === -2 && ls.find((l) => l.text === "Property paragraph")?.pieces[0].mcid === 9, JSON.stringify(ls.map((l) => l.pieces[0].mcid)));
+  pdf.close();
+}
+
+// 괘선 없는 표 — 칸이 같은 자리에서 끊기는 줄들. 표 아닌 것(저자 줄·수식·양끝 맞춤)은 그대로
+{
+  const pdf = await PDFDocument.open(`${FX}/bare.pdf`);
+  const md = await pdf.markdown();
+  t("괘선 없는 표 머리글", md.includes("| Model | Layers | Params | Top-1 |\n| --- | --- | --- | --- |"), JSON.stringify(md.match(/\| Model.*/)?.[0]));
+  t("괘선 없는 표 행", md.includes("| ViT-Large | 24 | 307M | 85.3 |"));
+  t("저자 줄은 표 아님", md.includes("Ada Lovelace Analytical Engine Co.") && !md.includes("| Ada"));
+  t("번호 수식은 표 아님", md.includes("y = ax + b (1)") && !md.includes("| y ="));
+  t("양끝 맞춤 줄은 표 아님", md.includes("Justified text with wide gaps line 1 here") && !md.includes("| Justified"));
+  const bl = await pdf.blocks();
+  const tb = bl.find((b) => b.kind === "table");
+  t("괘선 없는 표 자리", tb && tb.page === 1 && tb.bbox[1] > 80 && tb.bbox[3] < 140 && tb.rows.length === 4, JSON.stringify(tb?.bbox));
+  pdf.close();
+}
+
+// 글자 폭 — 자손 글꼴이 배열 객체·/W 가 딴 객체·q…Q 안의 Tc
+{
+  const pdf = await PDFDocument.open(`${FX}/widths.pdf`);
+  const ls = await pdf.lines(1);
+  const w = ls.map((l) => Math.round(l.w * 10) / 10);
+  t("Tc 5 안에서 ABC 폭", Math.abs(w[0] - 30) < 1, w[0]);
+  t("Q 뒤 Tc 되돌림 · /W 참조 폭", Math.abs(w[1] - 15) < 1, w[1]);
+  t("대조군 Helvetica 폭", Math.abs(w[2] - 20.6) < 1, w[2]);
+  pdf.close();
+}
+
 // 암호가 걸린 문서
 {
   const pdf = await PDFDocument.open(`${FX}/enc-perm.pdf`, { password: "" });

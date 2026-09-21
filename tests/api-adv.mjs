@@ -194,7 +194,7 @@ await want("toLines(빈 것)", () => lib.toLines([]), Array.isArray);
 await bounded("toLines(이상한 것)", () => lib.toLines([{ x: NaN, y: NaN, w: NaN, h: NaN, text: "" }]));
 
 // 글자 뽑기·Markdown — 빈 것, 이상한 값, 거대한 값
-hit("linesOf", "textOf", "rulesOf", "toMarkdown", "markdownOf", "toBlocks", "blocksOf");
+hit("linesOf", "textOf", "rulesOf", "toMarkdown", "markdownOf", "toBlocks", "blocksOf", "structTree");
 const piece = (x, y, t, extra = {}) => ({ x, y, size: 10, w: 20, text: t, font: "F1", base: "Helvetica", dir: "ltr", ...extra });
 await want("linesOf(빈 것)", () => lib.linesOf([], 100), (v) => Array.isArray(v) && v.length === 0);
 await want("linesOf(둘)", () => lib.linesOf([piece(10, 80, "a"), piece(40, 80, "b")], 100), (v) => v.length === 1 && v[0].text === "a b");
@@ -208,6 +208,25 @@ await want("toBlocks(빈 쪽)", () => lib.toBlocks([]), (v) => Array.isArray(v) 
 await want("blocksOf(빈 쪽)", () => lib.blocksOf([{ items: [], ops: new Float32Array(0), w: 100, h: 100, y0: 0 }]), (v) => Array.isArray(v));
 await bounded("blocksOf(이상한 쪽)", () => lib.blocksOf([{ items: [piece(NaN, NaN, "x")], ops: new Float32Array([16, 6, NaN, NaN, NaN, NaN, NaN, NaN]), w: NaN, h: NaN, y0: NaN }]));
 await bounded("markdownOf(이상한 쪽)", () => lib.markdownOf([{ items: [piece(NaN, NaN, "x")], ops: new Float32Array([16, 6, NaN, NaN, NaN, NaN, NaN, NaN]), w: NaN, h: NaN, y0: NaN }]));
+// 구조 나무를 함께 준 것 — 이상한 나무(빈 역할·엉뚱한 쪽·자기 참조 깊이)에도 멎지 않는다
+{
+  const items = [piece(10, 80, "Head", { mcid: 0 }), piece(10, 60, "Body", { mcid: 1 }), piece(10, 40, "Loose", { mcid: -1 })];
+  const pg = { items, ops: new Float32Array(0), w: 100, h: 100, y0: 0 };
+  const node = (role, mcid, page, children = []) => ({ role, alt: "", page, mcid, children });
+  const tree = node("Root", -1, -1, [node("Document", -1, -1, [node("H1", 0, 0), node("P", 1, 0)])]);
+  await want("markdownOf(구조 나무)", () => lib.markdownOf([pg], undefined, tree), (v) => v.startsWith("# Head") && v.includes("Body") && v.includes("Loose"));
+  await want("structTree(빈 것)", () => lib.structTree([]), (v) => v === null);
+  await want("structTree(깊이 건너뜀)", () => lib.structTree([{ depth: 0, role: "Root", alt: "", page: -1, mcid: -1 }, { depth: 5, role: "P", alt: "", page: 0, mcid: 0 }, { depth: 1, role: "H1", alt: "", page: 1, mcid: 2 }]), (v) => v.children.length === 2 && v.children[1].role === "H1");
+  await want("structTree(쪽 고르기)", () => lib.structTree([{ depth: 0, role: "Root", alt: "", page: -1, mcid: -1 }, { depth: 1, role: "P", alt: "", page: 0, mcid: 0 }, { depth: 1, role: "H1", alt: "", page: 1, mcid: 2 }], 2), (v) => v.children.length === 1 && v.children[0].role === "H1");
+  await bounded("structTree(이상한 것)", () => lib.structTree([{ depth: NaN, role: null, page: "x", mcid: undefined }, { depth: -3 }, { depth: 1e9, role: "P", page: 0, mcid: 0 }]));
+  await want("blocksOf(구조 나무 = null)", () => lib.blocksOf([pg], undefined, null), (v) => Array.isArray(v) && v.length > 0);
+  await bounded("markdownOf(엉뚱한 나무)", () => lib.markdownOf([pg], undefined, node("", NaN, 99, [node(undefined, 0, -5), node("Table", -1, 0, [node("TR", -1, 0, [node("TD", 7, 3)])]), node("L", -1, 0, [node("LI", -1, 0, [node("Lbl", 0, 0)])])])));
+  const deep = node("Sect", -1, 0); let cur = deep; for (let i = 0; i < 2000; i++) { const k = node("Sect", -1, 0); cur.children.push(k); cur = k; } cur.children.push(node("H", 0, 0));
+  await bounded("markdownOf(깊은 나무 2000)", () => lib.markdownOf([pg], undefined, deep));
+  // 잎이 본문을 반도 안 가리키면 어림으로 돌아간다 — 나무가 있어도 결과가 비지 않는다
+  await want("markdownOf(겉만 태그)", () => lib.markdownOf([{ ...pg, items: [piece(10, 80, "x", { mcid: 0 }), ...Array.from({ length: 20 }, (_, i) => piece(10, 70 - i * 3, "untagged words here " + i))] }], undefined, tree), (v) => v.includes("untagged words here 5"));
+}
+
 // 조각 2만 개 — 줄 묶기가 제곱으로 늘면 여기서 걸린다
 {
   const many = [];

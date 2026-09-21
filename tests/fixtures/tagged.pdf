@@ -1,0 +1,217 @@
+%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 8 0 R /MarkInfo << /Marked true >> >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> /Properties << /MC0 << /MCID 9 >> >> >> /Contents 5 0 R /StructParents 0 >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 1278 >>
+stream
+/Artifact <</Type /Pagination>> BDC BT /F1 8 Tf 72 760 Td (Running head page 1) Tj ET EMC
+/H1 <</MCID 0>> BDC BT /F1 12 Tf 72 700 Td (Plain Sized Heading) Tj ET EMC
+/P <</MCID 1>> BDC BT /F1 12 Tf 72 680 Td (First paragraph line one) Tj ET BT /F1 12 Tf 72 666 Td (and line two of it.) Tj ET EMC
+/P <</MCID 2>> BDC BT /F1 20 Tf 72 630 Td (Big but just a paragraph) Tj ET EMC
+/Lbl <</MCID 3>> BDC BT /F1 12 Tf 72 600 Td (•) Tj ET EMC /LBody <</MCID 4>> BDC BT /F1 12 Tf 86 600 Td (Alpha item) Tj ET EMC
+/Lbl <</MCID 5>> BDC BT /F1 12 Tf 100 586 Td (1.) Tj ET EMC /LBody <</MCID 6>> BDC BT /F1 12 Tf 114 586 Td (Numbered child) Tj ET EMC
+/Lbl <</MCID 7>> BDC BT /F1 12 Tf 72 572 Td (•) Tj ET EMC /LBody <</MCID 8>> BDC BT /F1 12 Tf 86 572 Td (Beta item) Tj ET EMC
+/P /MC0 BDC BT /F1 12 Tf 72 545 Td (Property paragraph) Tj ET EMC
+/TH <</MCID 10>> BDC BT /F1 12 Tf 72 515 Td (Name) Tj ET EMC /TH <</MCID 11>> BDC BT /F1 12 Tf 200 515 Td (Score) Tj ET EMC
+/TD <</MCID 12>> BDC BT /F1 12 Tf 72 500 Td (Ann) Tj ET EMC /TD <</MCID 13>> BDC BT /F1 12 Tf 200 500 Td (9) Tj ET EMC
+/Code <</MCID 14>> BDC BT /F1 12 Tf 72 470 Td (let x = 1;) Tj ET EMC
+BT /F1 12 Tf 72 440 Td (Loose untagged line) Tj ET
+/P <</MCID 15>> BDC BT /F1 12 Tf 72 410 Td (This paragraph starts on page one) Tj ET EMC
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 7 0 R /StructParents 1 >>
+endobj
+7 0 obj
+<< /Length 560 >>
+stream
+/Artifact BMC BT /F1 8 Tf 72 760 Td (Running head page 2) Tj ET EMC
+/P <</MCID 0>> BDC BT /F1 12 Tf 72 700 Td (and ends on page two.) Tj ET EMC
+/H <</MCID 1>> BDC BT /F1 12 Tf 72 670 Td (Section Heading) Tj ET EMC
+/P <</MCID 2>> BDC BT /F1 12 Tf 72 650 Td (Section body.) Tj ET EMC
+/TD <</MCID 3>> BDC BT /F1 12 Tf 72 620 Td (Boxed Title) Tj ET EMC
+/P <</MCID 4>> BDC BT /F1 12 Tf 72 590 Td (Intro before nested table) Tj ET EMC
+/TD <</MCID 5>> BDC BT /F1 12 Tf 72 570 Td (Left cell) Tj ET EMC /TD <</MCID 6>> BDC BT /F1 12 Tf 200 570 Td (Right cell) Tj ET EMC
+endstream
+endobj
+8 0 obj
+<< /Type /StructTreeRoot /K [9 0 R] >>
+endobj
+9 0 obj
+<< /Type /StructElem /S /Document  /K [10 0 R 11 0 R 12 0 R 13 0 R 24 0 R 25 0 R 32 0 R 33 0 R 34 0 R 35 0 R] >>
+endobj
+10 0 obj
+<< /Type /StructElem /S /H1 /Pg 3 0 R /K 0 >>
+endobj
+11 0 obj
+<< /Type /StructElem /S /P /Pg 3 0 R /K 1 >>
+endobj
+12 0 obj
+<< /Type /StructElem /S /P /Pg 3 0 R /K 2 >>
+endobj
+13 0 obj
+<< /Type /StructElem /S /L /Pg 3 0 R /K [14 0 R 21 0 R] >>
+endobj
+14 0 obj
+<< /Type /StructElem /S /LI  /K [15 0 R 16 0 R] >>
+endobj
+15 0 obj
+<< /Type /StructElem /S /Lbl  /K 3 >>
+endobj
+16 0 obj
+<< /Type /StructElem /S /LBody  /K [4 17 0 R] >>
+endobj
+17 0 obj
+<< /Type /StructElem /S /L  /K [18 0 R] >>
+endobj
+18 0 obj
+<< /Type /StructElem /S /LI  /K [19 0 R 20 0 R] >>
+endobj
+19 0 obj
+<< /Type /StructElem /S /Lbl  /K 5 >>
+endobj
+20 0 obj
+<< /Type /StructElem /S /LBody  /K 6 >>
+endobj
+21 0 obj
+<< /Type /StructElem /S /LI  /K [22 0 R 23 0 R] >>
+endobj
+22 0 obj
+<< /Type /StructElem /S /Lbl  /K 7 >>
+endobj
+23 0 obj
+<< /Type /StructElem /S /LBody  /K 8 >>
+endobj
+24 0 obj
+<< /Type /StructElem /S /P /Pg 3 0 R /K 9 >>
+endobj
+25 0 obj
+<< /Type /StructElem /S /Table /Pg 3 0 R /K [26 0 R 29 0 R] >>
+endobj
+26 0 obj
+<< /Type /StructElem /S /TR  /K [27 0 R 28 0 R] >>
+endobj
+27 0 obj
+<< /Type /StructElem /S /TH  /K 10 >>
+endobj
+28 0 obj
+<< /Type /StructElem /S /TH  /K 11 >>
+endobj
+29 0 obj
+<< /Type /StructElem /S /TR  /K [30 0 R 31 0 R] >>
+endobj
+30 0 obj
+<< /Type /StructElem /S /TD  /K 12 >>
+endobj
+31 0 obj
+<< /Type /StructElem /S /TD  /K 13 >>
+endobj
+32 0 obj
+<< /Type /StructElem /S /Figure /Pg 3 0 R /Alt (A chart of scores) >>
+endobj
+33 0 obj
+<< /Type /StructElem /S /Code /Pg 3 0 R /K 14 >>
+endobj
+34 0 obj
+<< /Type /StructElem /S /P  /K [<< /Type /MCR /Pg 3 0 R /MCID 15 >> << /Type /MCR /Pg 6 0 R /MCID 0 >>] >>
+endobj
+35 0 obj
+<< /Type /StructElem /S /Sect  /K [36 0 R] >>
+endobj
+36 0 obj
+<< /Type /StructElem /S /Sect  /K [37 0 R 38 0 R 39 0 R 42 0 R] >>
+endobj
+37 0 obj
+<< /Type /StructElem /S /H /Pg 6 0 R /K 1 >>
+endobj
+38 0 obj
+<< /Type /StructElem /S /P /Pg 6 0 R /K 2 >>
+endobj
+39 0 obj
+<< /Type /StructElem /S /Table /Pg 6 0 R /K [40 0 R] >>
+endobj
+40 0 obj
+<< /Type /StructElem /S /TR  /K [41 0 R] >>
+endobj
+41 0 obj
+<< /Type /StructElem /S /TD  /K 3 >>
+endobj
+42 0 obj
+<< /Type /StructElem /S /P /Pg 6 0 R /K [4 43 0 R] >>
+endobj
+43 0 obj
+<< /Type /StructElem /S /Table  /K [44 0 R] >>
+endobj
+44 0 obj
+<< /Type /StructElem /S /TR  /K [45 0 R 46 0 R] >>
+endobj
+45 0 obj
+<< /Type /StructElem /S /TD  /K 5 >>
+endobj
+46 0 obj
+<< /Type /StructElem /S /TD  /K 6 >>
+endobj
+xref
+0 47
+0000000000 65535 f 
+0000000009 00000 n 
+0000000109 00000 n 
+0000000172 00000 n 
+0000000352 00000 n 
+0000000449 00000 n 
+0000001779 00000 n 
+0000001922 00000 n 
+0000002533 00000 n 
+0000002587 00000 n 
+0000002715 00000 n 
+0000002777 00000 n 
+0000002838 00000 n 
+0000002899 00000 n 
+0000002974 00000 n 
+0000003041 00000 n 
+0000003095 00000 n 
+0000003160 00000 n 
+0000003219 00000 n 
+0000003286 00000 n 
+0000003340 00000 n 
+0000003396 00000 n 
+0000003463 00000 n 
+0000003517 00000 n 
+0000003573 00000 n 
+0000003634 00000 n 
+0000003713 00000 n 
+0000003780 00000 n 
+0000003834 00000 n 
+0000003888 00000 n 
+0000003955 00000 n 
+0000004009 00000 n 
+0000004063 00000 n 
+0000004149 00000 n 
+0000004214 00000 n 
+0000004337 00000 n 
+0000004399 00000 n 
+0000004482 00000 n 
+0000004543 00000 n 
+0000004604 00000 n 
+0000004676 00000 n 
+0000004736 00000 n 
+0000004789 00000 n 
+0000004859 00000 n 
+0000004922 00000 n 
+0000004989 00000 n 
+0000005042 00000 n 
+trailer
+<< /Size 47 /Root 1 0 R >>
+startxref
+5095
+%%EOF

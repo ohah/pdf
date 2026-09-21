@@ -17,6 +17,7 @@
 //   머리말·꼬리말 쪽마다 같은 자리에 같은 꼴로 반복되는 줄 — 버린다
 //   표          가는 선·네모(괘선)가 격자를 이루면 그 안의 글을 칸에 넣는다
 import { joinPieces, type Line } from "./extract.js";
+import { taggedBlocks, type HeadingGuess, type StructNode } from "./tagged.js";
 
 export type PageForMd = {
   /** 쪽 번호(1부터). 없으면 넘긴 차례 */
@@ -278,6 +279,99 @@ function tablesOf(page: PageForMd, used: Set<Line>): { top: number; rows: string
   return out;
 }
 
+/**
+ * 괘선 없는 표 — 줄들이 같은 x 자리에서 끊어지는 칸으로 늘어서면 표다.
+ *
+ * 한 줄 안에서 글자 크기의 2.2배 넘게 벌어진 틈이 칸 경계다(낱말 사이는 0.25배쯤,
+ * 양끝 맞춤이라도 그만큼은 안 벌어진다). 세 줄 넘게 이어지고, 칸 시작 x 가
+ * 줄마다 같은 자리로 모이고, 첫 칸 밖의 칸 절반 가까이에 숫자가 있어야 한다 —
+ * 마지막 조건이 없으면 두 단으로 늘어놓은 저자 이름이 표가 된다.
+ */
+function bareTablesOf(page: PageForMd, used: Set<Line>, body: number, fig: Set<Line>): { top: number; rows: string[][]; bbox: [number, number, number, number] }[] {
+  type Cell = { x0: number; x1: number; ps: Line["pieces"] };
+  const cellsOf = (l: Line): Cell[] => {
+    const ps = [...l.pieces].sort((a, b) => a.x - b.x);
+    const cells: Cell[] = [];
+    let cur: Cell | null = null;
+    for (const p of ps) {
+      if (!p.text.trim()) { if (cur) cur.x1 = Math.max(cur.x1, p.x + p.w); continue; }
+      if (cur && p.x - cur.x1 <= Math.max(8, l.size * 2.2)) { cur.ps.push(p); cur.x1 = Math.max(cur.x1, p.x + p.w); }
+      else { cur = { x0: p.x, x1: p.x + p.w, ps: [p] }; cells.push(cur); }
+    }
+    return cells;
+  };
+  // 그림 속 글자(축 눈금 숫자)는 표가 아니다
+  const okLine = (l: Line) => !used.has(l) && !fig.has(l) && Math.abs(l.angle) <= 0.1 && l.size <= body * 1.3 && !isMono(l) && !/\.{4,}|…{2,}/.test(l.text);
+  const out: { top: number; rows: string[][]; bbox: [number, number, number, number] }[] = [];
+  const lines = page.lines;
+  let i = 0;
+  while (i < lines.length) {
+    // 칸이 둘 넘는 줄에서 시작해 줄 간격이 촘촘한 동안 잇는다(한 칸짜리 줄은 첫 칸 자리에 있으면 행 이름으로 끼워 준다)
+    if (!okLine(lines[i]) || cellsOf(lines[i]).length < 2) { i++; continue; }
+    const run: { l: Line; cells: Cell[] }[] = [{ l: lines[i], cells: cellsOf(lines[i]) }];
+    let j = i + 1;
+    while (j < lines.length) {
+      const l = lines[j], prev = run[run.length - 1].l;
+      if (!okLine(l) || l.y - prev.y > Math.max(l.size, prev.size) * 2.2 || l.y <= prev.y - 1) break;
+      const cells = cellsOf(l);
+      if (cells.length < 2 && !(cells.length === 1 && Math.abs(cells[0].x0 - run[0].cells[0].x0) < l.size)) break;
+      run.push({ l, cells });
+      j++;
+    }
+    // 끝의 한 칸짜리 줄은 표가 아니다
+    while (run.length && run[run.length - 1].cells.length < 2) run.pop();
+    if (run.length < 3) { i++; continue; }
+    // 칸 시작 x 를 모아 열을 만든다
+    const tol = Math.max(6, body * 1.2);
+    const starts = run.flatMap((r) => r.cells.map((c) => c.x0)).sort((a, b) => a - b);
+    const clusters: { x: number; n: number }[] = [];
+    for (const x of starts) {
+      const c = clusters[clusters.length - 1];
+      if (c && x - c.x <= tol) { c.x = (c.x * c.n + x) / (c.n + 1); c.n++; } else clusters.push({ x, n: 1 });
+    }
+    const cols = clusters.filter((c) => c.n >= run.length * 0.5).map((c) => c.x);
+    if (cols.length < 2) { i++; continue; }
+    const colOf = (x: number) => { let k = -1, best = tol; cols.forEach((cx, ci) => { const d = Math.abs(x - cx); if (d <= best) { best = d; k = ci; } }); return k; };
+    // 줄마다 칸을 열에 넣는다. 어느 열에도 안 맞는 칸은 앞 칸에 이어 붙인다
+    const rows: string[][] = [];
+    let digits = 0, cellsN = 0;
+    for (const r of run) {
+      const cells = new Array<string>(cols.length).fill("");
+      let last = 0;
+      for (const c of r.cells) {
+        let k = colOf(c.x0);
+        if (k < 0) k = last; else last = k;
+        const t = joinPieces(c.ps);
+        cells[k] = cells[k] ? cells[k] + " " + t : t;
+      }
+      const filled = cells.filter((c) => c).length;
+      // 첫 칸이 비고 한 칸만 찬 줄은 앞 행의 칸이 줄바꿈된 것
+      if (rows.length && filled === 1 && !cells[0]) { const k = cells.findIndex((c) => c); rows[rows.length - 1][k] = (rows[rows.length - 1][k] + " " + cells[k]).trim(); continue; }
+      rows.push(cells);
+      // 숫자 칸 — 빈칸 뺀 글자의 40% 넘게 숫자("86M"·"52.1%"·"1,027"). 글자 사이에 숫자가
+      // 섞인 것("Vn6 Wu6w0" 같은 깨진 글꼴)은 아니다
+      cells.slice(1).forEach((c) => { if (c) { cellsN++; const t = c.replace(/\s/g, ""); if ((t.match(/\d/g)?.length ?? 0) >= t.length * 0.4) digits++; } });
+    }
+    if (rows.length < 3 || digits < 3 || digits < cellsN * 0.5) { i++; continue; }
+    // 칸이 글줄이면(두 단 본문·양식 설명문) 표가 아니다 — 칸 글은 짧다
+    const cellsAll = rows.flat().filter((c) => c);
+    const lens = cellsAll.map((c) => c.length).sort((a, b) => a - b);
+    if (lens[Math.floor(lens.length / 2)] > 30 || lens.filter((n) => n > 60).length > lens.length * 0.2) { i++; continue; }
+    // 분수·합 기호가 늘어선 수식(여러 줄 전개식)도 칸처럼 벌어진다 — 수학 기호가 든 칸이 넷에 하나 넘으면 수식이다
+    const mathy = (c: string) => /[=≤≥∀∃∈∉∑∏∫∥∼≈±÷√∞∂∇⊂⊆∪∩→←⇒⇔^_{}]|[a-zA-Zα-ωΑ-Ω]\s*[+−]\s*\d/.test(c) || /[α-ωΑ-Ω]/.test(c) && c.length < 12;
+    if (cellsAll.filter(mathy).length > cellsAll.length * 0.2 || cellsAll.filter((c) => c.includes("=")).length >= 2) { i++; continue; }
+    // 어느 열도 절반 넘게 비면 열을 잘못 갈랐다
+    if (cols.some((_, k) => rows.filter((r) => r[k]).length < rows.length * 0.5)) { i++; continue; }
+    // 오른쪽 열이 "(1)" "(2)" 뿐이면 번호 붙은 수식이지 표가 아니다
+    if (cols.some((_, k) => k > 0 && rows.filter((r) => /^\(\d+[a-z]?\)$/.test(r[k])).length >= rows.length * 0.5)) { i++; continue; }
+    for (const r of run) used.add(r.l);
+    const ls = run.map((r) => r.l);
+    out.push({ top: ls[0].y - ls[0].size, rows, bbox: [Math.min(...ls.map((l) => l.x)), ls[0].y - ls[0].size, Math.max(...ls.map((l) => l.x + l.w)), ls[ls.length - 1].y + ls[ls.length - 1].size * 0.25] });
+    i = j;
+  }
+  return out;
+}
+
 function headingLevel(l: Line, body: number, ranks: number[]): number {
   const m = NUMBERED.exec(l.text);
   if (m) return Math.min(4, m[1].split(".").length);
@@ -337,30 +431,59 @@ function isHeading(l: Line, body: number): boolean {
 }
 
 /** 쪽들을 Markdown 으로. 한 문서를 통째로 넘겨야 본문 크기와 머리말·꼬리말을 안다. */
-export function toMarkdown(pages: PageForMd[]): string {
-  return render(toBlocks(pages), hyphenatedWords(pages));
+export function toMarkdown(pages: PageForMd[], struct?: StructNode | null): string {
+  return render(toBlocks(pages, struct), hyphenatedWords(pages));
 }
 
-/** 쪽들을 덩이(제목·문단·목록·코드·표)로 가른다 — 쪽 번호·자리까지. JSON 으로 내는 쪽이 쓴다 */
-export function toBlocks(pages: PageForMd[]): DocBlock[] {
+/**
+ * 쪽들을 덩이(제목·문단·목록·코드·표)로 가른다 — 쪽 번호·자리까지. JSON 으로 내는 쪽이 쓴다.
+ *
+ * 구조 나무(태그 PDF)를 주면 어림 대신 나무를 따른다 — 나무가 본문을 충분히
+ * 가리킬 때만이고, 아니면 어림으로 돌아간다.
+ */
+export function toBlocks(pages: PageForMd[], struct?: StructNode | null): DocBlock[] {
+  if (struct) { const got = taggedBlocks(pages, struct, headingGuess(pages)); if (got) return got; }
+  return guessBlocks(pages);
+}
+
+/** 태그 모드에 빌려주는 제목 판정 — 본문 크기·크기 순위는 어림과 같은 잣대 */
+function headingGuess(pages: PageForMd[]): HeadingGuess {
+  const body = bodySize(pages);
+  const ranks = sizeRanks(pages, body, new Set(), new Map());
+  return (ls) => {
+    const l = ls[0];
+    if (!isHeading(l, body) || ls.some((m) => m.size < body * 1.15 && !isBoldLine(m))) return 0;
+    // 두 줄이면 둘 다 같은 꼴이어야 한다
+    if (ls.length === 2 && Math.abs(ls[1].size - l.size) > 0.5) return 0;
+    return headingLevel(l, body, ranks) || 2;
+  };
+}
+
+/** 제목 크기 순위 — 본문보다 큰 크기들, 큰 것부터 셋 */
+function sizeRanks(pages: PageForMd[], body: number, drop: Set<Line>, figOf: Map<PageForMd, Set<Line>>): number[] {
+  const sizes = new Map<number, number>();
+  for (const p of pages) for (const l of p.lines) if (!drop.has(l) && !figOf.get(p)?.has(l) && Math.abs(l.angle) <= 0.1 && l.size > body * 1.15 && l.text.length <= 120) {
+    const k = Math.round(l.size * 2) / 2; sizes.set(k, (sizes.get(k) ?? 0) + 1);
+  }
+  return [...sizes.keys()].sort((a, b) => b - a).slice(0, 3);
+}
+
+function guessBlocks(pages: PageForMd[]): DocBlock[] {
   const body = bodySize(pages);
   const drop = runningLines(pages);
   const hyph = hyphenatedWords(pages);
   // 그림 글자는 쪽마다 미리 표시해 둔다 — 크기 순위에도 안 넣는다(그림 라벨 20pt 가 1위가 되어 제목이 밀린다)
   const figOf = new Map<PageForMd, Set<Line>>();
   for (const p of pages) { const f = new Set<Line>(); for (const l of p.lines) if (!drop.has(l) && inFigure(p, l)) f.add(l); figOf.set(p, f); }
-  // 제목 크기 순위 — 본문보다 큰 크기들
-  const sizes = new Map<number, number>();
-  for (const p of pages) for (const l of p.lines) if (!drop.has(l) && !figOf.get(p)!.has(l) && Math.abs(l.angle) <= 0.1 && l.size > body * 1.15 && l.text.length <= 120) {
-    const k = Math.round(l.size * 2) / 2; sizes.set(k, (sizes.get(k) ?? 0) + 1);
-  }
-  const ranks = [...sizes.keys()].sort((a, b) => b - a).slice(0, 3);
+  const ranks = sizeRanks(pages, body, drop, figOf);
 
   const blocks: Block[] = [];
   pages.forEach((page, pi) => {
     const pno = page.page ?? pi + 1;
     const used = new Set<Line>(drop);
     const tables = tablesOf(page, used);
+    tables.push(...bareTablesOf(page, used, body, figOf.get(page)!));
+    tables.sort((a, b) => a.top - b.top);
     const rotatedChars = page.lines.reduce((a, l) => a + (Math.abs(l.angle) > 0.1 ? l.text.length : 0), 0);
     const allChars = page.lines.reduce((a, l) => a + l.text.length, 0);
     const mostlyRotated = allChars > 0 && rotatedChars > allChars * 0.5;
@@ -548,7 +671,8 @@ function render(blocks: Block[], _hyph: Set<string>): string {
       case "heading": out.push(`${"#".repeat(b.level)} ${b.text}`); break;
       // 문단 첫머리의 #·> 는 Markdown 문법으로 읽힌다("#x #y" 같은 수식) — 피한다
       case "para": out.push(b.text.replace(/^([#>])/, "\\$1")); break;
-      case "list": out.push(b.items.map((t) => `- ${t}`).join("\n")); break;
+      // 앞의 탭은 안긴 깊이(태그 PDF 의 목록 속 목록)
+      case "list": out.push(b.items.map((t) => { const m = /^(\t*)([^]*)$/.exec(t)!; return `${"  ".repeat(m[1].length)}- ${m[2]}`; }).join("\n")); break;
       case "code": out.push("```\n" + b.text + "\n```"); break;
       case "table": {
         const n = Math.max(...b.rows.map((r) => r.length));

@@ -276,8 +276,40 @@ fn descendantOf(b: []const u8, fbody: usize, fend: usize) ?[2]usize {
     while (p < fend and (core.isSpace(b[p]) or b[p] == '[')) p += 1;
     if (p >= fend or !core.isDigit(b[p])) return null;
     const dn = core.readUint(b, &p);
-    const db = core.findObj(b, dn) orelse return null;
+    var db = core.findObj(b, dn) orelse return null;
+    // /DescendantFonts 2910 0 R 이고 2910 이 "[2935 0 R]" 배열 객체인 문서(InDesign)가
+    // 있다. 배열을 글꼴로 읽으면 /W 가 없어 모든 글자가 1000 폭이 되어 줄이
+    // 쪽 밖으로 밀려 나갔다 — 한 번 더 따라간다
+    var q2 = db;
+    const de = core.find(b, "endobj", db) orelse b.len;
+    while (q2 < de and core.isSpace(b[q2])) q2 += 1;
+    if (q2 < de and b[q2] == '[') {
+        q2 += 1;
+        while (q2 < de and core.isSpace(b[q2])) q2 += 1;
+        if (q2 >= de or !core.isDigit(b[q2])) return null;
+        const dn2 = core.readUint(b, &q2);
+        db = core.findObj(b, dn2) orelse return null;
+    }
     return .{ db, core.find(b, "endobj", db) orelse b.len };
+}
+
+/// /W·/W2 배열의 안쪽 범위. "/W 71 0 R" 처럼 딴 객체에 둔 것(Word)도 따라간다 —
+/// 안 따라가면 모든 글자가 DW(1000) 폭이 되어 한 줄이 두 줄 길이로 늘어나고,
+/// 줄 뒤쪽 글자가 쪽 밖으로 밀려 글자 뽑기에서 사라졌다. "/W" 는 "/W2" 에도
+/// 걸리므로 이름이 그 자리에서 끝나는 keyPos 로 찾는다.
+fn cidArray(b: []const u8, db: usize, de: usize, key: []const u8) ?[2]usize {
+    const wa = core.keyPos(b, db, de, key) orelse return null;
+    var p = wa + key.len;
+    while (p < de and core.isSpace(b[p])) p += 1;
+    if (p < de and b[p] == '[') return .{ p + 1, arrayEnd(b, p, de) };
+    if (p >= de or !core.isDigit(b[p])) return null;
+    const on = core.readUint(b, &p);
+    const ob = core.findObj(b, on) orelse return null;
+    const oe = core.find(b, "endobj", ob) orelse b.len;
+    var q = ob;
+    while (q < oe and b[q] != '[') q += 1;
+    if (q >= oe) return null;
+    return .{ q + 1, arrayEnd(b, q, oe) };
 }
 
 /// 방금 등록한 글꼴에 폭 표를 채운다.
@@ -357,16 +389,8 @@ pub fn attachWidths(b: []const u8, fbody: usize) void {
                 f.dw2[1] = core.readFloat(b, &p);
             }
         }
-        if (core.keyPos(b, db, de, "/W2")) |wa| {
-            var p = wa + 3;
-            while (p < de and core.isSpace(b[p])) p += 1;
-            if (p < de and b[p] == '[') readCidTable(f, b, p + 1, arrayEnd(b, p, de), 3);
-        }
-        if (core.find(b[db..de], "/W", 0)) |wa| {
-            var p = db + wa + 2;
-            while (p < de and core.isSpace(b[p])) p += 1;
-            if (p < de and b[p] == '[') readCidTable(f, b, p + 1, arrayEnd(b, p, de), 1);
-        }
+        if (cidArray(b, db, de, "/W2")) |r| readCidTable(f, b, r[0], r[1], 3);
+        if (cidArray(b, db, de, "/W")) |r| readCidTable(f, b, r[0], r[1], 1);
         if (f.dw == 0) f.dw = 1000; // 규격 기본값
         return;
     }

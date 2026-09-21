@@ -26,6 +26,9 @@ export type { Line, Piece } from "./extract.js";
 export { linesOf, textOf } from "./extract.js";
 export { rulesOf, toMarkdown, toBlocks } from "./markdown.js";
 export type { PageForMd, Rule, DocBlock } from "./markdown.js";
+export type { StructNode, StructRow } from "./tagged.js";
+export { structTree } from "./tagged.js";
+import { structTree, type StructNode } from "./tagged.js";
 
 /**
  * 이미 읽어 둔 쪽들(PageMsg — `PDFClient.page()` 가 준 것)로 Markdown 을 만든다.
@@ -34,13 +37,13 @@ export type { PageForMd, Rule, DocBlock } from "./markdown.js";
  */
 type MdPage = Pick<PageMsg, "items" | "ops" | "w" | "h" | "y0"> & { x0?: number };
 
-export function markdownOf(pages: MdPage[], numbers?: number[]): string {
-  return toMarkdown(pagesForMd(pages, numbers));
+export function markdownOf(pages: MdPage[], numbers?: number[], struct?: StructNode | null): string {
+  return toMarkdown(pagesForMd(pages, numbers), struct);
 }
 
-/** 같은 입력으로 덩이(JSON 꼴)를 — 종류·글·쪽·자리 */
-export function blocksOf(pages: MdPage[], numbers?: number[]): DocBlock[] {
-  return toBlocks(pagesForMd(pages, numbers));
+/** 같은 입력으로 덩이(JSON 꼴)를 — 종류·글·쪽·자리. struct 는 `structure()` 가 준 나무(태그 PDF면 그대로 따른다) */
+export function blocksOf(pages: MdPage[], numbers?: number[], struct?: StructNode | null): DocBlock[] {
+  return toBlocks(pagesForMd(pages, numbers), struct);
 }
 
 function pagesForMd(pages: MdPage[], numbers?: number[]): PageForMd[] {
@@ -143,18 +146,6 @@ function sniff(buf: Uint8Array, kind: string): Uint8Array {
   return buf;
 }
 
-/** 구조 나무의 마디 하나 */
-export type StructNode = {
-  /** Document·H1·P·Table … (/S). 뿌리는 "Root" */
-  role: string;
-  /** 그림 등에 붙는 대체 글 (/Alt) */
-  alt: string;
-  /** 놓인 쪽(0부터). 모르면 -1 */
-  page: number;
-  /** 본문에서 이 마디를 가리키는 표식. 잎이 아니면 -1 */
-  mcid: number;
-  children: StructNode[];
-};
 
 export type OpenOpts = Paths & {
   /** 잠긴 문서의 암호. 틀리면 needPassword 가 선다. */
@@ -719,7 +710,7 @@ export class PDFDocument {
     const want = opts.pages ?? Array.from({ length: this.pages }, (_, i) => i + 1);
     const pages = [];
     for (const n of want) pages.push(await this.get(n, false));
-    return markdownOf(pages, want);
+    return markdownOf(pages, want, this.structure());
   }
 
   /**
@@ -730,7 +721,7 @@ export class PDFDocument {
     const want = opts.pages ?? Array.from({ length: this.pages }, (_, i) => i + 1);
     const pages = [];
     for (const n of want) pages.push(await this.get(n, false));
-    return blocksOf(pages, want);
+    return blocksOf(pages, want, this.structure());
   }
 
   /** 쪽 하나의 입력 칸 */
@@ -778,35 +769,7 @@ export class PDFDocument {
    * 추린다. 태그가 없는 문서면 null 이다.
    */
   structure(page?: number): StructNode | null {
-    if (this.structFlat.length === 0) return null;
-    const want = page == null ? null : page - 1;
-    const root: StructNode = { role: "Root", alt: "", page: -1, mcid: -1, children: [] };
-    const stack: StructNode[] = [root];
-    for (const n of this.structFlat) {
-      const node: StructNode = {
-        role: n.role, alt: n.alt, page: n.page, mcid: n.mcid, children: [],
-      };
-      stack.length = Math.min(stack.length, n.depth + 1);
-      const parent = stack[stack.length - 1] ?? root;
-      if (n.depth === 0 && parent === root && n.role === "Root") {
-        // 뿌리는 하나로 둔다
-        stack[0] = node;
-        root.children = node.children;
-        root.role = node.role;
-        continue;
-      }
-      parent.children.push(node);
-      stack[n.depth + 1] = node;
-    }
-    if (want == null) return root;
-    // 그 쪽에 놓인 것만 남긴다 — 자식이 남으면 부모도 남긴다
-    const keep = (n: StructNode): StructNode | null => {
-      const kids = n.children.map(keep).filter((k): k is StructNode => k !== null);
-      if (kids.length === 0 && n.page !== want && n.mcid < 0) return null;
-      if (kids.length === 0 && n.page !== want) return null;
-      return { ...n, children: kids };
-    };
-    return keep(root);
+    return structTree(this.structFlat, page);
   }
 
   /** 딸린 파일 하나를 꺼낸다 */

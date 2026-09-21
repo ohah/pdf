@@ -22,6 +22,8 @@ export type PageMsg = {
     base: string;
     /** 글꼴 서술자(FontWeight·StemV·ForceBold)가 굵다고 한 것 */
     bold: boolean;
+    /** 태그 PDF 의 표시 구간 번호(/MCID). 없으면 -1, /Artifact(머리글·쪽 번호) 안이면 -2 */
+    mcid: number;
     /** 쓰는 방향 — 세로쓰기면 "ttb", 아랍·히브리면 "rtl", 그 밖은 "ltr" */
     dir: "ltr" | "rtl" | "ttb";
   }[];
