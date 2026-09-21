@@ -3898,12 +3898,14 @@ pub fn runOps(b: []const u8, depth: u32) void {
             runFlush();
             // 뽑아 둔 글자는 문자열 단위로 묶는다 — 나중에 본문 검색에 쓴다
             if (text.n > start_text and items.room(item_n + 1)) {
-                // 장치 좌표로 — 시작점·끝점을 변환하고 크기는 변환의 배율만큼
+                // 장치 좌표로 — 시작점·끝점을 변환하고 크기는 텍스트 행렬(Tm)과
+                // CTM 의 세로 배율만큼. "Tf 1" 에 Tm 으로 24배 키우는 문서(Word·
+                // Quartz)에서 크기가 0.2 로 나와 띄어쓰기·제목 판정이 다 깨졌다.
                 const p0 = matMul(.{ .e = x0, .f = y0 }, dev);
                 const p1 = matMul(.{ .e = tm.e, .f = tm.f }, dev);
-                const sc = @sqrt(@abs(dev.a * dev.d - dev.b * dev.c));
                 // 나아가는 방향 — 텍스트 행렬의 x 축을 장치 좌표로 옮긴 각
                 const dm = matMul(tm, dev);
+                const sc = @sqrt(dm.c * dm.c + dm.d * dm.d);
                 items.all()[item_n] = .{
                     .x = p0.e, .y = p0.f, .size = tf_size * (if (sc > 0) sc else 1),
                     .ang = atan2f(dm.b, dm.a),

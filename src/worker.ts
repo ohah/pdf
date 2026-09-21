@@ -734,6 +734,8 @@ async function page(i: number, formOn: boolean, light = false) {
       base: fi > 0 && e.fontBasePtr && e.fontBaseLen && e.fontBaseLen(fi - 1) > 0
         ? dec.decode(new Uint8Array(e.memory.buffer, e.fontBasePtr(fi - 1), e.fontBaseLen(fi - 1)))
         : "",
+      // 글꼴 서술자가 굵다고 한 것(FontWeight·StemV·ForceBold). 이름은 못 믿는다
+      bold: fi > 0 && ((e.fontKind?.(fi - 1) ?? 0) & 2048) !== 0,
       dir: (e.itemVertical?.(k) ?? 0) === 1 ? "ttb" : rtl(t) ? "rtl" : "ltr",
     });
   }

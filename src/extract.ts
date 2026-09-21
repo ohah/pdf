@@ -14,6 +14,8 @@ export type Piece = {
   ang?: number;
   /** /BaseFont — 굵기·고정폭 판단에 쓴다 */
   base: string;
+  /** 서술자가 굵다고 한 것. 이름에 Bold 가 없어도(LinLibertineTB) 안다 */
+  bold?: boolean;
   dir: "ltr" | "rtl" | "ttb";
 };
 
@@ -77,8 +79,34 @@ export function joinPieces(ps: Piece[]): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * 같은 글자를 살짝 어긋나게 거듭 찍은 것(가짜 굵게 — 한글 보고서에 흔하다)은
+ * 하나만 남긴다. 같은 글·같은 크기·0.15×크기 안이면 겹친 것이다. docling 은
+ * 이걸 "차 차 차 례 례 례" 로 낸다.
+ */
+function dedupe(ps: Piece[]): Piece[] {
+  if (ps.length < 2) return ps;
+  const out: Piece[] = [];
+  // 같은 글끼리 모아 둔다 — 겹친 사본은 줄 전체를 다 찍은 뒤에 오기도 해서 이웃만 봐선 못 잡는다
+  const seen = new Map<string, Piece[]>();
+  for (const p of ps) {
+    const tol = Math.max(0.5, p.size * 0.15);
+    const list = seen.get(p.text);
+    const dup = list?.some((q) => Math.abs(q.size - p.size) < 0.1 && Math.abs(q.x - p.x) < tol && Math.abs(q.y - p.y) < tol) ?? false;
+    if (dup) continue;
+    out.push(p);
+    if (list) list.push(p); else seen.set(p.text, [p]);
+  }
+  return out;
+}
+
 /** 조각들을 줄로 묶어 글로 잇는다. pageH 는 쪽 높이(pt) — y 를 위 기준으로 뒤집는다 */
-export function linesOf(pieces: Piece[], pageH: number, y0 = 0): Line[] {
+export function linesOf(pieces0: Piece[], pageH: number, y0 = 0, pageW?: number, x0 = 0): Line[] {
+  // 쪽 상자 밖의 글자(책등에 세로로 찍은 장식 제목, 잘려 나간 자리)는 본문이 아니다
+  const inPage = pageW
+    ? pieces0.filter((p) => p.x + Math.max(p.w, 0) > x0 - 2 && p.x < x0 + pageW + 2 && p.y > y0 - p.size && p.y < y0 + pageH + p.size)
+    : pieces0;
+  const pieces = dedupe(inPage);
   // 위 기준(y 아래로)으로 뒤집으므로 각도도 부호가 뒤집힌다
   const runs: TextRun[] = pieces.map((p) => ({
     x: p.x, y: y0 + pageH - p.y, w: p.w > 0 ? p.w : p.size * 0.5 * p.text.length, h: p.size,

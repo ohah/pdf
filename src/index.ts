@@ -32,19 +32,21 @@ export type { PageForMd, Rule, DocBlock } from "./markdown.js";
  * 워커 창구를 직접 쓰는 앱용이다. 가벼운 읽기(light)로 받은 쪽도 된다 —
  * 글자와 그리기 명령만 있으면 충분하다.
  */
-export function markdownOf(pages: Pick<PageMsg, "items" | "ops" | "w" | "h" | "y0">[], numbers?: number[]): string {
+type MdPage = Pick<PageMsg, "items" | "ops" | "w" | "h" | "y0"> & { x0?: number };
+
+export function markdownOf(pages: MdPage[], numbers?: number[]): string {
   return toMarkdown(pagesForMd(pages, numbers));
 }
 
 /** 같은 입력으로 덩이(JSON 꼴)를 — 종류·글·쪽·자리 */
-export function blocksOf(pages: Pick<PageMsg, "items" | "ops" | "w" | "h" | "y0">[], numbers?: number[]): DocBlock[] {
+export function blocksOf(pages: MdPage[], numbers?: number[]): DocBlock[] {
   return toBlocks(pagesForMd(pages, numbers));
 }
 
-function pagesForMd(pages: Pick<PageMsg, "items" | "ops" | "w" | "h" | "y0">[], numbers?: number[]): PageForMd[] {
+function pagesForMd(pages: MdPage[], numbers?: number[]): PageForMd[] {
   return pages.map((q, i) => {
     const { rules, boxes, marks } = rulesOf(q.ops, q.h, q.y0);
-    return { page: numbers?.[i] ?? i + 1, lines: linesOf(q.items, q.h, q.y0), w: q.w, h: q.h, rules, boxes, marks };
+    return { page: numbers?.[i] ?? i + 1, lines: linesOf(q.items, q.h, q.y0, q.w, q.x0 ?? 0), w: q.w, h: q.h, rules, boxes, marks };
   });
 }
 export type { TextRun, Stencil } from "./draw.js";

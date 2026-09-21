@@ -20,6 +20,8 @@ export type PageMsg = {
     font: string;
     /** 문서가 적은 글꼴 이름(/BaseFont). 굵기·고정폭이 이름에 드러난다 */
     base: string;
+    /** 글꼴 서술자(FontWeight·StemV·ForceBold)가 굵다고 한 것 */
+    bold: boolean;
     /** 쓰는 방향 — 세로쓰기면 "ttb", 아랍·히브리면 "rtl", 그 밖은 "ltr" */
     dir: "ltr" | "rtl" | "ttb";
   }[];

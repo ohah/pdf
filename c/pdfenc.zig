@@ -568,6 +568,12 @@ pub fn attachEmbedded(b: []const u8, fbody: usize) void {
     const sb = core.findObj(b, dn) orelse return;
     const se = core.find(b, "endobj", sb) orelse b.len;
 
+    // 굵기 — 이름(Bold·Medi·TB…)은 글꼴마다 달라 믿을 수 없다. 서술자의
+    // /FontWeight ≥ 600, /StemV ≥ 120, /Flags 의 ForceBold(2^18) 가운데 하나면 굵다.
+    if (core.intAfter(b, sb, se, "/FontWeight")) |fw| { if (fw >= 600) f.kind |= 2048; }
+    if (core.intAfter(b, sb, se, "/StemV")) |sv| { if (sv >= 120) f.kind |= 2048; }
+    if (core.intAfter(b, sb, se, "/Flags")) |fl| { if ((fl & (1 << 18)) != 0) f.kind |= 2048; }
+
     var fobj: u32 = 0;
     var is_cff = false;
     if (core.find(b[fbody..fend], "/Type3", 0) != null) f.kind |= 32;

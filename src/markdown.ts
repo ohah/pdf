@@ -165,7 +165,7 @@ function runningLines(pages: PageForMd[]): Set<Line> {
 
 function isBoldLine(l: Line): boolean {
   let bold = 0, all = 0;
-  for (const p of l.pieces) { all += p.text.length; if (BOLD.test(p.base)) bold += p.text.length; }
+  for (const p of l.pieces) { all += p.text.length; if (p.bold || BOLD.test(p.base)) bold += p.text.length; }
   return all > 0 && bold / all > 0.6;
 }
 
@@ -290,7 +290,11 @@ function headingLevel(l: Line, body: number, ranks: number[]): number {
 function inBlock(lines: Line[], l: Line, drop: Set<Line>): boolean {
   const i = lines.indexOf(l);
   // 같은 크기, 가로로 겹치고(가운데 맞춤도 됨), 줄 간격이 촘촘한 이웃
-  const same = (a: Line, b: Line) => Math.abs(a.size - b.size) < 0.3 &&
+  // 굵기가 다르면 다른 묶음 — 본문 크기의 굵은 제목이 뒤따르는 본문에 묻히지 않게.
+  // 다만 긴 줄(40자 초과)은 굵기를 안 본다 — 굵은 초록 문단에 수식(이탤릭)이 섞인
+  // 줄이 이웃과 갈려 제목이 됐다. 긴 줄은 이웃이 있으면 문단이다
+  const short = l.text.length <= 40;
+  const same = (a: Line, b: Line) => Math.abs(a.size - b.size) < 0.3 && (!short || isBoldLine(a) === isBoldLine(b)) &&
     Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > 0 &&
     Math.abs(b.y - a.y) < b.size * 1.8 && Math.abs(b.y - a.y) > b.size * 0.3;
   let n = 1, chars = l.text.length;
@@ -319,12 +323,16 @@ function inFigure(page: PageForMd, l: Line): boolean {
   return big || crowd;
 }
 
+const CAPTION = /^(fig(ure)?|table|tab|scheme|chart|그림|표|사진)\.?\s*\d+[.:]?\s/i;
+
 function isHeading(l: Line, body: number): boolean {
   if (l.text.length > 120) return false;
+  // 캡션("FIG. 2. …", "Table 1:", "그림 3")은 굵어도 제목이 아니다
+  if (CAPTION.test(l.text)) return false;
   if (l.size > body * 1.15) return true;
   // 작은 대문자(첫 글자만 크고 나머지는 본문 크기) — "1 INTRODUCTION". 대문자뿐이고 짧으면 제목
   if (l.text.length <= 60 && /[A-Z]{3}/.test(l.text) && !/[a-z]/.test(l.text) && /^(\d+(\.\d+)*\s+)?[A-Z]/.test(l.text)) return true;
-  if (l.size >= body * 0.95 && isBoldLine(l) && l.text.length < 80 && !/[.,;:]$/.test(l.text)) return true;
+  if (l.size >= body * 0.85 && isBoldLine(l) && l.text.length < 80 && !/[.,;:]$/.test(l.text)) return true;
   return false;
 }
 
@@ -338,9 +346,12 @@ export function toBlocks(pages: PageForMd[]): DocBlock[] {
   const body = bodySize(pages);
   const drop = runningLines(pages);
   const hyph = hyphenatedWords(pages);
+  // 그림 글자는 쪽마다 미리 표시해 둔다 — 크기 순위에도 안 넣는다(그림 라벨 20pt 가 1위가 되어 제목이 밀린다)
+  const figOf = new Map<PageForMd, Set<Line>>();
+  for (const p of pages) { const f = new Set<Line>(); for (const l of p.lines) if (!drop.has(l) && inFigure(p, l)) f.add(l); figOf.set(p, f); }
   // 제목 크기 순위 — 본문보다 큰 크기들
   const sizes = new Map<number, number>();
-  for (const p of pages) for (const l of p.lines) if (!drop.has(l) && Math.abs(l.angle) <= 0.1 && l.size > body * 1.15 && l.text.length <= 120) {
+  for (const p of pages) for (const l of p.lines) if (!drop.has(l) && !figOf.get(p)!.has(l) && Math.abs(l.angle) <= 0.1 && l.size > body * 1.15 && l.text.length <= 120) {
     const k = Math.round(l.size * 2) / 2; sizes.set(k, (sizes.get(k) ?? 0) + 1);
   }
   const ranks = [...sizes.keys()].sort((a, b) => b - a).slice(0, 3);
@@ -353,9 +364,7 @@ export function toBlocks(pages: PageForMd[]): DocBlock[] {
     const rotatedChars = page.lines.reduce((a, l) => a + (Math.abs(l.angle) > 0.1 ? l.text.length : 0), 0);
     const allChars = page.lines.reduce((a, l) => a + l.text.length, 0);
     const mostlyRotated = allChars > 0 && rotatedChars > allChars * 0.5;
-    // 그림 구역 — 도형·그림 상자와 겹치는 짧은 줄
-    const fig = new Set<Line>();
-    for (const l of page.lines) if (!drop.has(l) && inFigure(page, l)) fig.add(l);
+    const fig = figOf.get(page)!;
     let para: string[] = [];
     let paraX = 0;
     let lastBottom = -1;
@@ -449,6 +458,54 @@ export function toBlocks(pages: PageForMd[]): DocBlock[] {
       blocks.splice(i + 1, 1); i--;
     }
   }
+  // 같은 단계·같은 크기의 제목이 촘촘히 이어지면 한 제목이 두 줄로 갈린 것
+  // ("1. Introduction: The Case for Pragmatic" + "Research")
+  for (let i = 0; i + 1 < blocks.length; i++) {
+    const a = blocks[i], b = blocks[i + 1];
+    if (a.kind === "heading" && b.kind === "heading" && b.level >= a.level && a.page === b.page &&
+        !NUMBERED.test(b.text) && b.bbox[1] - a.bbox[3] < (a.bbox[3] - a.bbox[1]) * 0.6 && Math.abs(b.bbox[0] - a.bbox[0]) < 30) {
+      a.text += " " + b.text; a.bbox = [Math.min(a.bbox[0], b.bbox[0]), a.bbox[1], Math.max(a.bbox[2], b.bbox[2]), b.bbox[3]];
+      blocks.splice(i + 1, 1); i--;
+    }
+  }
+  // 1쪽 제목과 첫 절(Abstract·Contents·"1 …") 사이의 짧은 제목 후보들은 저자·소속·날짜다 — 문단으로
+  const first = blocks.findIndex((b) => b.page === blocks[0]?.page && b.kind === "heading" &&
+    (/^(abstract|contents|introduction|keywords?)\b/i.test(b.text.trim()) || NUMBERED.test(b.text) || /^[IVX]+\.\s/.test(b.text)));
+  const titleAt = blocks.findIndex((b) => b.kind === "heading");
+  if (first > 1) {
+    for (let i = titleAt + 1; i < first; i++) {
+      const b = blocks[i];
+      if (b.kind === "heading" && b.text.length <= 60 && !NUMBERED.test(b.text) && b.level >= 2) blocks[i] = { kind: "para", text: b.text, page: b.page, bbox: b.bbox };
+    }
+  }
+  // 차례(목차): "Contents"·"차례" 제목 뒤 두 쪽 안의 제목 후보는 목차 항목이다.
+  // 그 제목이 없어도 쪽 번호로 끝나는 제목 후보가 넷 이상 이어지면 목록이다
+  const tocAt = blocks.findIndex((b) => b.kind === "heading" && /^(table of contents|contents|차\s*례|목\s*차)$/i.test(b.text.trim()));
+  if (tocAt >= 0) {
+    // 차례 쪽(과 이어지는 다음 쪽)의 제목 후보는 다 항목이다 — 긴 항목은 줄이 갈려 문단으로 왔다
+    const tocPage = blocks[tocAt].page;
+    const cont = blocks.some((b) => b.page === tocPage + 1 && b.kind === "heading" && /\s\d{1,4}$/.test(b.text));
+    let j = tocAt + 1;
+    while (j < blocks.length && (blocks[j].page === tocPage || (cont && blocks[j].page === tocPage + 1))) j++;
+    if (j - tocAt > 2) {
+      const items = blocks.slice(tocAt + 1, j).flatMap((b) => b.kind === "list" ? b.items : b.kind === "table" ? b.rows.map((r) => r.join(" ")) : [b.text]);
+      const bb = blocks.slice(tocAt + 1, j).map((b) => b.bbox);
+      blocks.splice(tocAt + 1, j - tocAt - 1, { kind: "list", items, page: tocPage, bbox: [Math.min(...bb.map((b) => b[0])), bb[0][1], Math.max(...bb.map((b) => b[2])), bb[bb.length - 1][3]] });
+    }
+  }
+  for (let i = 0; i < blocks.length; i++) {
+    let j = i;
+    while (j < blocks.length && blocks[j].page === blocks[i].page) {
+      const b = blocks[j];
+      if (b.kind !== "heading" || !/\s\d{1,4}$/.test(b.text)) break;
+      j++;
+    }
+    if (j - i >= 4) {
+      const items = blocks.slice(i, j).map((b) => (b as { text: string }).text);
+      const bb = blocks.slice(i, j).map((b) => b.bbox);
+      blocks.splice(i, j - i, { kind: "list", items, page: blocks[i].page, bbox: [Math.min(...bb.map((b) => b[0])), bb[0][1], Math.max(...bb.map((b) => b[2])), bb[bb.length - 1][3]] });
+    }
+  }
   return blocks;
 }
 
@@ -489,7 +546,8 @@ function render(blocks: Block[], _hyph: Set<string>): string {
   for (const b of blocks) {
     switch (b.kind) {
       case "heading": out.push(`${"#".repeat(b.level)} ${b.text}`); break;
-      case "para": out.push(b.text); break;
+      // 문단 첫머리의 #·> 는 Markdown 문법으로 읽힌다("#x #y" 같은 수식) — 피한다
+      case "para": out.push(b.text.replace(/^([#>])/, "\\$1")); break;
       case "list": out.push(b.items.map((t) => `- ${t}`).join("\n")); break;
       case "code": out.push("```\n" + b.text + "\n```"); break;
       case "table": {

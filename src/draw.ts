@@ -998,38 +998,82 @@ function linesOf(list: TextRun[], ang: number): TextRun[][] {
  */
 function byColumn(runs: TextRun[]): TextRun[][] | null {
   if (runs.length < 6) return null;
-  const iv = runs.map((r) => [r.x, r.x + Math.max(r.w, 1)] as [number, number])
-    .sort((a, b) => a[0] - b[0]);
-  const merged: [number, number][] = [];
-  for (const v of iv) {
-    const last = merged[merged.length - 1];
-    if (last && v[0] <= last[1]) last[1] = Math.max(last[1], v[1]);
-    else merged.push([v[0], v[1]]);
-  }
-  if (merged.length < 2) return null;
-  const extent = merged[merged.length - 1][1] - merged[0][0];
+  const x0 = Math.min(...runs.map((r) => r.x));
+  const x1 = Math.max(...runs.map((r) => r.x + Math.max(r.w, 1)));
+  const extent = x1 - x0;
+  if (extent < 40) return null;
   const h = mid(runs.map((r) => r.h));
   const least = Math.max(h * 1.5, extent * 0.025);
-  // 띠마다 잘라 보고, 양쪽이 단이라 할 만한지 본다
-  const edges: number[] = [];
-  for (let i = 1; i < merged.length; i++) {
-    if (merged[i][0] - merged[i - 1][1] >= least) edges.push((merged[i][0] + merged[i - 1][1]) / 2);
-  }
-  if (edges.length === 0) return null;
-  const groups: TextRun[][] = Array.from({ length: edges.length + 1 }, () => []);
+  // x 를 2pt 칸으로 나눠 칸마다 걸친 글자 덩이 수를 센다. 제목·초록처럼 두 단에
+  // 걸친 줄이 몇 있어도(10% 이하) 골을 찾을 수 있게 — 예전엔 하나만 걸쳐도
+  // 단이 없다고 봐서 "1 Introduction" 과 오른쪽 단 본문이 한 줄로 붙었다.
+  const bin = 2;
+  const n = Math.ceil(extent / bin) + 1;
+  const cover = new Int32Array(n);
   for (const r of runs) {
-    let k = 0;
-    while (k < edges.length && r.x + r.w / 2 > edges[k]) k += 1;
-    groups[k].push(r);
+    const a = Math.max(0, Math.floor((r.x - x0) / bin));
+    const b = Math.min(n - 1, Math.floor((r.x + Math.max(r.w, 1) - x0) / bin));
+    for (let k = a; k <= b; k++) cover[k]++;
   }
-  // 한쪽이 몇 줄 안 되면 단이 아니라 그냥 벌어진 한 줄이다
+  // 한 칸을 지나는 조각 수는 곧 그 x 를 지나는 줄 수다. 골은 걸친 줄(제목·초록)만
+  // 지나니 줄 수의 15% 이하인 칸이 골이다 — 조각 수 기준이면 쪽 전체가 골이 된다
+  const all = linesOf(runs, 0);
+  const crossMax = Math.max(2, Math.floor(all.length * 0.15));
+  // 걸친 것이 crossMax 이하인 칸이 least 만큼 이어지면 골 후보. 제일 넓은 골을 고른다 —
+  // 제일 덜 걸친 골을 고르면 그림 옆의 좁은 빈틈이 이긴다
+  let best: { s: number; e: number; load: number } | null = null;
+  let s = -1, load = 0;
+  for (let k = 0; k <= n; k++) {
+    const low = k < n && cover[k] <= crossMax;
+    if (low) { if (s < 0) { s = k; load = 0; } load += cover[k]; continue; }
+    if (s >= 0 && (k - s) * bin >= least && (!best || k - s > best.e - best.s)) best = { s, e: k, load };
+    s = -1;
+  }
+  if (!best) return null;
+  const gL = x0 + best.s * bin, gR = x0 + best.e * bin;
+  const gutter = (gL + gR) / 2;
+  // 줄 단위로 가른다 — 낱말 조각으로 가르면 두 단에 걸친 제목의 낱말이 좌우로 흩어진다.
+  // 골 양쪽에 다 있는 줄은, 글이 골을 이어서 지나가면(왼쪽 끝과 오른쪽 시작 사이가
+  // 골 폭보다 좁으면) 걸친 줄이고, 골에서 끊겨 있으면 두 단의 줄이 y 로 합쳐진 것이다
+  const left: TextRun[] = [], right: TextRun[] = [], wide: TextRun[] = [];
+  let wideLines = 0;
+  for (const line of all) {
+    // 조각 하나가 골 한가운데를 넘어가면(한 덩이 제목, 단 폭보다 긴 줄) 그 줄은 걸친
+    // 줄이다 — 단 안의 줄은 골 한가운데를 넘지 않는다
+    if (line.some((r) => r.x < gL && r.x + Math.max(r.w, 1) > gutter)) { wide.push(...line); wideLines++; continue; }
+    const ls = line.filter((r) => r.x + Math.max(r.w, 1) / 2 < gutter);
+    const rs = line.filter((r) => r.x + Math.max(r.w, 1) / 2 >= gutter);
+    if (ls.length && rs.length) {
+      const lEnd = Math.max(...ls.map((r) => r.x + Math.max(r.w, 1)));
+      const rStart = Math.min(...rs.map((r) => r.x));
+      if (rStart - lEnd < (gR - gL) * 0.8) { wide.push(...line); wideLines++; continue; }
+    }
+    left.push(...ls);
+    right.push(...rs);
+  }
+  // 걸친 줄(제목·저자·초록)이 줄의 30% 를 넘으면 단이 아니라 한 단 문서다
+  if (wideLines > Math.max(3, all.length * 0.3)) return null;
+  // 양쪽이 저마다 여러 줄이어야 단이다 — "차례 ..... 3" 처럼 벌어진 한 줄이 아니라
   const okGroup = (g: TextRun[]) => {
     if (g.length < 3) return false;
-    const ys = [...new Set(g.map((r) => Math.round(r.y / Math.max(r.h, 1))))];
-    return ys.length >= 2;
+    return new Set(g.map((r) => Math.round(r.y / Math.max(r.h, 1)))).size >= 2;
   };
-  if (!groups.every(okGroup)) return null;
-  return groups;
+  if (!okGroup(left) || !okGroup(right)) return null;
+  if (wide.length === 0) return [left, right];
+  // 걸친 줄은 가로 자름선이다: 그 위의 두 단 → 걸친 줄 → 그 아래의 두 단
+  const cuts = linesOf(wide, 0).sort((p, q) => p[0].y - q[0].y);
+  const out: TextRun[][] = [];
+  let top = -Infinity;
+  for (let c = 0; c <= cuts.length; c++) {
+    const bottom = c < cuts.length ? cuts[c][0].y - h * 0.5 : Infinity;
+    const inBand = (r: TextRun) => r.y >= top && r.y < bottom;
+    const l = left.filter(inBand), rr = right.filter(inBand);
+    if (l.length) out.push(l);
+    if (rr.length) out.push(rr);
+    if (c < cuts.length) out.push(cuts[c]);
+    top = bottom;
+  }
+  return out;
 }
 
 /**
