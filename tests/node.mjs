@@ -8,6 +8,7 @@
 // 하므로, 없을 때 무슨 일인지 알아들을 오류가 나는지까지 함께 본다.
 //
 // dist/ 를 읽으므로 build:js 를 먼저 돌려야 한다.
+import fs from "node:fs";
 import { readFile } from "node:fs/promises";
 import { PDFDocument, PasswordNeeded } from "../dist/index.js";
 import { stdFontFile, stdFontUrl } from "../dist/std14.js";
@@ -154,6 +155,32 @@ const t = (name, cond, got) => {
   const d = await PDFDocument.open(new TextEncoder().encode(rep));
   t("같은 쪽 300번: 다 센다", d.pages === 300 && d.truncated === false, `${d.pages}쪽 truncated=${d.truncated}`);
   d.close();
+}
+
+// 글자 뽑기 — 조각 사이 틈으로 띄어쓰기를 정하고, 합자는 글자 둘로 푼다.
+// 예전엔 조각을 무조건 빈칸으로 이어 "Pro vided" 였고, ToUnicode 의
+// 두 글자 목적지(<0C> <00660069>)를 앞 4자리만 읽어 "fgures" 였다.
+{
+  const d = await PDFDocument.open(`${FX}/text-pieces.pdf`);
+  const txt = await d.text(1);
+  t("자간으로 갈라진 낱말이 붙는다", txt.includes("Provided proper attribution"), JSON.stringify(txt));
+  t("합자 fi·ffi 가 글자로 풀린다", txt.includes("the figures are efficient"), JSON.stringify(txt));
+  t("진짜 빈칸은 남는다", txt.includes("hello world"), JSON.stringify(txt));
+  t("줄마다 한 줄", txt.split("\n").length === 3, txt.split("\n").length);
+  const ls = await d.lines(1);
+  t("lines(): 자리와 크기", ls.length === 3 && ls[0].size === 12 && ls[0].x === 40 && ls[0].w > 100, JSON.stringify(ls.map((l) => [l.x, l.size, Math.round(l.w)])));
+  d.close();
+
+  // 박힌 Type1 의 내장 인코딩 — ToUnicode 도 /Differences 도 그 코드를 안 정하면
+  // 글꼴 프로그램의 "dup 68 /fi put" 이 글자를 정한다(TeX 글꼴이 이 꼴). 그리고
+  // 합자 이름은 낱글자 "fi" 로 푼다. type1.pdf 를 같은 길이로 고쳐 만든다.
+  const src = fs.readFileSync(`${FX}/type1.pdf`).toString("latin1");
+  const alt = src.replace("/Differences [65 /A /B /C /D]", "/Differences [65 /A /B /C   ]").replace("dup 68 /D put", "dup 68 /fi pu");
+  fs.writeFileSync(`${FX}/.type1-builtin.pdf`, Buffer.from(alt, "latin1"));
+  const d2 = await PDFDocument.open(`${FX}/.type1-builtin.pdf`);
+  const t2 = await d2.text(1);
+  t("Type1 내장 인코딩 이름으로 글자를 정한다", t2 === "ABCfi", JSON.stringify(t2));
+  d2.close();
 }
 
 // 캔버스를 주면 Node 에서도 그린다 (@napi-rs/canvas 가 있을 때만 본다)

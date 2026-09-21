@@ -144,10 +144,10 @@ for pass in $(seq 1 "$N"); do
   atleast "기능 단언" "$(printf '%s' "$fn" | grep -oE '기능 단언 [0-9]+' | grep -oE '[0-9]+')" 434
   atleast "적대적" "$n" 600
   atleast "메모리" "$(printf '%s' "$mm" | grep -oE '메모리 [0-9]+' | grep -oE '[0-9]+')" 6
-  atleast "Node" "$(printf '%s' "$nd" | grep -oE '통과 [0-9]+' | tail -1 | grep -oE '[0-9]+')" 82
+  atleast "Node" "$(printf '%s' "$nd" | grep -oE '통과 [0-9]+' | tail -1 | grep -oE '[0-9]+')" 88
   # 빈틈(gap.mjs)은 지금 0개다 — 여섯 빈틈을 다 만들어 진짜 시험으로 옮겼다.
   # 새 빈틈을 못 박으면 그때 여기 바닥값을 다시 둔다.
-  atleast "손자국" "$(printf '%s' "$sn" | grep -oE '손자국 [0-9]+' | grep -oE '[0-9]+')" 160
+  atleast "손자국" "$(printf '%s' "$sn" | grep -oE '손자국 [0-9]+' | grep -oE '[0-9]+')" 176
   atleast "글꼴 열쇠" "$(printf '%s' "$fk" | grep -oE '글꼴 열쇠 [0-9]+' | grep -oE '[0-9]+')" 5
   atleast "서명" "$(printf '%s' "$sg" | grep -oE '서명 [0-9]+' | grep -oE '[0-9]+')" 30
   if echo "$fn" | grep -qE '실패 [1-9]'; then echo "$fn"; fail=1; fi

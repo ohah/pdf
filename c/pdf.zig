@@ -1372,7 +1372,9 @@ export fn apply() usize { return pdfapply.apply(); }
 // 글꼴 번호(fonts 의 자리)와 세로쓰기 여부까지 함께 남긴다. pdf.js 의
 // TextItem 이 fontName·dir 을 주는 자리다 — 글자층이 글꼴을 맞춰 눕히거나
 // 세로쓰기를 알아보는 데 쓴다.
-const Item = struct { x: f32, y: f32, size: f32, off: u32, len: u32, font: i32 = -1, vert: bool = false };
+/// w — 문자열이 차지한 길이(시작점에서 끝점까지). 조각 사이가 띄어쓰기인지
+/// 자간인지는 이 끝점이 있어야 안다 — 없으면 "Pro vided" 처럼 낱말이 갈라진다.
+const Item = struct { x: f32, y: f32, size: f32, off: u32, len: u32, font: i32 = -1, vert: bool = false, w: f32 = 0 };
 /// 글자 조각. 필요한 만큼 늘어난다(세는 상한 없음).
 var items: Table(Item, 4096) = .{};
 var item_n: u32 = 0;
@@ -1465,6 +1467,16 @@ pub fn emitText(x: f32, y: f32, size: f32, utf8: []const u8) void {
         x, y, size, @floatFromInt(off), @floatFromInt(dtext.n - off), 0,
         1, 0, 0, 1, 0, 0, @floatFromInt(roff), @floatFromInt(rtext.n - roff),
     });
+}
+
+/// 본문 글자 하나 — 합자는 낱글자로 푼다.
+fn putText(uni: u32) void {
+    const lig: ?[]const u8 = switch (uni) {
+        0xFB00 => "ff", 0xFB01 => "fi", 0xFB02 => "fl", 0xFB03 => "ffi", 0xFB04 => "ffl",
+        0xFB05, 0xFB06 => "st",
+        else => null,
+    };
+    if (lig) |l| { for (l) |ch| putUtf8(ch); } else putUtf8(uni);
 }
 
 fn runFlush() void {
@@ -1582,6 +1594,16 @@ pub const FontMap = struct {
     identity: bool,
     /// 세로쓰기
     vertical: bool,
+    /// ToUnicode 가 있었나. 있으면 인코딩 이름으로 짓는 표는 안 쓴다.
+    has_tu: bool,
+    /// 한 코드가 글자 여럿이 되는 것 — 합자 fi → "f","i" (<0C> <00660069>).
+    /// 첫 글자는 unis 에, 나머지는 여기(코드, 글자) 쌍으로. 앞 4자리만 읽어
+    /// "fgures" 가 되던 자리다.
+    mx_n: u32,
+    mx_codes: Table(u16, 16) = .{},
+    mx_unis: Table(u16, 16) = .{},
+    /// PDF /Differences 가 정한 코드(비트). Type1 프로그램의 내장 인코딩보다 세다.
+    diff: [32]u8,
     /// 세로쓰기 글자 자리(9.7.4.3). /DW2 [vy w1y] — 기본 [880 −1000]. 글자는
     /// 현재 점에서 v = (w0/2, vy) 만큼 왼쪽·아래로 놓이고, w1y 만큼 내려간다.
     dw2: [2]f32,
@@ -2763,6 +2785,7 @@ export fn imageLen() usize { return img.len; }
 export fn itemX(i: u32) f32 { return items.all()[i].x; }
 export fn itemY(i: u32) f32 { return items.all()[i].y; }
 export fn itemSize(i: u32) f32 { return items.all()[i].size; }
+export fn itemWidth(i: u32) f32 { return if (i < item_n) items.all()[i].w else 0; }
 export fn itemOff(i: u32) u32 { return items.all()[i].off; }
 /// 이 항목을 그린 글꼴 번호(1부터, 없으면 0). 이름은 fontNamePtr 로 읽는다.
 export fn itemFont(i: u32) u32 {
@@ -2935,18 +2958,34 @@ fn parseCMap(f: *FontMap, cm: []const u8) void {
             while (p < end and cm[p] != '<') p += 1;
             if (p >= end) break;
             p += 1;
-            var dst: u32 = 0;
+            // 목적지는 UTF-16 단위 여럿일 수 있다 — 합자 fi 는 <00660069>.
+            // 첫 단위는 표에, 나머지는 mx 표에 남긴다(서로게이트 쌍은 하나로 본다).
+            var units: [8]u16 = undefined;
+            var nu: u32 = 0;
+            var acc: u32 = 0;
             var nd: u32 = 0;
             while (p < end and cm[p] != '>') : (p += 1) {
-                if (hexVal(cm[p])) |h| { dst = (dst << 4) | h; nd += 1; }
-                if (nd == 4) break; // 서로게이트는 앞 4자리만
+                if (hexVal(cm[p])) |h| {
+                    acc = (acc << 4) | h;
+                    nd += 1;
+                    if (nd == 4) { if (nu < 8) { units[nu] = @truncate(acc); nu += 1; } acc = 0; nd = 0; }
+                }
             }
-            while (p < end and cm[p] != '>') p += 1;
             p += 1;
+            if (nu == 0) continue;
             if (!mapRoom(f, f.n + 1)) break;
             f.codes.all()[f.n] = @truncate(src);
-            f.unis.all()[f.n] = @truncate(dst);
+            f.unis.all()[f.n] = units[0];
             f.n += 1;
+            // 서로게이트 쌍(D800–DBFF 뒤 DC00–DFFF)이면 한 글자라 뒤를 안 남긴다
+            const surrogate = nu >= 2 and units[0] >= 0xD800 and units[0] <= 0xDBFF;
+            var ui: u32 = 1;
+            while (!surrogate and ui < nu) : (ui += 1) {
+                if (!f.mx_codes.room(f.mx_n + 1) or !f.mx_unis.room(f.mx_n + 1)) break;
+                f.mx_codes.all()[f.mx_n] = @truncate(src);
+                f.mx_unis.all()[f.mx_n] = units[ui];
+                f.mx_n += 1;
+            }
         }
         at = end + 1;
     }
@@ -3008,6 +3047,17 @@ fn mapCode(byte: u8) u32 {
 fn mapCode2(code: u32) u32 {
     if (cur.font >= 0) return lookup(&fonts.all()[@intCast(cur.font)], code);
     return code;
+}
+
+/// 코드의 k 번째(1부터) 뒤 글자. 합자 fi 의 "i" 같은 것. 없으면 0.
+fn extraUni(f: *const FontMap, code: u32, k: u32) ?u32 {
+    var i: u32 = 0;
+    var seen: u32 = 0;
+    while (i < f.mx_n) : (i += 1) if (f.mx_codes.all()[i] == code) {
+        seen += 1;
+        if (seen == k) return f.mx_unis.all()[i];
+    };
+    return null;
 }
 
 fn lookup(f: *const FontMap, code: u32) u32 {
@@ -3089,6 +3139,9 @@ fn addFont(name: [*]const u8, name_len: u32, cmap: [*]const u8, cmap_len: u32, b
     f.std_w = null;
     f.identity = false;
     f.vertical = false;
+    f.has_tu = false;
+    f.mx_n = 0;
+    f.diff = [_]u8{0} ** 32;
     f.dw2 = .{ 880, -1000 };
     f.w2n = 0;
     f.cmap_kind = 0;
@@ -3601,7 +3654,15 @@ pub fn runOps(b: []const u8, depth: u32) void {
                     tc2: f32, tw2: f32, th2: f32, dep: u32,
                     mode: i32, rise: f32,
                 ) void {
-                    putUtf8(uni);
+                    // 합자 코드포인트(U+FB00–FB06)는 글자로 풀어 남긴다 — 검색과
+                    // 복사에서 "ﬁgures" 가 아니라 "figures" 여야 한다. pdf.js 의
+                    // NormalizedUnicodes 와 같은 자리.
+                    putText(uni);
+                    // 합자처럼 코드 하나가 글자 여럿이면 뒤 글자도 본문에 남긴다
+                    if (ff) |g4| if (g4.mx_n > 0) {
+                        var kx: u32 = 1;
+                        while (extraUni(g4, code, kx)) |ux| : (kx += 1) putUtf8(ux);
+                    };
                     var adv = step(ff, code, size, tc2, tw2, th2);
                     // 세로쓰기(9.7.4.3): 글자는 현재 점에서 v = (vx, vy) 만큼
                     // 왼쪽·아래로 놓이고, 이동량은 가로 폭이 아니라 w1y 다.
@@ -3694,6 +3755,10 @@ pub fn runOps(b: []const u8, depth: u32) void {
                     // 글자층은 읽을 수 있는 쪽을 쓴다. 되찾지 못한 글자는
                     // 자리만 지키게 빈칸으로 둔다 — 안 그러면 뒤 글자가 밀린다.
                     putRead(if (uni >= 0x20 and uni != 0xFFFD) uni else ' ');
+                    if (ff) |g5| if (g5.mx_n > 0) {
+                        var kx: u32 = 1;
+                        while (extraUni(g5, code, kx)) |ux| : (kx += 1) putRead(ux);
+                    };
                     trun.adv += adv;
                     m.* = advance(ff, adv, m.*);
                     // 세로쓰기는 글자마다 자리가 아래로 내려간다. 묶어서
@@ -3769,6 +3834,7 @@ pub fn runOps(b: []const u8, depth: u32) void {
             if (text.n > start_text and items.room(item_n + 1)) {
                 items.all()[item_n] = .{
                     .x = x0, .y = y0, .size = tf_size,
+                    .w = @sqrt((tm.e - x0) * (tm.e - x0) + (tm.f - y0) * (tm.f - y0)),
                     .off = start_text, .len = text.n - start_text,
                     // 어떤 글꼴로 그렸는지·세로쓰기인지도 함께 남긴다
                     .font = cur.font,

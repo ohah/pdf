@@ -72,7 +72,7 @@ const GNAMES =
 /// "aacute" 처럼 밑글자+악센트인 이름은 밑글자만이라도 살린다.
 const ACCENTS = "acute grave circumflex tilde dieresis ring cedilla caron breve macron ogonek";
 
-fn nameToUni(nm: []const u8) u32 {
+pub fn nameToUni(nm: []const u8) u32 {
     if (nm.len == 0) return 0;
     if (nm.len == 1) return nm[0];
     // uniXXXX · uXXXX
@@ -120,7 +120,7 @@ fn nameToUni(nm: []const u8) u32 {
 /// 한 바이트 글꼴의 코드 → 유니코드 표를 인코딩에서 짓는다.
 fn attachEncoding(b: []const u8, fbody: usize, fend: usize, f: *core.FontMap) void {
     // ToUnicode 가 있으면 그게 낫다
-    if (f.n > 0) return;
+    if (f.n > 0) { f.has_tu = true; return; }
     var base: u8 = 0; // 0 표준 1 WinAnsi 2 MacRoman
     var ds: usize = 0;
     var de: usize = 0;
@@ -176,6 +176,7 @@ fn attachEncoding(b: []const u8, fbody: usize, fend: usize, f: *core.FontMap) vo
         var e2 = p + 1;
         while (e2 < de and !core.isSpace(b[e2]) and b[e2] != '/' and b[e2] != ']') e2 += 1;
         const u = nameToUni(b[p + 1 .. e2]);
+        if (code < 256) f.diff[code >> 3] |= @as(u8, 1) << @intCast(code & 7);
         if (u != 0 and code < 256) {
             var k: u32 = 0;
             var hit = false;

@@ -11,6 +11,7 @@ import { fontKey, loadBytes } from "./bytes.js";
 //   const text = await pdf.text(1);
 //   pdf.close();
 import { PDFClient, type PageMsg, type OpenMsg, type BuildSpec } from "./client.js";
+import { linesOf, textOf, type Line } from "./extract.js";
 import { openRanged, fillRest, type Ranged } from "./range.js";
 import { drawOps, toLines, type TextRun } from "./draw.js";
 import { type Paths } from "./config.js";
@@ -20,6 +21,7 @@ import { makeViewport, type Viewport } from "./viewport.js";
 
 export type { Paths } from "./config.js";
 export type { BuildSpec, Mask, PageMsg } from "./client.js";
+export type { Line, Piece } from "./extract.js";
 export type { TextRun, Stencil } from "./draw.js";
 export type { SigCheck } from "./sig.js";
 export { checkSignature } from "./sig.js";
@@ -663,9 +665,20 @@ export class PDFDocument {
   }
 
   /** 쪽 하나의 글자. 사람이 읽는 차례로 줄을 세워 준다. */
+  /**
+   * 쪽의 글. 줄마다 한 줄이고, 조각 사이는 틈을 재서 띄어쓰기를 정한다 —
+   * 자간으로 갈라진 낱말("Pro" "vided")이 다시 붙는다. 읽는 차례는 단·띠·줄
+   * 순(두 단 문서는 왼쪽 단을 다 읽고 오른쪽으로).
+   */
   async text(page: number) {
     const q = await this.get(page, false);
-    return q.items.map((it) => it.text).join(" ");
+    return textOf(q.items, q.h);
+  }
+
+  /** 쪽의 줄들 — 자리·크기·글꼴까지. 제목·문단·표를 가르는 쪽(markdown)이 쓴다 */
+  async lines(page: number): Promise<Line[]> {
+    const q = await this.get(page, false);
+    return linesOf(q.items, q.h);
   }
 
   /** 쪽 하나의 입력 칸 */

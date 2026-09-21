@@ -153,6 +153,13 @@
   "명령": "34:16s755k",
   "그림": "0/0/0"
  },
+ ".type1-builtin.pdf": {
+  "h": "e15279d1c5cc0ab0",
+  "쪽": "",
+  "글자": "ABCfi",
+  "명령": "203:q8viok",
+  "그림": "0/0/0"
+ },
  ".zbig.pdf": {
   "h": "1b114bd1720e55ff",
   "쪽": "",
@@ -978,6 +985,13 @@
   "글자": "ABCxDABCxDABCxDDCxBA",
   "명령": "684:1e374ys",
   "그림": "4/0/1"
+ },
+ "text-pieces.pdf": {
+  "h": "6c501412996afc7a",
+  "쪽": "",
+  "글자": "Providedproperattributio",
+  "명령": "128:1e3w7a4",
+  "그림": "0/0/0"
  },
  "tile-mark.pdf": {
   "h": "31a3bd098b5e6213",

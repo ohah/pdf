@@ -1,0 +1,47 @@
+%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding << /Type /Encoding /Differences [12 /fi 14 /ffi] >> /ToUnicode 6 0 R >>
+endobj
+5 0 obj
+<<  /Length 203 >>
+stream
+BT /F1 12 Tf 40 150 Td [(Pro) 15 (vided) -1800 (proper) -2000 (attrib) 20 (ution)] TJ ET
+BT /F1 12 Tf 40 120 Td (the \014gures are e\016cient) Tj ET
+BT /F1 12 Tf 40 90 Td (hello) Tj 60 0 Td (world) Tj ET
+endstream
+endobj
+6 0 obj
+<<  /Length 249 >>
+stream
+/CIDInit /ProcSet findresource begin 12 dict begin begincmap
+/CMapName /X def 1 begincodespacerange <00> <FF> endcodespacerange
+2 beginbfchar
+<0C> <00660069>
+<0E> <006600660069>
+endbfchar
+endcmap CMapName currentdict /CMap defineresource pop end end
+endstream
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000390 00000 n 
+0000000645 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+946
+%%EOF

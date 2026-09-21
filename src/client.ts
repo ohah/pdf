@@ -12,6 +12,8 @@ export type PageMsg = {
   w: number; h: number; x0: number; y0: number; rot: number;
   items: {
     x: number; y: number; size: number; text: string;
+    /** 문자열이 차지한 길이(pt). 다음 덩이와의 틈을 재서 띄어쓰기인지 자간인지 가른다 */
+    w: number;
     /** 이 덩이를 그린 글꼴 이름. 문서가 안 적어 두면 빈 문자열 */
     font: string;
     /** 쓰는 방향 — 세로쓰기면 "ttb", 아랍·히브리면 "rtl", 그 밖은 "ltr" */

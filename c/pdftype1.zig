@@ -247,6 +247,32 @@ pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) v
         }
     }
 
+    // 내장 인코딩의 이름으로 코드→글자 표를 채운다. ToUnicode 가 없고 PDF 의
+    // /Differences 도 그 코드를 안 정했을 때만 — TeX 글꼴(fi 가 12번)처럼
+    // 표준 인코딩에 없는 자리를 여기서 살린다. 안 하면 "fgures" 가 된다.
+    if (!f.has_tu) {
+        var c: u32 = 0;
+        while (c < 256) : (c += 1) {
+            if ((f.diff[c >> 3] >> @intCast(c & 7)) & 1 != 0) continue;
+            const nm = encGet(c);
+            if (nm.len == 0) continue;
+            const u = pdfenc.nameToUni(nm);
+            if (u == 0) continue;
+            var k: u32 = 0;
+            var hit = false;
+            while (k < f.n) : (k += 1) if (f.codes.all()[k] == c) {
+                f.unis.all()[k] = @intCast(@min(u, 65535));
+                hit = true;
+                break;
+            };
+            if (!hit and root.mapRoom(f, f.n + 1)) {
+                f.codes.all()[f.n] = @intCast(c);
+                f.unis.all()[f.n] = @intCast(@min(u, 65535));
+                f.n += 1;
+            }
+        }
+    }
+
     // 글리프 프로그램을 풀 자리
     var w_at: u32 = dec_at + dn;
     if (w_at + 4096 > area.len) return;
