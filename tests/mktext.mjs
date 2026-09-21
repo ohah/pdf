@@ -28,17 +28,24 @@ const tounicode = `/CIDInit /ProcSet findresource begin 12 dict begin begincmap
 <0C> <00660069>
 <0E> <006600660069>
 endbfchar
+1 beginbfrange
+<80> <82> [<00580059> <005A> <0041>]
+endbfrange
 endcmap CMapName currentdict /CMap defineresource pop end end`;
 const content = [
   'BT /F1 12 Tf 40 150 Td [(Pro) 15 (vided) -1800 (proper) -2000 (attrib) 20 (ution)] TJ ET',
   'BT /F1 12 Tf 40 120 Td (the \\014gures are e\\016cient) Tj ET',
   'BT /F1 12 Tf 40 90 Td (hello) Tj 60 0 Td (world) Tj ET',
+  // 표시 내용 딕셔너리의 문자열은 글자가 아니다 — 한은 보고서에서 (en-US) 와 hex 가 본문에 섞였다
+  '/Span << /Lang (en-US) /ActualText <FEFF654E2D55> >> BDC BT /F1 12 Tf 40 60 Td (tagged) Tj ET EMC',
+  // bfrange 배열 꼴: 0x80→"XY" 0x81→"Z" 0x82→"A"
+  'BT /F1 12 Tf 40 30 Td (\\200\\201\\202) Tj ET',
 ].join('\n');
 fs.writeFileSync(`${S}/text-pieces.pdf`, build([
   '<< /Type /Catalog /Pages 2 0 R >>',
   '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
   '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
-  '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding << /Type /Encoding /Differences [12 /fi 14 /ffi] >> /ToUnicode 6 0 R >>',
+  '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding << /Type /Encoding /Differences [12 /fi 14 /ffi 128 /X /Z /A] >> /ToUnicode 6 0 R >>',
   stream('', content),
   stream('', tounicode),
 ]));

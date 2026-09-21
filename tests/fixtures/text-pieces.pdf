@@ -9,18 +9,20 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
 endobj
 4 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding << /Type /Encoding /Differences [12 /fi 14 /ffi] >> /ToUnicode 6 0 R >>
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding << /Type /Encoding /Differences [12 /fi 14 /ffi 128 /X /Z /A] >> /ToUnicode 6 0 R >>
 endobj
 5 0 obj
-<<  /Length 203 >>
+<<  /Length 344 >>
 stream
 BT /F1 12 Tf 40 150 Td [(Pro) 15 (vided) -1800 (proper) -2000 (attrib) 20 (ution)] TJ ET
 BT /F1 12 Tf 40 120 Td (the \014gures are e\016cient) Tj ET
 BT /F1 12 Tf 40 90 Td (hello) Tj 60 0 Td (world) Tj ET
+/Span << /Lang (en-US) /ActualText <FEFF654E2D55> >> BDC BT /F1 12 Tf 40 60 Td (tagged) Tj ET EMC
+BT /F1 12 Tf 40 30 Td (\200\201\202) Tj ET
 endstream
 endobj
 6 0 obj
-<<  /Length 249 >>
+<<  /Length 312 >>
 stream
 /CIDInit /ProcSet findresource begin 12 dict begin begincmap
 /CMapName /X def 1 begincodespacerange <00> <FF> endcodespacerange
@@ -28,6 +30,9 @@ stream
 <0C> <00660069>
 <0E> <006600660069>
 endbfchar
+1 beginbfrange
+<80> <82> [<00580059> <005A> <0041>]
+endbfrange
 endcmap CMapName currentdict /CMap defineresource pop end end
 endstream
 endobj
@@ -38,10 +43,10 @@ xref
 0000000058 00000 n 
 0000000115 00000 n 
 0000000241 00000 n 
-0000000390 00000 n 
-0000000645 00000 n 
+0000000403 00000 n 
+0000000799 00000 n 
 trailer
 << /Size 7 /Root 1 0 R >>
 startxref
-946
+1163
 %%EOF

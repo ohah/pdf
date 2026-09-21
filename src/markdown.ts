@@ -26,6 +26,8 @@ export type PageForMd = {
   rules: Rule[];
   /** 칠해진 도형·그림의 상자(위 기준). 그 안의 글자는 그림 라벨이지 제목이 아니다 */
   boxes: Rule[];
+  /** 칠한 경로 하나하나의 상자 — 도표는 수십 개, 제목 띠는 한두 개 */
+  marks: Rule[];
 };
 
 export type Rule = { x0: number; y0: number; x1: number; y1: number };
@@ -33,7 +35,11 @@ export type Rule = { x0: number; y0: number; x1: number; y1: number };
 const MONO = /courier|mono|sftt|consolas|menlo|typewriter|cmtt|lucidacon/i;
 const BOLD = /bold|black|heavy|semibold|demibold|-bd\b|medi\b|cmbx|\bbd\b/i;
 const NUMBERED = /^(\d+(\.\d+)*)\.?\s+\S/;
-const BULLET = /^([•·▪‣◦\-–—*]|\d+[.)]|\(?[a-zA-Z0-9][.)]|[ivxIVX]+[.)])\s+/;
+// 글머리: 기호, 번호, 그리고 Wingdings·Symbol 글꼴의 사용자 영역(PUA) 글자 —
+// 한국어 보고서의 요약 문장이 그 꼴이다
+const BULLET = /^([•·▪‣◦■□▶►◆◇○●※\-–—*]|[\uE000-\uF8FF]|[\u2700-\u27BF]|\d+[.)]|\(?[a-zA-Z0-9][.)]|[ivxIVX]+[.)])\s*/;
+// 기호 글머리 — 굵거나 커도 제목이 아니라 목록이다(보고서의 요약 문장)
+const SYMBOL_BULLET = /^([•·▪‣◦■□▶►◆◇○●※\-–—*]|[\uE000-\uF8FF]|[\u2700-\u27BF])\s*/;
 
 type Block =
   | { kind: "heading"; level: number; text: string }
@@ -43,9 +49,10 @@ type Block =
   | { kind: "table"; rows: string[][] };
 
 /** 그리기 명령에서 괘선(가늘고 긴 채움 네모와 획 선)과 도형·그림 상자를 뽑는다. */
-export function rulesOf(ops: Float32Array, pageH: number, y0page = 0): { rules: Rule[]; boxes: Rule[] } {
+export function rulesOf(ops: Float32Array, pageH: number, y0page = 0): { rules: Rule[]; boxes: Rule[]; marks: Rule[] } {
   const out: Rule[] = [];
   const boxes: Rule[] = [];
+  const marks: Rule[] = [];
   // CTM 을 따라간다 — 표 괘선은 대개 변환 아래에 있다
   let m: [number, number, number, number, number, number] = [1, 0, 0, 1, 0, 0];
   const stack: typeof m[] = [];
@@ -74,6 +81,7 @@ export function rulesOf(ops: Float32Array, pageH: number, y0page = 0): { rules: 
       }
       // 쪽 바탕만 한 채움(배경)은 도형이 아니다
       if (w >= 8 && h >= 8 && !(w > 400 && h > 500)) boxes.push({ x0, y0: top(y1), x1, y1: top(y0) });
+      if (!(w > 400 && h > 500)) marks.push({ x0, y0: top(y1), x1, y1: top(y0) });
     }
     path = []; sub = [];
   };
@@ -110,7 +118,7 @@ export function rulesOf(ops: Float32Array, pageH: number, y0page = 0): { rules: 
     }
     i += 2 + n;
   }
-  return { rules: out, boxes };
+  return { rules: out, boxes, marks };
 }
 
 /** 글자 수로 가중한 최빈 크기 */
@@ -197,10 +205,10 @@ function tablesOf(page: PageForMd, used: Set<Line>): { top: number; rows: string
     // 표 안의 줄들
     const inside = page.lines.filter((l) => !used.has(l) && l.y - l.size * 0.8 >= yTop - 2 && l.y <= yBot + 4 && l.x >= x0 - 4 && l.x + l.w <= x1 + 4);
     if (inside.length < 2) continue;
-    // 세로 경계: 세로 괘선이 있으면 그것, 없으면 조각 사이 빈 골로 짐작
-    let xs: number[] = [...new Set(vs.filter((v) => v.x0 >= x0 - 2 && v.x0 <= x1 + 2 && v.y0 <= yBot && v.y1 >= yTop).map((v) => Math.round(v.x0)))].sort((a, b) => a - b);
-    if (xs.length < 2) {
-      // 조각들의 x 를 모아 큰 빈 골(본문 크기의 1.5배 이상)을 경계로
+    // 세로 경계: 표 높이의 대부분(60%)을 지나는 세로 괘선. 병합 칸의 짧은
+    // 경계까지 열로 보면 14칸짜리 표가 된다. 없으면 조각 사이 빈 골로 짐작
+    const span = yBot - yTop;
+    const gapCols = (): number[] => {
       const spans: [number, number][] = [];
       for (const l of inside) for (const p of l.pieces) spans.push([p.x, p.x + p.w]);
       spans.sort((a, b) => a[0] - b[0]);
@@ -210,37 +218,53 @@ function tablesOf(page: PageForMd, used: Set<Line>): { top: number; rows: string
         if (s[0] - reach > 6) gaps.push((reach + s[0]) / 2);
         reach = Math.max(reach, s[1]);
       }
-      xs = [x0, ...gaps, x1];
+      return [x0, ...gaps, x1];
+    };
+    let xs: number[] = [];
+    for (const v of vs.filter((v) => v.x0 >= x0 - 2 && v.x0 <= x1 + 2 && Math.min(v.y1, yBot) - Math.max(v.y0, yTop) >= span * 0.6).map((v) => v.x0).sort((a, b) => a - b)) {
+      if (!xs.length || v - xs[xs.length - 1] > 4) xs.push(v);
     }
+    if (xs.length < 2) xs = gapCols();
     if (xs.length < 3) continue;
     // 행: 가로선 사이 띠 안의 글 줄 하나가 한 행이다(booktabs 처럼 괘선이
     // 위·중간·아래에만 있어도 된다). 칸 글은 조각 틈으로 띄어쓰기를 정한다.
-    const rows: string[][] = [];
-    const cellOf = (p: { x: number; w: number }) => {
-      const cx = p.x + p.w / 2;
-      const c = xs.findIndex((x, i) => i + 1 < xs.length && cx >= x && cx < xs[i + 1]);
-      return c < 0 ? (cx < xs[0] ? 0 : xs.length - 2) : c;
-    };
-    for (let r = 0; r + 1 < ys.length; r++) {
-      // l.y 는 기준선이라 글자 가운데는 그보다 0.35·size 위다
-      const band = inside.filter((l) => l.y - l.size * 0.35 > ys[r] && l.y - l.size * 0.35 < ys[r + 1]);
-      for (const l of band.sort((a, b) => a.y - b.y)) {
-        const cells: string[] = new Array(xs.length - 1).fill("");
-        const per: Line["pieces"][] = Array.from({ length: xs.length - 1 }, () => []);
-        for (const p of l.pieces) per[cellOf(p)].push(p);
-        per.forEach((ps, c) => { cells[c] = joinPieces(ps); });
-        used.add(l);
-        // 왼쪽 칸이 비고 한 칸만 찬 줄은 앞 행의 칸이 줄바꿈된 것
-        const filled = cells.filter((c) => c).length;
-        if (rows.length && filled === 1 && !cells[0] && rows[rows.length - 1].some((c) => c)) {
-          const k = cells.findIndex((c) => c);
-          rows[rows.length - 1][k] = (rows[rows.length - 1][k] + " " + cells[k]).trim();
-          continue;
+    const build = (cols: number[]): { rows: string[][]; lines: Line[]; empty: number } => {
+      const rows: string[][] = [];
+      const lines: Line[] = [];
+      const cellOf = (p: { x: number; w: number }) => {
+        const cx = p.x + p.w / 2;
+        const c = cols.findIndex((x, i) => i + 1 < cols.length && cx >= x && cx < cols[i + 1]);
+        return c < 0 ? (cx < cols[0] ? 0 : cols.length - 2) : c;
+      };
+      for (let r = 0; r + 1 < ys.length; r++) {
+        // l.y 는 기준선이라 글자 가운데는 그보다 0.35·size 위다
+        const band = inside.filter((l) => l.y - l.size * 0.35 > ys[r] && l.y - l.size * 0.35 < ys[r + 1]);
+        for (const l of band.sort((a, b) => a.y - b.y)) {
+          const cells: string[] = new Array(cols.length - 1).fill("");
+          const per: Line["pieces"][] = Array.from({ length: cols.length - 1 }, () => []);
+          for (const p of l.pieces) per[cellOf(p)].push(p);
+          per.forEach((ps, c) => { cells[c] = joinPieces(ps); });
+          lines.push(l);
+          // 왼쪽 칸이 비고 한 칸만 찬 줄은 앞 행의 칸이 줄바꿈된 것
+          const filled = cells.filter((c) => c).length;
+          if (rows.length && filled === 1 && !cells[0] && rows[rows.length - 1].some((c) => c)) {
+            const k = cells.findIndex((c) => c);
+            rows[rows.length - 1][k] = (rows[rows.length - 1][k] + " " + cells[k]).trim();
+            continue;
+          }
+          rows.push(cells);
         }
-        rows.push(cells);
       }
-    }
-    if (rows.length >= 2) out.push({ top: yTop, rows });
+      let empty = 0, all = 0;
+      for (const r of rows) for (const c of r) { all++; if (!c) empty++; }
+      return { rows, lines, empty: all ? empty / all : 1 };
+    };
+    let got = build(xs);
+    // 빈 칸이 60% 넘으면 열을 잘못 갈랐다 — 골 기준으로 다시. 그래도 나쁘면 표가 아니다
+    if (got.empty > 0.6) { const alt = gapCols(); if (alt.length >= 3) got = build(alt); }
+    if (got.empty > 0.6 || got.rows.length < 2) continue;
+    got.lines.forEach((l) => used.add(l));
+    out.push({ top: yTop, rows: got.rows });
   }
   return out;
 }
@@ -275,8 +299,15 @@ function inBlock(lines: Line[], l: Line, drop: Set<Line>): boolean {
  */
 function inFigure(page: PageForMd, l: Line): boolean {
   if (l.text.length > 40) return false;
-  const lx0 = l.x, lx1 = l.x + l.w, ly0 = l.y, ly1 = l.y + l.size;
-  return page.boxes.some((b) => lx1 > b.x0 - 2 && lx0 < b.x1 + 2 && ly1 > b.y0 - 2 && ly0 < b.y1 + 2);
+  const lx0 = l.x, lx1 = l.x + l.w, ly0 = l.y - l.size, ly1 = l.y + l.size * 0.3;
+  const hit = page.boxes.filter((b) => lx1 > b.x0 - 2 && lx0 < b.x1 + 2 && ly1 > b.y0 - 2 && ly0 < b.y1 + 2);
+  if (!hit.length) return false;
+  // 줄 하나 높이의 띠(제목 뒤 색 바탕)는 그림이 아니다. 큰 상자(그림)거나
+  // 둘레에 칠한 경로가 많아야(도표의 마디·축·선) 그림이다
+  const big = hit.some((b) => b.y1 - b.y0 >= l.size * 3);
+  // 가는 선(표 괘선)은 안 센다 — 도형(폭·높이 3pt 이상)만
+  const crowd = page.marks.filter((b) => Math.min(b.x1 - b.x0, b.y1 - b.y0) >= 3 && Math.abs((b.y0 + b.y1) / 2 - l.y) < 160 && Math.abs((b.x0 + b.x1) / 2 - l.x) < 260).length >= 8;
+  return big || crowd;
 }
 
 function isHeading(l: Line, body: number): boolean {
@@ -346,7 +377,8 @@ export function toMarkdown(pages: PageForMd[]): string {
       const inFig = fig.has(l0);
       if (inFig && !/\p{L}/u.test(l.text)) continue;
       endCode();
-      if (!inFig && isHeading(l, body) && !inBlock(page.lines, l0, drop)) {
+      const symbolBullet = SYMBOL_BULLET.test(l.text) && l.text.length > 2;
+      if (!symbolBullet && !inFig && isHeading(l, body) && !inBlock(page.lines, l0, drop)) {
         endAll();
         blocks.push({ kind: "heading", level: headingLevel(l, body, ranks) || 2, text: l.text });
         lastBottom = l.y + l.size;

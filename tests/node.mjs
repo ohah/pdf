@@ -166,9 +166,11 @@ const t = (name, cond, got) => {
   t("자간으로 갈라진 낱말이 붙는다", txt.includes("Provided proper attribution"), JSON.stringify(txt));
   t("합자 fi·ffi 가 글자로 풀린다", txt.includes("the figures are efficient"), JSON.stringify(txt));
   t("진짜 빈칸은 남는다", txt.includes("hello world"), JSON.stringify(txt));
-  t("줄마다 한 줄", txt.split("\n").length === 3, txt.split("\n").length);
+  t("줄마다 한 줄", txt.split("\n").length === 5, txt.split("\n").length);
+  t("표시 내용 딕셔너리(/Lang·/ActualText)는 글자가 아니다", txt.includes("tagged") && !txt.includes("en-US") && !txt.includes("敮"), JSON.stringify(txt));
+  t("ToUnicode bfrange 배열 꼴", txt.includes("XYZA"), JSON.stringify(txt));
   const ls = await d.lines(1);
-  t("lines(): 자리와 크기", ls.length === 3 && ls[0].size === 12 && ls[0].x === 40 && ls[0].w > 100, JSON.stringify(ls.map((l) => [l.x, l.size, Math.round(l.w)])));
+  t("lines(): 자리와 크기", ls.length === 5 && ls[0].size === 12 && ls[0].x === 40 && ls[0].w > 100, JSON.stringify(ls.map((l) => [l.x, l.size, Math.round(l.w)])));
   d.close();
 
   // 박힌 Type1 의 내장 인코딩 — ToUnicode 도 /Differences 도 그 코드를 안 정하면
@@ -190,7 +192,7 @@ const t = (name, cond, got) => {
   const d = await PDFDocument.open(`${FX}/md.pdf`);
   const md = await d.markdown();
   const heads = md.split("\n").filter((l) => l.startsWith("#"));
-  t("md: 제목 계층 — 크기와 번호 깊이", heads.join("|") === "# Markdown Fixture Title|# 1 Introduction|## 1.1 A List|# 2 Code and Table|# 3 Two Columns", heads.join("|"));
+  t("md: 제목 계층 — 크기와 번호 깊이", heads.join("|") === "# Markdown Fixture Title|# 1 Introduction|## 1.1 A List|# 2 Code and Table|# 3 Two Columns|# 4 Heading On A Bar", heads.join("|"));
   t("md: 줄 끝 하이픈을 떼어 낱말을 잇는다", md.includes("breaks a compound word") && md.includes("second paragraph follows"), md.slice(0, 200));
   t("md: 문서 안에 하이픈 붙은 낱말은 남긴다", md.includes("with self-attention again"), md.slice(0, 400));
   t("md: 줄 간격이 벌어지면 새 문단", /gap\.\n\nSecond paragraph/.test(md), md.slice(0, 400));
@@ -199,6 +201,8 @@ const t = (name, cond, got) => {
   t("md: 괘선 표", md.includes("| Name | Value |\n| --- | --- |\n| alpha | 1.5 |\n| beta | 2.0 |"), md);
   t("md: 머리말·쪽 번호는 버린다", !md.includes("Running Head") && !/\n2\n/.test(md), md);
   t("md: 두 단은 왼쪽 단을 다 읽고 오른쪽", /Left line 6 of the column text here\n\nRight line 1/.test(md), md.slice(-400));
+  t("md: 굵은 글머리 문장은 목록", md.includes("- Bold summary sentence that is not a heading") && !md.includes("# \u2022"), md.slice(-500));
+  t("md: 색 띠 위 제목은 그림이 아니다", md.includes("# 4 Heading On A Bar"), md.slice(-300));
   d.close();
 }
 

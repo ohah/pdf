@@ -1,34 +1,208 @@
 {
   "_": "PDF → Markdown 정답. 손으로 못 박은 것만 — 도구 출력을 베끼면 도구의 틀린 것까지 정답이 된다. heading: 그 글이 제목 줄(#)로 있다. notheading: 제목이 아니다. text: 그 구절이 이어져 있다. notext: 그 꼴은 없어야 한다. table: 한 표 행에 그 칸들이 다 있다. code: 코드 울타리 안에 있다. order: 앞이 뒤보다 먼저.",
   "attention.pdf": {
-    "heading": ["Attention Is All You Need", "Abstract", "1 Introduction", "2 Background", "3 Model Architecture", "3.1 Encoder and Decoder Stacks", "3.2 Attention", "3.2.1 Scaled Dot-Product Attention", "3.2.2 Multi-Head Attention", "3.3 Position-wise Feed-Forward Networks", "3.5 Positional Encoding", "4 Why Self-Attention", "5 Training", "6 Results", "7 Conclusion", "References"],
-    "notheading": ["Provided proper attribution", "scholarly works."],
-    "text": ["Provided proper attribution is provided", "tables and figures in this paper", "position-wise fully connected feed-forward network", "28.4 BLEU on the WMT 2014 English-to-German", "Ashish Vaswani", "significantly less time to train"],
-    "notext": ["Pro vided", "fgures", "T ype", "signifcantly"],
-    "table": [["Self-Attention", "O(1)"], ["Recurrent", "O(n)"], ["Transformer (big)", "28.4", "41.8"]],
-    "order": [["1 Introduction", "2 Background"], ["3.2.1 Scaled", "3.2.2 Multi-Head"], ["7 Conclusion", "References"]]
+    "heading": [
+      "Attention Is All You Need",
+      "Abstract",
+      "1 Introduction",
+      "2 Background",
+      "3 Model Architecture",
+      "3.1 Encoder and Decoder Stacks",
+      "3.2 Attention",
+      "3.2.1 Scaled Dot-Product Attention",
+      "3.2.2 Multi-Head Attention",
+      "3.3 Position-wise Feed-Forward Networks",
+      "3.5 Positional Encoding",
+      "4 Why Self-Attention",
+      "5 Training",
+      "6 Results",
+      "7 Conclusion",
+      "References"
+    ],
+    "notheading": [
+      "Provided proper attribution",
+      "scholarly works."
+    ],
+    "text": [
+      "Provided proper attribution is provided",
+      "tables and figures in this paper",
+      "position-wise fully connected feed-forward network",
+      "28.4 BLEU on the WMT 2014 English-to-German",
+      "Ashish Vaswani",
+      "significantly less time to train"
+    ],
+    "notext": [
+      "Pro vided",
+      "fgures",
+      "T ype",
+      "signifcantly"
+    ],
+    "table": [
+      [
+        "Self-Attention",
+        "O(1)"
+      ],
+      [
+        "Recurrent",
+        "O(n)"
+      ],
+      [
+        "Transformer (big)",
+        "28.4",
+        "41.8"
+      ]
+    ],
+    "order": [
+      [
+        "1 Introduction",
+        "2 Background"
+      ],
+      [
+        "3.2.1 Scaled",
+        "3.2.2 Multi-Head"
+      ],
+      [
+        "7 Conclusion",
+        "References"
+      ]
+    ]
   },
   "bitcoin.pdf": {
-    "heading": ["Bitcoin: A Peer-to-Peer Electronic Cash System", "1. Introduction", "2. Transactions", "3. Timestamp Server", "4. Proof-of-Work", "5. Network", "6. Incentive", "7. Reclaiming Disk Space", "8. Simplified Payment Verification", "9. Combining and Splitting Value", "10. Privacy", "11. Calculations", "12. Conclusion"],
-    "text": ["Satoshi Nakamoto", "peer-to-peer network", "without a trusted party", "electronic payment system based on cryptographic proof", "transact directly with each other"],
-    "notext": ["SatoshiNakamoto", "peer-to-peernetwork", "channelwithouta"],
-    "code": ["#include <math.h>", "double AttackerSuccessProbability"],
-    "order": [["1. Introduction", "2. Transactions"], ["11. Calculations", "12. Conclusion"]]
+    "heading": [
+      "Bitcoin: A Peer-to-Peer Electronic Cash System",
+      "1. Introduction",
+      "2. Transactions",
+      "3. Timestamp Server",
+      "4. Proof-of-Work",
+      "5. Network",
+      "6. Incentive",
+      "7. Reclaiming Disk Space",
+      "8. Simplified Payment Verification",
+      "9. Combining and Splitting Value",
+      "10. Privacy",
+      "11. Calculations",
+      "12. Conclusion"
+    ],
+    "text": [
+      "Satoshi Nakamoto",
+      "peer-to-peer network",
+      "without a trusted party",
+      "electronic payment system based on cryptographic proof",
+      "transact directly with each other"
+    ],
+    "notext": [
+      "SatoshiNakamoto",
+      "peer-to-peernetwork",
+      "channelwithouta"
+    ],
+    "code": [
+      "#include <math.h>",
+      "double AttackerSuccessProbability"
+    ],
+    "order": [
+      [
+        "1. Introduction",
+        "2. Transactions"
+      ],
+      [
+        "11. Calculations",
+        "12. Conclusion"
+      ]
+    ]
   },
   "vit.pdf": {
-    "heading": ["ABSTRACT", "1 INTRODUCTION", "2 RELATED WORK", "3 METHOD", "3.1 VISION TRANSFORMER (VIT)", "3.2 FINE-TUNING AND HIGHER RESOLUTION", "4 EXPERIMENTS", "4.1 SETUP", "5 CONCLUSION"],
-    "notheading": ["MLP", "Norm", "Accuracy [%]", "Multi-Head", "Patches"],
-    "text": ["While the Transformer architecture has become the de-facto standard", "Vision Transformer (ViT)"],
-    "order": [["1 INTRODUCTION", "2 RELATED WORK"], ["4 EXPERIMENTS", "5 CONCLUSION"]]
+    "heading": [
+      "ABSTRACT",
+      "1 INTRODUCTION",
+      "2 RELATED WORK",
+      "3 METHOD",
+      "3.1 VISION TRANSFORMER (VIT)",
+      "3.2 FINE-TUNING AND HIGHER RESOLUTION",
+      "4 EXPERIMENTS",
+      "4.1 SETUP",
+      "5 CONCLUSION"
+    ],
+    "notheading": [
+      "MLP",
+      "Norm",
+      "Accuracy [%]",
+      "Multi-Head",
+      "Patches"
+    ],
+    "text": [
+      "While the Transformer architecture has become the de-facto standard",
+      "Vision Transformer (ViT)"
+    ],
+    "order": [
+      [
+        "1 INTRODUCTION",
+        "2 RELATED WORK"
+      ],
+      [
+        "4 EXPERIMENTS",
+        "5 CONCLUSION"
+      ]
+    ]
   },
   "korean.pdf": {
-    "heading": ["임베디드 글꼴 시험"],
-    "text": ["한글 글꼴이 파일 안에 박혀 있습니다", "Mixed with English 123", "테두리와 배경이 있는 상자"],
-    "table": [["글꼴", "Type0 Identity-H"], ["표", "선 그리기"]]
+    "heading": [
+      "임베디드 글꼴 시험"
+    ],
+    "text": [
+      "한글 글꼴이 파일 안에 박혀 있습니다",
+      "Mixed with English 123",
+      "테두리와 배경이 있는 상자"
+    ],
+    "table": [
+      [
+        "글꼴",
+        "Type0 Identity-H"
+      ],
+      [
+        "표",
+        "선 그리기"
+      ]
+    ]
   },
   "w9.pdf": {
-    "text": ["Request for Taxpayer", "Identification Number and Certification", "Purpose of Form", "Backup Withholding"],
-    "heading": ["Specific Instructions", "Backup Withholding"],
-    "order": [["Purpose of Form", "Specific Instructions"]]
+    "text": [
+      "Request for Taxpayer",
+      "Identification Number and Certification",
+      "Purpose of Form",
+      "Backup Withholding"
+    ],
+    "heading": [
+      "Specific Instructions",
+      "Backup Withholding"
+    ],
+    "order": [
+      [
+        "Purpose of Form",
+        "Specific Instructions"
+      ]
+    ]
+  },
+  "bok.pdf": {
+    "_": "한국은행 경제전망보고서 2026-02 앞 12쪽 (https://www.bok.or.kr, 공개 자료)",
+    "heading": [
+      "경제전망 요약",
+      "국내외 여건 및 전망",
+      "전망의 리스크"
+    ],
+    "notheading": [
+      "금년중 소비자물가는",
+      "취업자수 증가규모는"
+    ],
+    "text": [
+      "부문별 담당자",
+      "성장 2%",
+      "취업자수 증가규모는 지난해 19만명에서 금년 17만명으로",
+      "반도체 경기"
+    ],
+    "notext": [
+      "敮ⵕS",
+      "en-US",
+      "ࢊ본"
+    ]
   }
 }

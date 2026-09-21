@@ -694,8 +694,8 @@ export class PDFDocument {
     const pages: PageForMd[] = [];
     for (const n of want) {
       const q = await this.get(n, false);
-      const { rules, boxes } = rulesOf(q.ops, q.h, q.y0);
-      pages.push({ lines: linesOf(q.items, q.h, q.y0), w: q.w, h: q.h, rules, boxes });
+      const { rules, boxes, marks } = rulesOf(q.ops, q.h, q.y0);
+      pages.push({ lines: linesOf(q.items, q.h, q.y0), w: q.w, h: q.h, rules, boxes, marks });
     }
     return toMarkdown(pages);
   }

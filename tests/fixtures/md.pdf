@@ -66,7 +66,7 @@ BT /R 10 Tf 72 530 Td (Text after the table.) Tj ET
 endstream
 endobj
 11 0 obj
-<< /Length 938 >>
+<< /Length 1156 >>
 stream
 BT /R 8 Tf 72 760 Td (Running Head: Markdown Fixture) Tj ET
 BT /R 8 Tf 300 40 Td (3) Tj ET
@@ -83,6 +83,10 @@ BT /R 10 Tf 320 676 Td (Right line 3 of the column text here) Tj ET
 BT /R 10 Tf 320 664 Td (Right line 4 of the column text here) Tj ET
 BT /R 10 Tf 320 652 Td (Right line 5 of the column text here) Tj ET
 BT /R 10 Tf 320 640 Td (Right line 6 of the column text here) Tj ET
+BT /B 11 Tf 72 600 Td (\225 Bold summary sentence that is not a heading) Tj ET
+0.9 0.9 1 rg 68 556 200 18 re f
+BT /B 14 Tf 72 560 Td (4 Heading On A Bar) Tj ET
+BT /R 10 Tf 72 540 Td (Body after the bar heading.) Tj ET
 endstream
 endobj
 xref
@@ -102,5 +106,5 @@ xref
 trailer
 << /Size 12 /Root 1 0 R >>
 startxref
-3612
+3831
 %%EOF

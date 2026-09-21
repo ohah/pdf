@@ -56,7 +56,12 @@ const p2 = [
 ].join('\n');
 // 3쪽 — 두 단
 const col = (x, tag) => Array.from({ length: 6 }, (_, i) => T('R', 10, x, 700 - i * 12, `${tag} line ${i + 1} of the column text here`)).join('\n');
-const p3 = [header(3), T('B', 14, 72, 730, '3 Two Columns'), col(72, 'Left'), col(320, 'Right')].join('\n');
+const p3 = [header(3), T('B', 14, 72, 730, '3 Two Columns'), col(72, 'Left'), col(320, 'Right'),
+  // 굵은 요약 문장이 딩뱃(PUA) 글머리로 시작 — 제목이 아니라 목록이다
+  T('B', 11, 72, 600, '\\225 Bold summary sentence that is not a heading'),
+  // 제목 뒤 색 바탕 띠 — 그림이 아니다
+  '0.9 0.9 1 rg 68 556 200 18 re f', T('B', 14, 72, 560, '4 Heading On A Bar'),
+  T('R', 10, 72, 540, 'Body after the bar heading.')].join('\n');
 const page = (c) => `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /R 6 0 R /B 7 0 R /C 8 0 R >> >> /Contents ${c} 0 R >>`;
 fs.writeFileSync(`${S}/md.pdf`, build([
   '<< /Type /Catalog /Pages 2 0 R >>',

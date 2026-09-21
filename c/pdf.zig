@@ -2987,19 +2987,7 @@ fn parseCMap(f: *FontMap, cm: []const u8) void {
             }
             p += 1;
             if (nu == 0) continue;
-            if (!mapRoom(f, f.n + 1)) break;
-            f.codes.all()[f.n] = @truncate(src);
-            f.unis.all()[f.n] = units[0];
-            f.n += 1;
-            // 서로게이트 쌍(D800–DBFF 뒤 DC00–DFFF)이면 한 글자라 뒤를 안 남긴다
-            const surrogate = nu >= 2 and units[0] >= 0xD800 and units[0] <= 0xDBFF;
-            var ui: u32 = 1;
-            while (!surrogate and ui < nu) : (ui += 1) {
-                if (!f.mx_codes.room(f.mx_n + 1) or !f.mx_unis.room(f.mx_n + 1)) break;
-                f.mx_codes.all()[f.mx_n] = @truncate(src);
-                f.mx_unis.all()[f.mx_n] = units[ui];
-                f.mx_n += 1;
-            }
+            if (!putMap(f, src, units[0..nu])) break;
         }
         at = end + 1;
     }
@@ -3025,7 +3013,30 @@ fn parseCMap(f: *FontMap, cm: []const u8) void {
                 if (hexVal(cm[p])) |h| { hi = (hi << 4) | h; };
             p += 1;
             while (p < end and isSpace(cm[p])) p += 1;
-            if (p < end and cm[p] == '[') { // 배열형은 건너뛴다
+            if (p < end and cm[p] == '[') {
+                // 배열형 <lo> <hi> [<d1> <d2> …] — 코드마다 목적지가 따로다.
+                // 건너뛰었더니 "일본" 이 "ࢊ본" 이 됐다(한은 보고서, 맑은 고딕).
+                p += 1;
+                var c = lo;
+                while (p < end and cm[p] != ']' and c <= hi) {
+                    while (p < end and cm[p] != '<' and cm[p] != ']') p += 1;
+                    if (p >= end or cm[p] == ']') break;
+                    p += 1;
+                    var units: [8]u16 = undefined;
+                    var nu: u32 = 0;
+                    var acc: u32 = 0;
+                    var nd: u32 = 0;
+                    while (p < end and cm[p] != '>') : (p += 1) {
+                        if (hexVal(cm[p])) |h| {
+                            acc = (acc << 4) | h;
+                            nd += 1;
+                            if (nd == 4) { if (nu < 8) { units[nu] = @truncate(acc); nu += 1; } acc = 0; nd = 0; }
+                        }
+                    }
+                    p += 1;
+                    _ = putMap(f, c, units[0..nu]);
+                    c += 1;
+                }
                 while (p < end and cm[p] != ']') p += 1;
                 p += 1;
                 continue;
@@ -3072,6 +3083,25 @@ fn extraUni(f: *const FontMap, code: u32, k: u32) ?u32 {
         if (seen == k) return f.mx_unis.all()[i];
     };
     return null;
+}
+
+/// 코드 → UTF-16 단위들. 첫 단위는 표에, 나머지(합자의 뒤 글자)는 mx 표에.
+/// 서로게이트 쌍(D800–DBFF 뒤 DC00–DFFF)은 한 글자라 뒤를 안 남긴다.
+fn putMap(f: *FontMap, src: u32, units: []const u16) bool {
+    if (units.len == 0) return true;
+    if (!mapRoom(f, f.n + 1)) return false;
+    f.codes.all()[f.n] = @truncate(src);
+    f.unis.all()[f.n] = units[0];
+    f.n += 1;
+    const surrogate = units.len >= 2 and units[0] >= 0xD800 and units[0] <= 0xDBFF;
+    var ui: usize = 1;
+    while (!surrogate and ui < units.len) : (ui += 1) {
+        if (!f.mx_codes.room(f.mx_n + 1) or !f.mx_unis.room(f.mx_n + 1)) break;
+        f.mx_codes.all()[f.mx_n] = @truncate(src);
+        f.mx_unis.all()[f.mx_n] = units[ui];
+        f.mx_n += 1;
+    }
+    return true;
 }
 
 fn lookup(f: *const FontMap, code: u32) u32 {
@@ -3873,7 +3903,10 @@ pub fn runOps(b: []const u8, depth: u32) void {
         // 한 글자씩 넘기면 << 의 둘째 < 가 16진 문자열의 시작으로 보인다.
         // BDC 의 <</MCID 299 >> 가 통째로 글자가 되어, 라벨마다 "Í0" 같은
         // 군더더기가 찍히고 글자 자리까지 밀렸다.
-        if (c == '<' and p + 1 < b.len and b[p + 1] == '<') { p += 2; continue; }
+        // 안쪽 값도 글자가 아니다 — << /Lang (en-US) /ActualText <FEFF…> >> BDC 의
+        // (en-US) 와 hex 가 본문에 섞여 "담당자敮ⵕS en-US" 가 됐다(한은 보고서).
+        // 짝 >> 까지 통째로 건너뛴다.
+        if (c == '<' and p + 1 < b.len and b[p + 1] == '<') { p = dictEnd(b, p, b.len); continue; }
         if (c == '>' and p + 1 < b.len and b[p + 1] == '>') { p += 2; continue; }
         if (c == '<' or c == '>') { p += 1; continue; }
         if (c == '{' or c == '}') { p += 1; continue; }
