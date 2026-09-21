@@ -1,6 +1,6 @@
 # @ohah/pdf
 
-브라우저에서 PDF 를 읽고, 그리고, 고친다. 엔진은 Zig 로 짜 wasm 하나(321KB)로
+브라우저에서 PDF 를 읽고, 그리고, 고친다. 엔진은 Zig 로 짜 wasm 하나(327KB)로
 굽고 웹 워커에서 돌린다. 화면 갈래는 바닐라·React·Vue·Svelte 를 함께 낸다.
 
 ```bash

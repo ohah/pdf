@@ -111,7 +111,7 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 논문 둘(attention·ViT, 두 단·표·수식), 비트코인 백서(코드), IRS W-9(양식),
 한글 견본, 한국은행 경제전망보고서(2026-02, 앞 12쪽).
 
-| | 우리(규칙, wasm 323KB) | docling(ML, Python) | pymupdf4llm(Python) |
+| | 우리(규칙, wasm 327KB) | docling(ML, Python) | pymupdf4llm(Python) |
 |---|---|---|---|
 | 맞힌 정답 | **115/115** (docling·pymupdf4llm 은 102개 기준 95·51) | 95/102 | 51/102 |
 | attention 15쪽 | 150ms | 60s | — |
