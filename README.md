@@ -178,6 +178,7 @@ await writeFile("1쪽.png", cv.toBuffer("image/png"));
 | `pdf.text(page)` | 쪽의 글자 — 줄마다 한 줄. 조각 사이 틈으로 띄어쓰기를 정하고 합자를 푼다 |
 | `pdf.lines(page)` | 줄마다 자리·크기·글꼴·조각들 |
 | `pdf.markdown({ pages? })` | 문서를 Markdown 으로 — 제목 계층(크기·굵기·번호), 문단(하이픈 잇기), 목록, 코드(고정폭), 괘선 표, 머리말·꼬리말 버림, 두 단 순서. ML 없이 규칙만으로. `tests/md-bench.mjs` 로 정답과 맞댄다 |
+| `pdf.blocks({ pages? })` | 같은 규칙의 JSON 꼴 — `{ kind, text\|items\|rows, level, page, bbox }` 덩이 배열. 색인·인용·하이라이트용 |
 | `pdf.textItems(page)` | 덩이째 — 자리·크기·폭·글꼴 이름·쓰는 방향·줄 끝(장치 좌표) |
 | `pdf.structure(page?)` | 구조 나무(태그 PDF) — 제목·문단·표와 대체 글 |
 | `pdf.fields(page)` · `links(page)` | 입력 칸 · 링크 |

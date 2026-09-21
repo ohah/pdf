@@ -12,7 +12,7 @@ import { fontKey, loadBytes } from "./bytes.js";
 //   pdf.close();
 import { PDFClient, type PageMsg, type OpenMsg, type BuildSpec } from "./client.js";
 import { linesOf, textOf, type Line } from "./extract.js";
-import { rulesOf, toMarkdown } from "./markdown.js";
+import { rulesOf, toMarkdown, toBlocks, type PageForMd, type DocBlock } from "./markdown.js";
 import { openRanged, fillRest, type Ranged } from "./range.js";
 import { drawOps, toLines, type TextRun } from "./draw.js";
 import { type Paths } from "./config.js";
@@ -24,19 +24,28 @@ export type { Paths } from "./config.js";
 export type { BuildSpec, Mask, PageMsg } from "./client.js";
 export type { Line, Piece } from "./extract.js";
 export { linesOf, textOf } from "./extract.js";
-export { rulesOf, toMarkdown } from "./markdown.js";
-export type { PageForMd, Rule } from "./markdown.js";
+export { rulesOf, toMarkdown, toBlocks } from "./markdown.js";
+export type { PageForMd, Rule, DocBlock } from "./markdown.js";
 
 /**
  * 이미 읽어 둔 쪽들(PageMsg — `PDFClient.page()` 가 준 것)로 Markdown 을 만든다.
  * 워커 창구를 직접 쓰는 앱용이다. 가벼운 읽기(light)로 받은 쪽도 된다 —
  * 글자와 그리기 명령만 있으면 충분하다.
  */
-export function markdownOf(pages: Pick<PageMsg, "items" | "ops" | "w" | "h" | "y0">[]): string {
-  return toMarkdown(pages.map((q) => {
+export function markdownOf(pages: Pick<PageMsg, "items" | "ops" | "w" | "h" | "y0">[], numbers?: number[]): string {
+  return toMarkdown(pagesForMd(pages, numbers));
+}
+
+/** 같은 입력으로 덩이(JSON 꼴)를 — 종류·글·쪽·자리 */
+export function blocksOf(pages: Pick<PageMsg, "items" | "ops" | "w" | "h" | "y0">[], numbers?: number[]): DocBlock[] {
+  return toBlocks(pagesForMd(pages, numbers));
+}
+
+function pagesForMd(pages: Pick<PageMsg, "items" | "ops" | "w" | "h" | "y0">[], numbers?: number[]): PageForMd[] {
+  return pages.map((q, i) => {
     const { rules, boxes, marks } = rulesOf(q.ops, q.h, q.y0);
-    return { lines: linesOf(q.items, q.h, q.y0), w: q.w, h: q.h, rules, boxes, marks };
-  }));
+    return { page: numbers?.[i] ?? i + 1, lines: linesOf(q.items, q.h, q.y0), w: q.w, h: q.h, rules, boxes, marks };
+  });
 }
 export type { TextRun, Stencil } from "./draw.js";
 export type { SigCheck } from "./sig.js";
@@ -708,7 +717,18 @@ export class PDFDocument {
     const want = opts.pages ?? Array.from({ length: this.pages }, (_, i) => i + 1);
     const pages = [];
     for (const n of want) pages.push(await this.get(n, false));
-    return markdownOf(pages);
+    return markdownOf(pages, want);
+  }
+
+  /**
+   * 문서를 덩이(JSON 꼴)로 — `markdown()` 과 같은 규칙으로 가르되 종류·글에
+   * 쪽 번호와 자리(pt, 왼쪽 위 기준)를 붙여 준다. 검색 색인·인용·하이라이트에 쓴다.
+   */
+  async blocks(opts: { pages?: number[] } = {}): Promise<DocBlock[]> {
+    const want = opts.pages ?? Array.from({ length: this.pages }, (_, i) => i + 1);
+    const pages = [];
+    for (const n of want) pages.push(await this.get(n, false));
+    return blocksOf(pages, want);
   }
 
   /** 쪽 하나의 입력 칸 */

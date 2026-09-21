@@ -194,7 +194,7 @@ await want("toLines(빈 것)", () => lib.toLines([]), Array.isArray);
 await bounded("toLines(이상한 것)", () => lib.toLines([{ x: NaN, y: NaN, w: NaN, h: NaN, text: "" }]));
 
 // 글자 뽑기·Markdown — 빈 것, 이상한 값, 거대한 값
-hit("linesOf", "textOf", "rulesOf", "toMarkdown", "markdownOf");
+hit("linesOf", "textOf", "rulesOf", "toMarkdown", "markdownOf", "toBlocks", "blocksOf");
 const piece = (x, y, t, extra = {}) => ({ x, y, size: 10, w: 20, text: t, font: "F1", base: "Helvetica", dir: "ltr", ...extra });
 await want("linesOf(빈 것)", () => lib.linesOf([], 100), (v) => Array.isArray(v) && v.length === 0);
 await want("linesOf(둘)", () => lib.linesOf([piece(10, 80, "a"), piece(40, 80, "b")], 100), (v) => v.length === 1 && v[0].text === "a b");
@@ -204,6 +204,9 @@ await want("rulesOf(빈 명령)", () => lib.rulesOf(new Float32Array(0), 100), (
 await bounded("rulesOf(어긋난 명령)", () => lib.rulesOf(new Float32Array([5, 4, NaN, NaN, NaN, NaN, 16, 6, 0, 0, 0, 0, 0, 0, 7, 0, 14, 0, 14, 0, 15, 0, 15, 0, 15, 0, 99, 3]), 100));
 await want("toMarkdown(빈 쪽)", () => lib.toMarkdown([]), (v) => typeof v === "string");
 await want("markdownOf(빈 쪽)", () => lib.markdownOf([{ items: [], ops: new Float32Array(0), w: 100, h: 100, y0: 0 }]), (v) => typeof v === "string");
+await want("toBlocks(빈 쪽)", () => lib.toBlocks([]), (v) => Array.isArray(v) && v.length === 0);
+await want("blocksOf(빈 쪽)", () => lib.blocksOf([{ items: [], ops: new Float32Array(0), w: 100, h: 100, y0: 0 }]), (v) => Array.isArray(v));
+await bounded("blocksOf(이상한 쪽)", () => lib.blocksOf([{ items: [piece(NaN, NaN, "x")], ops: new Float32Array([16, 6, NaN, NaN, NaN, NaN, NaN, NaN]), w: NaN, h: NaN, y0: NaN }]));
 await bounded("markdownOf(이상한 쪽)", () => lib.markdownOf([{ items: [piece(NaN, NaN, "x")], ops: new Float32Array([16, 6, NaN, NaN, NaN, NaN, NaN, NaN]), w: NaN, h: NaN, y0: NaN }]));
 // 조각 2만 개 — 줄 묶기가 제곱으로 늘면 여기서 걸린다
 {

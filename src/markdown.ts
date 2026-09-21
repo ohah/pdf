@@ -19,6 +19,8 @@
 import { joinPieces, type Line } from "./extract.js";
 
 export type PageForMd = {
+  /** 쪽 번호(1부터). 없으면 넘긴 차례 */
+  page?: number;
   lines: Line[];
   /** 쪽 크기(pt) */
   w: number; h: number;
@@ -42,12 +44,18 @@ const BULLET = /^([•·▪‣◦■□▶►◆◇○●※\-–—*]|[\uE000-\
 // 기호 글머리 — 굵거나 커도 제목이 아니라 목록이다(보고서의 요약 문장)
 const SYMBOL_BULLET = /^([•·▪‣◦■□▶►◆◇○●※\-–—*]|[\uE000-\uF8FF]|[\u2700-\u27BF])\s*/;
 
-type Block =
+/** 어느 쪽, 어느 자리(pt, 왼쪽 위 기준 [x0 y0 x1 y1])에서 왔는지 */
+type Where = { page: number; bbox: [number, number, number, number] };
+
+/** 문서를 가른 덩이 하나 — JSON 으로 그대로 낼 수 있다 */
+export type DocBlock = Where & (
   | { kind: "heading"; level: number; text: string }
   | { kind: "para"; text: string }
   | { kind: "list"; items: string[] }
   | { kind: "code"; text: string }
-  | { kind: "table"; rows: string[][] };
+  | { kind: "table"; rows: string[][] }
+);
+type Block = DocBlock;
 
 /** 그리기 명령에서 괘선(가늘고 긴 채움 네모와 획 선)과 도형·그림 상자를 뽑는다. */
 export function rulesOf(ops: Float32Array, pageH: number, y0page = 0): { rules: Rule[]; boxes: Rule[]; marks: Rule[] } {
@@ -184,11 +192,11 @@ function merge(rs: Rule[], horiz: boolean): Rule[] {
 }
 
 /** 괘선 격자에서 표를 찾아 줄들을 칸에 넣는다. 표에 든 줄은 used 에 표시. */
-function tablesOf(page: PageForMd, used: Set<Line>): { top: number; rows: string[][] }[] {
+function tablesOf(page: PageForMd, used: Set<Line>): { top: number; rows: string[][]; bbox: [number, number, number, number] }[] {
   // 같은 y 에서 맞닿는 조각(칸마다 끊어 그린 괘선)은 한 선으로 잇는다
   const hs = merge(page.rules.filter((r) => Math.abs(r.y0 - r.y1) < 1 && r.x1 - r.x0 >= 4), true);
   const vs = merge(page.rules.filter((r) => Math.abs(r.x0 - r.x1) < 1 && r.y1 - r.y0 >= 4), false);
-  const out: { top: number; rows: string[][] }[] = [];
+  const out: { top: number; rows: string[][]; bbox: [number, number, number, number] }[] = [];
   if (hs.length < 2) return out;
   // 가로선을 겹치는 x 범위로 묶어 표 후보를 만든다
   const groups: typeof hs[] = [];
@@ -265,7 +273,7 @@ function tablesOf(page: PageForMd, used: Set<Line>): { top: number; rows: string
     if (got.empty > 0.6) { const alt = gapCols(); if (alt.length >= 3) got = build(alt); }
     if (got.empty > 0.6 || got.rows.length < 2) continue;
     got.lines.forEach((l) => used.add(l));
-    out.push({ top: yTop, rows: got.rows });
+    out.push({ top: yTop, rows: got.rows, bbox: [x0, yTop, x1, yBot] });
   }
   return out;
 }
@@ -322,6 +330,11 @@ function isHeading(l: Line, body: number): boolean {
 
 /** 쪽들을 Markdown 으로. 한 문서를 통째로 넘겨야 본문 크기와 머리말·꼬리말을 안다. */
 export function toMarkdown(pages: PageForMd[]): string {
+  return render(toBlocks(pages), hyphenatedWords(pages));
+}
+
+/** 쪽들을 덩이(제목·문단·목록·코드·표)로 가른다 — 쪽 번호·자리까지. JSON 으로 내는 쪽이 쓴다 */
+export function toBlocks(pages: PageForMd[]): DocBlock[] {
   const body = bodySize(pages);
   const drop = runningLines(pages);
   const hyph = hyphenatedWords(pages);
@@ -333,7 +346,8 @@ export function toMarkdown(pages: PageForMd[]): string {
   const ranks = [...sizes.keys()].sort((a, b) => b - a).slice(0, 3);
 
   const blocks: Block[] = [];
-  for (const page of pages) {
+  pages.forEach((page, pi) => {
+    const pno = page.page ?? pi + 1;
     const used = new Set<Line>(drop);
     const tables = tablesOf(page, used);
     const rotatedChars = page.lines.reduce((a, l) => a + (Math.abs(l.angle) > 0.1 ? l.text.length : 0), 0);
@@ -348,9 +362,16 @@ export function toMarkdown(pages: PageForMd[]): string {
     let code: string[] = [];
     let codeX = 0;
     let list: string[] = [];
-    const endPara = () => { if (para.length) blocks.push({ kind: "para", text: joinLines(para, hyph) }); para = []; };
-    const endCode = () => { if (code.length) blocks.push({ kind: "code", text: code.join("\n") }); code = []; };
-    const endList = () => { if (list.length) blocks.push({ kind: "list", items: list }); list = []; };
+    // 덩이가 차지한 자리 — 줄 상자를 합친다
+    let box: [number, number, number, number] | null = null;
+    const grow = (l: Line) => {
+      const b: [number, number, number, number] = [l.x, l.y - l.size, l.x + l.w, l.y + l.size * 0.25];
+      box = box ? [Math.min(box[0], b[0]), Math.min(box[1], b[1]), Math.max(box[2], b[2]), Math.max(box[3], b[3])] : b;
+    };
+    const where = (): Where => { const w: Where = { page: pno, bbox: box ?? [0, 0, 0, 0] }; box = null; return w; };
+    const endPara = () => { if (para.length) blocks.push({ kind: "para", text: joinLines(para, hyph), ...where() }); para = []; };
+    const endCode = () => { if (code.length) blocks.push({ kind: "code", text: code.join("\n"), ...where() }); code = []; };
+    const endList = () => { if (list.length) blocks.push({ kind: "list", items: list, ...where() }); list = []; };
     const endAll = () => { endPara(); endCode(); endList(); };
     let ti = 0;
     for (const l0 of page.lines) {
@@ -364,7 +385,7 @@ export function toMarkdown(pages: PageForMd[]): string {
       const l: Line = small ? { ...l0, text: joinPieces(l0.pieces.filter((p) => !mark(p))) } : l0;
       if (!l.text) continue;
       // 이 줄보다 위에 있는 표를 먼저 낸다
-      while (ti < tables.length && tables[ti].top <= l.y) { endAll(); blocks.push({ kind: "table", rows: tables[ti].rows }); ti++; }
+      while (ti < tables.length && tables[ti].top <= l.y) { endAll(); blocks.push({ kind: "table", rows: tables[ti].rows, page: pno, bbox: tables[ti].bbox }); ti++; }
       if (used.has(l0)) continue;
       // 고정폭 글꼴은 코드 — 기호뿐인 줄("}")도 살리고 들여쓰기는 x 로 되살린다
       if (isMono(l)) {
@@ -374,6 +395,7 @@ export function toMarkdown(pages: PageForMd[]): string {
         const lead = (/^\s*/.exec(l0.pieces[0]?.text ?? "") ?? [""])[0].length;
         const indent = Math.max(lead, Math.round((l.x - codeX) / (l.size * 0.6)));
         code.push(" ".repeat(indent) + l.text);
+        grow(l0);
         lastBottom = l.y + l.size;
         continue;
       }
@@ -386,7 +408,7 @@ export function toMarkdown(pages: PageForMd[]): string {
       const symbolBullet = SYMBOL_BULLET.test(l.text) && l.text.length > 2;
       if (!symbolBullet && !inFig && isHeading(l, body) && !inBlock(page.lines, l0, drop)) {
         endAll();
-        blocks.push({ kind: "heading", level: headingLevel(l, body, ranks) || 2, text: l.text });
+        blocks.push({ kind: "heading", level: headingLevel(l, body, ranks) || 2, text: l.text, page: pno, bbox: [l.x, l.y - l.size, l.x + l.w, l.y + l.size * 0.25] });
         lastBottom = l.y + l.size;
         continue;
       }
@@ -395,12 +417,14 @@ export function toMarkdown(pages: PageForMd[]): string {
       if (bm && l.text.length > bm[0].length) {
         endPara();
         list.push(l.text.slice(bm[0].length).trim());
+        grow(l0);
         lastBottom = l.y + l.size; paraX = l.x;
         continue;
       }
       if (list.length && gap < l.size * 0.9 && l.x > paraX + l.size * 0.5) {
         // 목록 항목의 이어지는 줄
         list[list.length - 1] += " " + l.text;
+        grow(l0);
         lastBottom = l.y + l.size;
         continue;
       }
@@ -410,12 +434,22 @@ export function toMarkdown(pages: PageForMd[]): string {
       if (newPara) endPara();
       if (!para.length) paraX = l.x;
       para.push(l.text);
+      grow(l0);
       lastBottom = l.y + l.size;
     }
-    while (ti < tables.length) { endAll(); blocks.push({ kind: "table", rows: tables[ti].rows }); ti++; }
+    while (ti < tables.length) { endAll(); blocks.push({ kind: "table", rows: tables[ti].rows, page: pno, bbox: tables[ti].bbox }); ti++; }
     endAll();
+  });
+  // 같은 문단이 쪽을 넘어 갈라진 것을 잇는다: 앞 문단이 마침표 없이 끝나고 다음이 소문자로 시작.
+  // 이은 덩이의 자리는 앞쪽 것이다.
+  for (let i = 0; i + 1 < blocks.length; i++) {
+    const a = blocks[i], b = blocks[i + 1];
+    if (a.kind === "para" && b.kind === "para" && a.page !== b.page && !/[.!?:"”)\]]$/.test(a.text) && /^[a-z]/.test(b.text)) {
+      a.text = joinLines([a.text, b.text], hyph);
+      blocks.splice(i + 1, 1); i--;
+    }
   }
-  return render(blocks, hyph);
+  return blocks;
 }
 
 /**
@@ -450,16 +484,8 @@ function hyphenatedWords(pages: PageForMd[]): Set<string> {
 
 function esc(s: string): string { return s.replace(/\|/g, "\\|"); }
 
-function render(blocks: Block[], hyph: Set<string>): string {
+function render(blocks: Block[], _hyph: Set<string>): string {
   const out: string[] = [];
-  // 같은 문단이 쪽을 넘어 갈라진 것을 잇는다: 앞 문단이 마침표 없이 끝나고 다음이 소문자로 시작
-  for (let i = 0; i + 1 < blocks.length; i++) {
-    const a = blocks[i], b = blocks[i + 1];
-    if (a.kind === "para" && b.kind === "para" && !/[.!?:"”)\]]$/.test(a.text) && /^[a-z]/.test(b.text)) {
-      a.text = joinLines([a.text, b.text], hyph);
-      blocks.splice(i + 1, 1); i--;
-    }
-  }
   for (const b of blocks) {
     switch (b.kind) {
       case "heading": out.push(`${"#".repeat(b.level)} ${b.text}`); break;

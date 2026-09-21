@@ -223,6 +223,16 @@ const t = (name, cond, got) => {
   t("md: 굵은 글머리 문장은 목록", md.includes("- Bold summary sentence that is not a heading") && !md.includes("# \u2022"), md.slice(-500));
   t("md: 색 띠 위 제목은 그림이 아니다", md.includes("# 4 Heading On A Bar"), md.slice(-300));
   t("md: 옆으로 누운 스탬프는 뺀다", !md.includes("SIDEWAYS"), md);
+  // 같은 규칙의 JSON 꼴 — 종류·글에 쪽·자리(pt, 왼쪽 위 기준)
+  const bl = await d.blocks();
+  const kinds = bl.map((b) => `${b.page}${b.kind[0]}`).join(" ");
+  t("blocks: 종류와 쪽 차례", kinds === "1h 1h 1p 1p 1h 1l 2h 2c 2p 2t 2p 3h 3p 3p 3l 3h 3p", kinds);
+  const tb = bl.find((b) => b.kind === "table");
+  t("blocks: 표 자리는 괘선 상자", tb && tb.bbox.map(Math.round).join() === "72,172,320,232", tb && tb.bbox.map(Math.round).join());
+  const h1 = bl[0];
+  t("blocks: 제목 자리", h1.kind === "heading" && h1.bbox[1] === 72 && h1.bbox[0] === 72 && h1.bbox[2] > 250, JSON.stringify(h1.bbox));
+  t("blocks: 문단 자리는 줄들을 덮는다", bl[2].kind === "para" && bl[2].bbox[3] - bl[2].bbox[1] > 30, JSON.stringify(bl[2].bbox));
+  t("blocks: JSON 으로 나간다", JSON.parse(JSON.stringify(bl)).length === bl.length);
   d.close();
 }
 
