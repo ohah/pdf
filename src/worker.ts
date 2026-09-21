@@ -716,7 +716,10 @@ async function page(i: number, formOn: boolean, light = false) {
   for (let k = 0; k < cnt; k++) {
     const len = e.itemLen(k);
     if (!len) continue;
-    const t = dec.decode(buf.subarray(e.itemOff(k), e.itemOff(k) + len)).replace(/\s+$/, "");
+    // 끝 빈칸을 자르지 않는다 — "i " 처럼 빈칸을 품은 조각은 폭에 빈칸이
+    // 들어 있어, 글자만 자르면 다음 조각과 틈이 0 이 되어 "SatoshiNakamoto"
+    // 가 된다. 빈칸뿐인 조각도 자리 정보라 남긴다.
+    const t = dec.decode(buf.subarray(e.itemOff(k), e.itemOff(k) + len));
     if (!t) continue;
     // 글꼴 이름과 쓰는 방향까지 함께 — pdf.js 의 TextItem 이 주는 것들이다.
     const fi = e.itemFont?.(k) ?? 0;
@@ -724,6 +727,11 @@ async function page(i: number, formOn: boolean, light = false) {
       x: e.itemX(k), y: e.itemY(k), size: e.itemSize(k), w: e.itemWidth?.(k) ?? 0, text: t,
       font: fi > 0 && e.fontNamePtr && e.fontNameLen
         ? dec.decode(new Uint8Array(e.memory.buffer, e.fontNamePtr(fi - 1), e.fontNameLen(fi - 1)))
+        : "",
+      // 문서가 적은 글꼴 이름(/BaseFont) — "TimesNewRomanPS-BoldMT" 처럼 굵기·
+      // 고정폭이 이름에 드러난다. 제목·코드를 가르는 쪽이 본다.
+      base: fi > 0 && e.fontBasePtr && e.fontBaseLen && e.fontBaseLen(fi - 1) > 0
+        ? dec.decode(new Uint8Array(e.memory.buffer, e.fontBasePtr(fi - 1), e.fontBaseLen(fi - 1)))
         : "",
       dir: (e.itemVertical?.(k) ?? 0) === 1 ? "ttb" : rtl(t) ? "rtl" : "ltr",
     });

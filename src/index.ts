@@ -12,6 +12,7 @@ import { fontKey, loadBytes } from "./bytes.js";
 //   pdf.close();
 import { PDFClient, type PageMsg, type OpenMsg, type BuildSpec } from "./client.js";
 import { linesOf, textOf, type Line } from "./extract.js";
+import { rulesOf, toMarkdown, type PageForMd } from "./markdown.js";
 import { openRanged, fillRest, type Ranged } from "./range.js";
 import { drawOps, toLines, type TextRun } from "./draw.js";
 import { type Paths } from "./config.js";
@@ -645,7 +646,7 @@ export class PDFDocument {
   async textItems(page: number): Promise<TextItem[]> {
     const q = await this.get(page, false);
     const out = q.items.map((it) => ({
-      str: it.text, x: it.x, y: it.y, size: it.size,
+      str: it.text, x: it.x, y: it.y, size: it.size, width: it.w,
       font: it.font, dir: it.dir, hasEOL: false,
     }));
     // 줄 끝 표시. 같은 줄에 있는 것끼리 묶고 그 줄의 마지막에 표시한다 —
@@ -672,13 +673,31 @@ export class PDFDocument {
    */
   async text(page: number) {
     const q = await this.get(page, false);
-    return textOf(q.items, q.h);
+    return textOf(q.items, q.h, q.y0);
   }
 
   /** 쪽의 줄들 — 자리·크기·글꼴까지. 제목·문단·표를 가르는 쪽(markdown)이 쓴다 */
   async lines(page: number): Promise<Line[]> {
     const q = await this.get(page, false);
-    return linesOf(q.items, q.h);
+    return linesOf(q.items, q.h, q.y0);
+  }
+
+  /**
+   * 문서를 Markdown 으로 — 제목·문단·목록·코드·표. LLM 에 먹이는 용도다.
+   *
+   * 글자층의 크기·글꼴·자리와 그리기 명령의 괘선만으로 규칙으로 가른다.
+   * 한 문서를 통째로 봐야 본문 크기와 머리말·꼬리말을 알기에 쪽 범위를
+   * 주더라도 전체를 한 번 읽는다. `pages` 는 1부터.
+   */
+  async markdown(opts: { pages?: number[] } = {}): Promise<string> {
+    const want = opts.pages ?? Array.from({ length: this.pages }, (_, i) => i + 1);
+    const pages: PageForMd[] = [];
+    for (const n of want) {
+      const q = await this.get(n, false);
+      const { rules, boxes } = rulesOf(q.ops, q.h, q.y0);
+      pages.push({ lines: linesOf(q.items, q.h, q.y0), w: q.w, h: q.h, rules, boxes });
+    }
+    return toMarkdown(pages);
   }
 
   /** 쪽 하나의 입력 칸 */

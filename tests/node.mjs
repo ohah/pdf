@@ -183,6 +183,25 @@ const t = (name, cond, got) => {
   d2.close();
 }
 
+// PDF → Markdown — 제목 계층·문단·하이픈·목록·코드·괘선 표·머리말·꼬리말·두 단.
+// 규칙마다 견본 한 자리씩. 진짜 문서로는 tests/md-bench.mjs 가 정답과 맞댄다
+// (attention·bitcoin·vit·w9·korean 90/90, pymupdf4llm 44/90).
+{
+  const d = await PDFDocument.open(`${FX}/md.pdf`);
+  const md = await d.markdown();
+  const heads = md.split("\n").filter((l) => l.startsWith("#"));
+  t("md: 제목 계층 — 크기와 번호 깊이", heads.join("|") === "# Markdown Fixture Title|# 1 Introduction|## 1.1 A List|# 2 Code and Table|# 3 Two Columns", heads.join("|"));
+  t("md: 줄 끝 하이픈을 떼어 낱말을 잇는다", md.includes("breaks a compound word") && md.includes("second paragraph follows"), md.slice(0, 200));
+  t("md: 문서 안에 하이픈 붙은 낱말은 남긴다", md.includes("with self-attention again"), md.slice(0, 400));
+  t("md: 줄 간격이 벌어지면 새 문단", /gap\.\n\nSecond paragraph/.test(md), md.slice(0, 400));
+  t("md: 목록 — 이어지는 줄까지 한 항목", md.includes("- first item\n- second item that wraps onto another line\n- third item"), md);
+  t("md: 코드 — 고정폭·들여쓰기·기호 줄", md.includes("```\nint main(void) {\n  return 0;\n}\n```"), md);
+  t("md: 괘선 표", md.includes("| Name | Value |\n| --- | --- |\n| alpha | 1.5 |\n| beta | 2.0 |"), md);
+  t("md: 머리말·쪽 번호는 버린다", !md.includes("Running Head") && !/\n2\n/.test(md), md);
+  t("md: 두 단은 왼쪽 단을 다 읽고 오른쪽", /Left line 6 of the column text here\n\nRight line 1/.test(md), md.slice(-400));
+  d.close();
+}
+
 // 캔버스를 주면 Node 에서도 그린다 (@napi-rs/canvas 가 있을 때만 본다)
 {
   let createCanvas = null;

@@ -1513,7 +1513,21 @@ fn pathReset() void {
     path.y1 = -1e30;
 }
 
+/// 지금까지 낸 변환(q·Q·cm·폼 행렬)의 곱 — 장치 좌표계. 글자 항목의 자리를
+/// 장치 좌표로 내는 데 쓴다. 캔버스가 변환을 대신 해 주어 엔진은 여태 이걸
+/// 안 들고 있었는데, 그러면 `1 0 0 -1 0 h cm` 으로 뒤집어 그린 문서의 글자
+/// 자리가 거꾸로 나온다(korean.pdf 가 그 꼴).
+pub var dev: Mat = .{};
+var dev_stack: [64]Mat = undefined;
+var dev_n: u32 = 0;
+fn devTrack(code: f32, args: []const f32) void {
+    if (code == 14) { if (dev_n < dev_stack.len) { dev_stack[dev_n] = dev; dev_n += 1; } }
+    else if (code == 15) { if (dev_n > 0) { dev_n -= 1; dev = dev_stack[dev_n]; } }
+    else if (code == 16 and args.len >= 6) dev = matMul(.{ .a = args[0], .b = args[1], .c = args[2], .d = args[3], .e = args[4], .f = args[5] }, dev);
+}
+
 pub fn emitOp(code: f32, args: []const f32) void {
+    devTrack(code, args);
     if (emit_mute) return;
     const need: u32 = ops.n + 2 + @as(u32, @intCast(args.len));
     if (!ops.items.room(need)) return;
@@ -3095,6 +3109,8 @@ fn resetPage(w: f32, h: f32) void {
     img.used = 0;
     inl.used = 0;
     ops.n = 0;
+    dev = .{};
+    dev_n = 0;
     fontarea.n = 0;
     fontarea.used = 0;
     c2g.used = 0;
@@ -3832,9 +3848,13 @@ pub fn runOps(b: []const u8, depth: u32) void {
             runFlush();
             // 뽑아 둔 글자는 문자열 단위로 묶는다 — 나중에 본문 검색에 쓴다
             if (text.n > start_text and items.room(item_n + 1)) {
+                // 장치 좌표로 — 시작점·끝점을 변환하고 크기는 변환의 배율만큼
+                const p0 = matMul(.{ .e = x0, .f = y0 }, dev);
+                const p1 = matMul(.{ .e = tm.e, .f = tm.f }, dev);
+                const sc = @sqrt(@abs(dev.a * dev.d - dev.b * dev.c));
                 items.all()[item_n] = .{
-                    .x = x0, .y = y0, .size = tf_size,
-                    .w = @sqrt((tm.e - x0) * (tm.e - x0) + (tm.f - y0) * (tm.f - y0)),
+                    .x = p0.e, .y = p0.f, .size = tf_size * (if (sc > 0) sc else 1),
+                    .w = @sqrt((p1.e - p0.e) * (p1.e - p0.e) + (p1.f - p0.f) * (p1.f - p0.f)),
                     .off = start_text, .len = text.n - start_text,
                     // 어떤 글꼴로 그렸는지·세로쓰기인지도 함께 남긴다
                     .font = cur.font,

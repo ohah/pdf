@@ -14,8 +14,10 @@ export type PageMsg = {
     x: number; y: number; size: number; text: string;
     /** 문자열이 차지한 길이(pt). 다음 덩이와의 틈을 재서 띄어쓰기인지 자간인지 가른다 */
     w: number;
-    /** 이 덩이를 그린 글꼴 이름. 문서가 안 적어 두면 빈 문자열 */
+    /** 이 덩이를 그린 글꼴 이름(리소스 이름). 문서가 안 적어 두면 빈 문자열 */
     font: string;
+    /** 문서가 적은 글꼴 이름(/BaseFont). 굵기·고정폭이 이름에 드러난다 */
+    base: string;
     /** 쓰는 방향 — 세로쓰기면 "ttb", 아랍·히브리면 "rtl", 그 밖은 "ltr" */
     dir: "ltr" | "rtl" | "ttb";
   }[];

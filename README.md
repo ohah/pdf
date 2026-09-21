@@ -60,7 +60,8 @@ webkit 에 직접 물어봤다). 그것들은 이름을 보고 갈래(`serif`·`
 
 ## 무엇을 하나
 
-**읽기** — 쪽 그리기, 글자 뽑기(읽는 차례로 줄 세우기 포함), 링크, 목차,
+**읽기** — 쪽 그리기, 글자 뽑기(읽는 차례로 줄 세우기 포함), **Markdown 으로
+내기**(제목·문단·목록·코드·표 — LLM 에 먹이는 용도), 링크, 목차,
 문서 속성, 레이어(선택 콘텐츠) 켜고 끄기, 딸린 파일 꺼내기, 전자 서명 확인,
 암호 걸린 문서(RC4·AES-128·AES-256, 사용자·소유자 암호 모두).
 
@@ -174,8 +175,10 @@ await writeFile("1쪽.png", cv.toBuffer("image/png"));
 | `pdf.destinations` | 이름 목적지 — 목차·링크가 이름으로 가리키는 자리 |
 | `pdf.viewerPreferences` · `pdf.xmp` | 뷰어 설정 · XMP 원문 |
 | `pdf.render(page, canvas, opts)` | 쪽을 그린다. 글자 자리(`runs`)를 돌려주므로 투명 글자층을 직접 얹을 수 있다 |
-| `pdf.text(page)` | 쪽의 글자 |
-| `pdf.textItems(page)` | 덩이째 — 자리·크기·글꼴 이름·쓰는 방향·줄 끝 |
+| `pdf.text(page)` | 쪽의 글자 — 줄마다 한 줄. 조각 사이 틈으로 띄어쓰기를 정하고 합자를 푼다 |
+| `pdf.lines(page)` | 줄마다 자리·크기·글꼴·조각들 |
+| `pdf.markdown({ pages? })` | 문서를 Markdown 으로 — 제목 계층(크기·굵기·번호), 문단(하이픈 잇기), 목록, 코드(고정폭), 괘선 표, 머리말·꼬리말 버림, 두 단 순서. ML 없이 규칙만으로. `tests/md-bench.mjs` 로 정답과 맞댄다 |
+| `pdf.textItems(page)` | 덩이째 — 자리·크기·폭·글꼴 이름·쓰는 방향·줄 끝(장치 좌표) |
 | `pdf.structure(page?)` | 구조 나무(태그 PDF) — 제목·문단·표와 대체 글 |
 | `pdf.fields(page)` · `links(page)` | 입력 칸 · 링크 |
 | `pdf.annotations(page)` | 쪽에 달린 주석 전부 — 종류·글·쓴이·날짜·색·깃발 |

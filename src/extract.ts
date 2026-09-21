@@ -10,6 +10,8 @@ import { toLines, type TextRun } from "./draw.js";
 
 export type Piece = {
   x: number; y: number; size: number; w: number; text: string; font: string;
+  /** /BaseFont — 굵기·고정폭 판단에 쓴다 */
+  base: string;
   dir: "ltr" | "rtl" | "ttb";
 };
 
@@ -40,10 +42,41 @@ function spaced(prev: Piece, next: Piece): boolean {
   return /\s$/.test(prev.text) || /^\s/.test(next.text);
 }
 
+/**
+ * 한 줄의 조각들을 글로 잇는다 — 틈으로 띄어쓰기를 정한다.
+ *
+ * 줄 크기의 0.75 미만이면서 기준선보다 올라간 조각은 윗첨자(10^19), 내려간
+ * 조각은 아랫첨자(x_i)로 붙인다 — 흩어 놓으면 "19 20 2.3 · 10" 이 된다.
+ */
+export function joinPieces(ps: Piece[]): string {
+  if (!ps.length) return "";
+  // 줄의 기준 크기와 기준선(글자 수 가중 최빈)
+  const count = new Map<string, number>();
+  for (const p of ps) { const k = `${Math.round(p.size * 4)}|${Math.round(p.y * 2)}`; count.set(k, (count.get(k) ?? 0) + p.text.length); }
+  const [bk] = [...count.entries()].sort((a, b) => b[1] - a[1])[0];
+  const [bs, by] = bk.split("|").map(Number);
+  const size = bs / 4, base = by / 2;
+  let text = "";
+  for (let i = 0; i < ps.length; i++) {
+    const p = ps[i];
+    const small = p.size < size * 0.75 && p.text.trim();
+    const sup = small && p.y > base + size * 0.15;
+    const sub = small && p.y < base - size * 0.15;
+    if (sup || sub) {
+      const t = p.text.trim();
+      text = text.replace(/\s+$/, "") + (sup ? "^" : "_") + (t.length > 1 && !/^\d+$/.test(t) ? `{${t}}` : t);
+      continue;
+    }
+    if (i > 0 && spaced(ps[i - 1], p) && !/\s$/.test(text)) text += " ";
+    text += p.text;
+  }
+  return text.replace(/\s+/g, " ").trim();
+}
+
 /** 조각들을 줄로 묶어 글로 잇는다. pageH 는 쪽 높이(pt) — y 를 위 기준으로 뒤집는다 */
-export function linesOf(pieces: Piece[], pageH: number): Line[] {
+export function linesOf(pieces: Piece[], pageH: number, y0 = 0): Line[] {
   const runs: TextRun[] = pieces.map((p) => ({
-    x: p.x, y: pageH - p.y, w: p.w > 0 ? p.w : p.size * 0.5 * p.text.length, h: p.size,
+    x: p.x, y: y0 + pageH - p.y, w: p.w > 0 ? p.w : p.size * 0.5 * p.text.length, h: p.size,
     text: p.text, angle: p.dir === "ttb" ? Math.PI / 2 : 0,
   }));
   const byRun = new Map<TextRun, Piece>();
@@ -51,16 +84,11 @@ export function linesOf(pieces: Piece[], pageH: number): Line[] {
   const out: Line[] = [];
   for (const L of toLines(runs)) {
     const ps = L.map((r) => byRun.get(r)!);
-    let text = "";
-    for (let i = 0; i < ps.length; i++) {
-      if (i > 0 && spaced(ps[i - 1], ps[i]) && !/\s$/.test(text)) text += " ";
-      text += ps[i].text;
-    }
-    text = text.replace(/\s+/g, " ").trim();
+    const text = joinPieces(ps);
     if (!text) continue;
     // 가장 흔한 크기·글꼴
     const count = new Map<string, number>();
-    for (const p of ps) { const k = `${Math.round(p.size * 10)}|${p.font}`; count.set(k, (count.get(k) ?? 0) + p.text.length); }
+    for (const p of ps) { const k = `${Math.round(p.size * 10)}|${p.base || p.font}`; count.set(k, (count.get(k) ?? 0) + p.text.length); }
     const [best] = [...count.entries()].sort((a, b) => b[1] - a[1])[0];
     const [sz, font] = best.split("|");
     const x0 = Math.min(...L.map((r) => r.x));
@@ -74,6 +102,6 @@ export function linesOf(pieces: Piece[], pageH: number): Line[] {
 }
 
 /** 쪽의 글 — 줄마다 한 줄 */
-export function textOf(pieces: Piece[], pageH: number): string {
-  return linesOf(pieces, pageH).map((l) => l.text).join("\n");
+export function textOf(pieces: Piece[], pageH: number, y0 = 0): string {
+  return linesOf(pieces, pageH, y0).map((l) => l.text).join("\n");
 }

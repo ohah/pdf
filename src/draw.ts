@@ -983,6 +983,9 @@ function linesOf(list: TextRun[], ang: number): TextRun[][] {
     line.push(r);
   }
   if (line.length > 0) out.push(line);
+  // 한 줄 안은 나아가는 쪽 순서로 — 위 정렬은 y 가 먼저라 윗첨자(살짝 위)가
+  // 줄 맨 앞에 몰린다. "10^19" 가 "^19 10" 이 되던 자리다.
+  for (const l of out) l.sort((p, q) => along(p) - along(q));
   return out;
 }
 
