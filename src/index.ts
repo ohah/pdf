@@ -12,7 +12,7 @@ import { fontKey, loadBytes } from "./bytes.js";
 //   pdf.close();
 import { PDFClient, type PageMsg, type OpenMsg, type BuildSpec } from "./client.js";
 import { linesOf, textOf, type Line } from "./extract.js";
-import { rulesOf, toMarkdown, type PageForMd } from "./markdown.js";
+import { rulesOf, toMarkdown } from "./markdown.js";
 import { openRanged, fillRest, type Ranged } from "./range.js";
 import { drawOps, toLines, type TextRun } from "./draw.js";
 import { type Paths } from "./config.js";
@@ -23,6 +23,21 @@ import { makeViewport, type Viewport } from "./viewport.js";
 export type { Paths } from "./config.js";
 export type { BuildSpec, Mask, PageMsg } from "./client.js";
 export type { Line, Piece } from "./extract.js";
+export { linesOf, textOf } from "./extract.js";
+export { rulesOf, toMarkdown } from "./markdown.js";
+export type { PageForMd, Rule } from "./markdown.js";
+
+/**
+ * 이미 읽어 둔 쪽들(PageMsg — `PDFClient.page()` 가 준 것)로 Markdown 을 만든다.
+ * 워커 창구를 직접 쓰는 앱용이다. 가벼운 읽기(light)로 받은 쪽도 된다 —
+ * 글자와 그리기 명령만 있으면 충분하다.
+ */
+export function markdownOf(pages: Pick<PageMsg, "items" | "ops" | "w" | "h" | "y0">[]): string {
+  return toMarkdown(pages.map((q) => {
+    const { rules, boxes, marks } = rulesOf(q.ops, q.h, q.y0);
+    return { lines: linesOf(q.items, q.h, q.y0), w: q.w, h: q.h, rules, boxes, marks };
+  }));
+}
 export type { TextRun, Stencil } from "./draw.js";
 export type { SigCheck } from "./sig.js";
 export { checkSignature } from "./sig.js";
@@ -691,13 +706,9 @@ export class PDFDocument {
    */
   async markdown(opts: { pages?: number[] } = {}): Promise<string> {
     const want = opts.pages ?? Array.from({ length: this.pages }, (_, i) => i + 1);
-    const pages: PageForMd[] = [];
-    for (const n of want) {
-      const q = await this.get(n, false);
-      const { rules, boxes, marks } = rulesOf(q.ops, q.h, q.y0);
-      pages.push({ lines: linesOf(q.items, q.h, q.y0), w: q.w, h: q.h, rules, boxes, marks });
-    }
-    return toMarkdown(pages);
+    const pages = [];
+    for (const n of want) pages.push(await this.get(n, false));
+    return markdownOf(pages);
   }
 
   /** 쪽 하나의 입력 칸 */
