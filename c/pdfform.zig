@@ -856,7 +856,10 @@ pub fn streamOf(b: []const u8, num: u32) ?[]const u8 {
 
 /// 객체 몸통 자리를 알 때 쓰는 판. 번호를 모르는 자리에서도 스트림을 편다.
 pub fn streamFrom(b: []const u8, body: usize) ?[]const u8 {
-    const sp = core.find(b, "stream", body) orelse return null;
+    // 이 객체 안에서만 — 끝까지 찾으면 스트림 없는 객체에 딴 객체의 스트림을
+    // 돌려주고, 큰 파일에선 객체마다 파일을 통째로 훑는다
+    const e = core.find(b, "endobj", body) orelse b.len;
+    const sp = core.find(b[0..e], "stream", body) orelse return null;
     // 길이를 못 읽어도 포기하지 않는다 — endstream 이 어디 있는지는 보인다
     const raw_len = core.lengthOf(b, body, sp) orelse 0;
     var data = sp + 6;

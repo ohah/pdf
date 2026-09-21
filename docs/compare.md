@@ -113,7 +113,7 @@ pdf.js **6.3.289** 의 공개 API 를 타입 정의에서 그대로 뽑아 하�
 
 | | 우리(규칙, wasm 323KB) | docling(ML, Python) | pymupdf4llm(Python) |
 |---|---|---|---|
-| 맞힌 정답 | **102/102** | 95/102 | 51/102 |
+| 맞힌 정답 | **111/111** (docling·pymupdf4llm 은 102개 기준 95·51) | 95/102 | 51/102 |
 | attention 15쪽 | 150ms | 60s | — |
 | 못 하는 것 | 괘선 없는 표·그림 캡션 경계 | 줄 끝 하이픈("Englishto-German"), booktabs 표 | 절 제목 0개, 수식을 제목으로 |
 

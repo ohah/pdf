@@ -822,8 +822,11 @@ pub fn annotsRange(b: []const u8, body: usize, end: usize) ?struct { s: usize, e
 /// "stream" 을 그냥 앞에서부터 찾으면 그 객체에 스트림이 없을 때 다음 객체의
 /// 것을 집어, 남의 /ShadingType·/PatternType 을 제 것으로 읽는다.
 pub fn objDictEnd(b: []const u8, ob: usize) usize {
+    // endobj 를 먼저 찾고 그 안에서만 stream 을 찾는다. 예전엔 stream 을
+    // 파일 끝까지 찾았는데, 펼쳐 둔 객체 스트림 영역엔 stream 이 없어 객체마다
+    // 수 MB 를 훑었다 — 756쪽 규격서를 여는 데 56초가 걸린 자리.
     const e1 = find(b, "endobj", ob) orelse b.len;
-    const e2 = find(b, "stream", ob) orelse b.len;
+    const e2 = find(b[0..e1], "stream", ob) orelse e1;
     return @min(e1, e2);
 }
 
@@ -1374,7 +1377,9 @@ export fn apply() usize { return pdfapply.apply(); }
 // 세로쓰기를 알아보는 데 쓴다.
 /// w — 문자열이 차지한 길이(시작점에서 끝점까지). 조각 사이가 띄어쓰기인지
 /// 자간인지는 이 끝점이 있어야 안다 — 없으면 "Pro vided" 처럼 낱말이 갈라진다.
-const Item = struct { x: f32, y: f32, size: f32, off: u32, len: u32, font: i32 = -1, vert: bool = false, w: f32 = 0 };
+/// ang — 글이 나아가는 방향(라디안, 장치 좌표). 0 이 보통 가로. arXiv 스탬프처럼
+/// 옆으로 누운 글은 ±π/2 — 본문에 섞이면 안 된다.
+const Item = struct { x: f32, y: f32, size: f32, off: u32, len: u32, font: i32 = -1, vert: bool = false, w: f32 = 0, ang: f32 = 0 };
 /// 글자 조각. 필요한 만큼 늘어난다(세는 상한 없음).
 var items: Table(Item, 4096) = .{};
 var item_n: u32 = 0;
@@ -1477,6 +1482,20 @@ fn putText(uni: u32) void {
         else => null,
     };
     if (lig) |l| { for (l) |ch| putUtf8(ch); } else putUtf8(uni);
+}
+
+/// atan2 — std 없이. 정확도는 1e-4 면 넉넉하다(가로냐 누웠냐만 본다).
+fn atan2f(y: f32, x: f32) f32 {
+    if (x == 0 and y == 0) return 0;
+    const ax = @abs(x);
+    const ay = @abs(y);
+    const a = @min(ax, ay) / @max(ax, ay);
+    const s = a * a;
+    var r = ((-0.0464964749 * s + 0.15931422) * s - 0.327622764) * s * a + a;
+    if (ay > ax) r = 1.57079637 - r;
+    if (x < 0) r = 3.14159274 - r;
+    if (y < 0) r = -r;
+    return r;
 }
 
 fn runFlush() void {
@@ -2800,6 +2819,7 @@ export fn itemX(i: u32) f32 { return items.all()[i].x; }
 export fn itemY(i: u32) f32 { return items.all()[i].y; }
 export fn itemSize(i: u32) f32 { return items.all()[i].size; }
 export fn itemWidth(i: u32) f32 { return if (i < item_n) items.all()[i].w else 0; }
+export fn itemAngle(i: u32) f32 { return if (i < item_n) items.all()[i].ang else 0; }
 export fn itemOff(i: u32) u32 { return items.all()[i].off; }
 /// 이 항목을 그린 글꼴 번호(1부터, 없으면 0). 이름은 fontNamePtr 로 읽는다.
 export fn itemFont(i: u32) u32 {
@@ -3882,8 +3902,11 @@ pub fn runOps(b: []const u8, depth: u32) void {
                 const p0 = matMul(.{ .e = x0, .f = y0 }, dev);
                 const p1 = matMul(.{ .e = tm.e, .f = tm.f }, dev);
                 const sc = @sqrt(@abs(dev.a * dev.d - dev.b * dev.c));
+                // 나아가는 방향 — 텍스트 행렬의 x 축을 장치 좌표로 옮긴 각
+                const dm = matMul(tm, dev);
                 items.all()[item_n] = .{
                     .x = p0.e, .y = p0.f, .size = tf_size * (if (sc > 0) sc else 1),
+                    .ang = atan2f(dm.b, dm.a),
                     .w = @sqrt((p1.e - p0.e) * (p1.e - p0.e) + (p1.f - p0.f) * (p1.f - p0.f)),
                     .off = start_text, .len = text.n - start_text,
                     // 어떤 글꼴로 그렸는지·세로쓰기인지도 함께 남긴다
@@ -5996,8 +6019,9 @@ fn decryptAllStreams(b: []u8) void {
         if (num == encr.obj) continue;
         const body = objOff()[num];
         const e = find(b, "endobj", body) orelse b.len;
-        const sp2 = find(b, "stream", body) orelse continue;
-        if (sp2 > e) continue;
+        // stream 은 이 객체 안에서만 찾는다 — 끝까지 찾으면 스트림 없는 객체마다
+        // 파일을 통째로 훑어 암호 문서 여는 데 객체 수 × 파일 크기가 든다
+        const sp2 = find(b[0..e], "stream", body) orelse continue;
         // XRef 스트림은 잠기지 않는다
         if (find(b[body..sp2], "/XRef", 0) != null) continue;
         const raw_len2 = lengthOf(b, body, sp2) orelse 0;

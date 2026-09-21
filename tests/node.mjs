@@ -185,6 +185,25 @@ const t = (name, cond, got) => {
   d2.close();
 }
 
+// 큰 암호 문서 여는 시간 — 객체 수에 비례해야 한다.
+//
+// 스트림을 풀 때 객체마다 "stream" 을 파일 끝까지 찾아, 스트림 없는 객체가
+// 앞에 몰리면 객체 수 × 파일 크기가 들었다 — 756쪽 PDF 규격서 56초
+// (pdf.js 46ms). 객체 3만 개 + 3MB 스트림: 고치기 전 2,664ms, 뒤 82ms(CPU).
+// 벽시계가 아니라 CPU 시간으로 잰다 — 기계가 바쁠 때 헛되이 빨간불이 안 뜨게.
+{
+  const { execFileSync } = await import("node:child_process");
+  execFileSync("node", ["tests/mkencmany.mjs", FX, "30000", ".enc-many.pdf"]);
+  const c0 = process.cpuUsage();
+  const d = await PDFDocument.open(`${FX}/.enc-many.pdf`);
+  const cpu = process.cpuUsage(c0);
+  const ms = (cpu.user + cpu.system) / 1000;
+  t("큰 암호 문서를 여는 데 객체 수 × 파일 크기가 안 든다", ms < 600, `${Math.round(ms)}ms`);
+  t("암호 문서의 글자가 풀린다", (await d.text(1)) === "many objects", await d.text(1));
+  d.close();
+  fs.unlinkSync(`${FX}/.enc-many.pdf`); // 6MB — 손자국·다른 시험이 줍지 않게 치운다
+}
+
 // PDF → Markdown — 제목 계층·문단·하이픈·목록·코드·괘선 표·머리말·꼬리말·두 단.
 // 규칙마다 견본 한 자리씩. 진짜 문서로는 tests/md-bench.mjs 가 정답과 맞댄다
 // (attention·bitcoin·vit·w9·korean 90/90, pymupdf4llm 44/90).
@@ -203,6 +222,7 @@ const t = (name, cond, got) => {
   t("md: 두 단은 왼쪽 단을 다 읽고 오른쪽", /Left line 6 of the column text here\n\nRight line 1/.test(md), md.slice(-400));
   t("md: 굵은 글머리 문장은 목록", md.includes("- Bold summary sentence that is not a heading") && !md.includes("# \u2022"), md.slice(-500));
   t("md: 색 띠 위 제목은 그림이 아니다", md.includes("# 4 Heading On A Bar"), md.slice(-300));
+  t("md: 옆으로 누운 스탬프는 뺀다", !md.includes("SIDEWAYS"), md);
   d.close();
 }
 

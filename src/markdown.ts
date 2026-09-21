@@ -37,7 +37,8 @@ const BOLD = /bold|black|heavy|semibold|demibold|-bd\b|medi\b|cmbx|\bbd\b/i;
 const NUMBERED = /^(\d+(\.\d+)*)\.?\s+\S/;
 // 글머리: 기호, 번호, 그리고 Wingdings·Symbol 글꼴의 사용자 영역(PUA) 글자 —
 // 한국어 보고서의 요약 문장이 그 꼴이다
-const BULLET = /^([•·▪‣◦■□▶►◆◇○●※\-–—*]|[\uE000-\uF8FF]|[\u2700-\u27BF]|\d+[.)]|\(?[a-zA-Z0-9][.)]|[ivxIVX]+[.)])\s*/;
+// 글자 글머리는 소문자만 — "Y. Bengio" 처럼 이름 머리글자로 시작하는 줄(참고문헌)은 목록이 아니다
+const BULLET = /^([•·▪‣◦■□▶►◆◇○●※\-–—*]|[\uE000-\uF8FF]|[\u2700-\u27BF]|\d+[.)]|\(?[a-z][.)]|\(?[ivx]+[.)])\s*/;
 // 기호 글머리 — 굵거나 커도 제목이 아니라 목록이다(보고서의 요약 문장)
 const SYMBOL_BULLET = /^([•·▪‣◦■□▶►◆◇○●※\-–—*]|[\uE000-\uF8FF]|[\u2700-\u27BF])\s*/;
 
@@ -326,7 +327,7 @@ export function toMarkdown(pages: PageForMd[]): string {
   const hyph = hyphenatedWords(pages);
   // 제목 크기 순위 — 본문보다 큰 크기들
   const sizes = new Map<number, number>();
-  for (const p of pages) for (const l of p.lines) if (!drop.has(l) && l.size > body * 1.15 && l.text.length <= 120) {
+  for (const p of pages) for (const l of p.lines) if (!drop.has(l) && Math.abs(l.angle) <= 0.1 && l.size > body * 1.15 && l.text.length <= 120) {
     const k = Math.round(l.size * 2) / 2; sizes.set(k, (sizes.get(k) ?? 0) + 1);
   }
   const ranks = [...sizes.keys()].sort((a, b) => b - a).slice(0, 3);
@@ -335,6 +336,9 @@ export function toMarkdown(pages: PageForMd[]): string {
   for (const page of pages) {
     const used = new Set<Line>(drop);
     const tables = tablesOf(page, used);
+    const rotatedChars = page.lines.reduce((a, l) => a + (Math.abs(l.angle) > 0.1 ? l.text.length : 0), 0);
+    const allChars = page.lines.reduce((a, l) => a + l.text.length, 0);
+    const mostlyRotated = allChars > 0 && rotatedChars > allChars * 0.5;
     // 그림 구역 — 도형·그림 상자와 겹치는 짧은 줄
     const fig = new Set<Line>();
     for (const l of page.lines) if (!drop.has(l) && inFigure(page, l)) fig.add(l);
@@ -351,6 +355,8 @@ export function toMarkdown(pages: PageForMd[]): string {
     let ti = 0;
     for (const l0 of page.lines) {
       if (drop.has(l0)) continue;
+      // 옆으로 누운 줄(arXiv 스탬프·워터마크)은 본문이 아니다 — 쪽 대부분이 누웠으면 그 쪽이 가로 쪽인 것이라 둔다
+      if (Math.abs(l0.angle) > 0.1 && !mostlyRotated) continue;
       // 각주 표시(작고 기호뿐인 조각 ∗ † ‡)는 뺀다 — "∗ ∗ Ashish" 가 아니라 "Ashish".
       // 숫자·글자 윗첨자는 joinPieces 가 ^ 로 붙인다.
       const mark = (p: { size: number; text: string }) => p.size < l0.size * 0.75 && !/[\p{L}\p{N}]/u.test(p.text);

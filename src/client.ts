@@ -14,6 +14,8 @@ export type PageMsg = {
     x: number; y: number; size: number; text: string;
     /** 문자열이 차지한 길이(pt). 다음 덩이와의 틈을 재서 띄어쓰기인지 자간인지 가른다 */
     w: number;
+    /** 글이 나아가는 방향(라디안). 0 이 보통 가로, ±π/2 는 옆으로 누운 글(arXiv 스탬프) */
+    ang: number;
     /** 이 덩이를 그린 글꼴 이름(리소스 이름). 문서가 안 적어 두면 빈 문자열 */
     font: string;
     /** 문서가 적은 글꼴 이름(/BaseFont). 굵기·고정폭이 이름에 드러난다 */

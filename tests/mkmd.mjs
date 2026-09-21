@@ -36,6 +36,8 @@ const p1 = [
   T('R', 10, 72, 504, '\\225 second item that wraps'),
   T('R', 10, 84, 492, 'onto another line'),
   T('R', 10, 72, 480, '\\225 third item'),
+  // 옆으로 누운 스탬프(arXiv 꼴) — 크고 굵어도 본문·제목이 아니다
+  'BT 0 1 -1 0 30 300 Tm /B 20 Tf (SIDEWAYS STAMP) Tj ET',
 ].join('\n');
 // 2쪽 — 코드·괘선 표
 const p2 = [

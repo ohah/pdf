@@ -204,5 +204,27 @@
       "en-US",
       "ࢊ본"
     ]
+  },
+  "resnet.pdf": {
+    "heading": [
+      "Abstract",
+      "1. Introduction",
+      "2. Related Work",
+      "3. Deep Residual Learning",
+      "3.1. Residual Learning",
+      "4. Experiments"
+    ],
+    "notheading": [
+      "arXiv:1512.03385v1"
+    ],
+    "text": [
+      "Deeper neural networks are more difficult to train"
+    ],
+    "order": [
+      [
+        "1. Introduction",
+        "2. Related Work"
+      ]
+    ]
   }
 }

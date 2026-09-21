@@ -10,6 +10,8 @@ import { toLines, type TextRun } from "./draw.js";
 
 export type Piece = {
   x: number; y: number; size: number; w: number; text: string; font: string;
+  /** 나아가는 방향(라디안). 없으면 0 */
+  ang?: number;
   /** /BaseFont — 굵기·고정폭 판단에 쓴다 */
   base: string;
   dir: "ltr" | "rtl" | "ttb";
@@ -18,6 +20,8 @@ export type Piece = {
 /** 한 줄 — 조각들과 이어 붙인 글 */
 export type Line = {
   text: string;
+  /** 줄의 방향(라디안, 위 기준). 0 이 보통 가로 */
+  angle: number;
   /** 줄의 자리(pt, 위가 0). 제목·문단 가르기에 쓴다 */
   x: number; y: number; w: number;
   /** 줄에서 가장 흔한 글자 크기와 글꼴 */
@@ -75,9 +79,10 @@ export function joinPieces(ps: Piece[]): string {
 
 /** 조각들을 줄로 묶어 글로 잇는다. pageH 는 쪽 높이(pt) — y 를 위 기준으로 뒤집는다 */
 export function linesOf(pieces: Piece[], pageH: number, y0 = 0): Line[] {
+  // 위 기준(y 아래로)으로 뒤집으므로 각도도 부호가 뒤집힌다
   const runs: TextRun[] = pieces.map((p) => ({
     x: p.x, y: y0 + pageH - p.y, w: p.w > 0 ? p.w : p.size * 0.5 * p.text.length, h: p.size,
-    text: p.text, angle: p.dir === "ttb" ? Math.PI / 2 : 0,
+    text: p.text, angle: p.dir === "ttb" ? Math.PI / 2 : -(p.ang ?? 0),
   }));
   const byRun = new Map<TextRun, Piece>();
   runs.forEach((r, i) => byRun.set(r, pieces[i]));
@@ -94,7 +99,7 @@ export function linesOf(pieces: Piece[], pageH: number, y0 = 0): Line[] {
     const x0 = Math.min(...L.map((r) => r.x));
     const x1 = Math.max(...L.map((r) => r.x + r.w));
     out.push({
-      text, x: x0, y: Math.min(...L.map((r) => r.y)), w: x1 - x0,
+      text, angle: L[0].angle, x: x0, y: Math.min(...L.map((r) => r.y)), w: x1 - x0,
       size: Number(sz) / 10, font, pieces: ps,
     });
   }
