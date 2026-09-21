@@ -1003,7 +1003,9 @@ function byColumn(runs: TextRun[]): TextRun[][] | null {
   const extent = x1 - x0;
   if (extent < 40) return null;
   const h = mid(runs.map((r) => r.h));
-  const least = Math.max(h * 1.5, extent * 0.025);
+  // 골은 글자 높이만큼만 넓어도 된다 — 학술지 두 단 골이 12pt 쯤이다. 낱말 사이(3~5pt)
+  // 는 줄마다 자리가 달라 여러 줄에 걸쳐 비지 않는다
+  const least = Math.max(h * 0.9, extent * 0.015);
   // x 를 2pt 칸으로 나눠 칸마다 걸친 글자 덩이 수를 센다. 제목·초록처럼 두 단에
   // 걸친 줄이 몇 있어도(10% 이하) 골을 찾을 수 있게 — 예전엔 하나만 걸쳐도
   // 단이 없다고 봐서 "1 Introduction" 과 오른쪽 단 본문이 한 줄로 붙었다.
