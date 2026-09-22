@@ -19,8 +19,10 @@ const pdfenc = @import("pdfenc.zig");
 // 외곽선을 바로 해석해 그린다 — 그리기 명령을 이미 갖고 있어 훨씬 짧다.
 
 const T1Range = struct { off: u32, len: u32 };
-/// 글꼴마다 768 칸(코드 256 + Subrs 512). 예전에는 8192 로 못박혀 한 쪽에 Type1 글꼴이
-/// 열 개 넘으면(pdfTeX 논문의 그림 쪽) 그 뒤 글꼴은 조용히 빠졌다 — 필요한 만큼 늘린다
+/// 글꼴마다 코드 256 칸 + Subrs 칸(글꼴이 적은 수만큼). 예전에는 8192 로 못박혀 한 쪽에
+/// Type1 글꼴이 열 개 넘으면(pdfTeX 논문의 그림 쪽) 그 뒤 글꼴은 조용히 빠졌다 — 필요한
+/// 만큼 늘린다. Subrs 도 512 로 못박았더니 TeX Gyre Termes(1441 개)의 글리프 대부분이
+/// 힌트 서브루틴을 못 불러 비었다 — 본문이 대체 글꼴로, 일부 글자만 굵게 나왔다
 var t1_pool_t: root.Table(T1Range, 8192) = .{};
 var t1_pool_n: u32 = 0;
 /// 쪽을 새로 그릴 때 글꼴과 함께 비운다
@@ -155,6 +157,48 @@ fn t1Entry(d: []const u8, p: *usize) ?struct { name: []const u8, off: usize, len
     return .{ .name = d[ns..nq], .off = i, .len = len };
 }
 
+/// PDF 글꼴 사전의 /Encoding /Differences 를 코드→이름 표에 얹는다.
+/// reset 이면 표를 비우고 시작한다 — 맨 CFF(FontFile3) 글꼴이 /Differences 의
+/// 이름(g7267 같은 제 이름)으로 글리프를 고를 때 쓴다. 유니코드에서 이름을 되짚어선
+/// 그런 이름을 못 맞춰 글꼴을 통째로 못 실었다(한글 보고서 kr05 의 열다섯 글꼴 전부)
+pub fn loadDifferences(b: []const u8, fbody: usize, fend: usize, reset: bool) void {
+    if (reset) { @memset(&enc_len, 0); enc_buf_n = 0; }
+    var es2 = fbody;
+    var ee2 = fend;
+    if (root.find(b[fbody..fend], "/Encoding", 0)) |ea| {
+        var q = fbody + ea + 9;
+        while (q < fend and root.isSpace(b[q])) q += 1;
+        if (q < fend and b[q] == '<') { es2 = q; ee2 = pdfenc.dictEnd(b, q, fend); }
+        else if (q < fend and root.isDigit(b[q])) {
+            const n2 = root.readUint(b, &q);
+            if (root.findObj(b, n2)) |eb| { es2 = eb; ee2 = root.find(b, "endobj", eb) orelse b.len; }
+        }
+    }
+    if (root.find(b[es2..ee2], "/Differences", 0)) |da| {
+        var q = es2 + da + 12;
+        while (q < ee2 and b[q] != '[') q += 1;
+        q += 1;
+        var code: u32 = 0;
+        while (q < ee2 and b[q] != ']') {
+            while (q < ee2 and root.isSpace(b[q])) q += 1;
+            if (q >= ee2 or b[q] == ']') break;
+            if (root.isDigit(b[q])) { code = root.readUint(b, &q); continue; }
+            if (b[q] != '/') { q += 1; continue; }
+            const ns = q + 1;
+            var nq = ns;
+            while (nq < ee2 and !root.isSpace(b[nq]) and b[nq] != '/' and b[nq] != ']') nq += 1;
+            encSet(code, b[ns..nq]);
+            code += 1;
+            q = nq;
+        }
+    }
+}
+
+/// 코드에 /Differences 가 준 이름. 없으면 빈 조각
+pub fn diffName(code: u32) []const u8 {
+    return if (code < 256) encGet(code) else "";
+}
+
 /// Type1 프로그램을 읽어 글리프 프로그램을 풀어 둔다.
 pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) void {
     if (root.fontarea.n == 0 or root.t1Area() == 0) return;
@@ -228,37 +272,7 @@ pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) v
         }
     }
     // PDF 쪽 Differences 가 있으면 덮어쓴다
-    {
-        var es2 = fbody;
-        var ee2 = fend;
-        if (root.find(b[fbody..fend], "/Encoding", 0)) |ea| {
-            var q = fbody + ea + 9;
-            while (q < fend and root.isSpace(b[q])) q += 1;
-            if (q < fend and b[q] == '<') { es2 = q; ee2 = pdfenc.dictEnd(b, q, fend); }
-            else if (q < fend and root.isDigit(b[q])) {
-                const n2 = root.readUint(b, &q);
-                if (root.findObj(b, n2)) |eb| { es2 = eb; ee2 = root.find(b, "endobj", eb) orelse b.len; }
-            }
-        }
-        if (root.find(b[es2..ee2], "/Differences", 0)) |da| {
-            var q = es2 + da + 12;
-            while (q < ee2 and b[q] != '[') q += 1;
-            q += 1;
-            var code: u32 = 0;
-            while (q < ee2 and b[q] != ']') {
-                while (q < ee2 and root.isSpace(b[q])) q += 1;
-                if (q >= ee2 or b[q] == ']') break;
-                if (root.isDigit(b[q])) { code = root.readUint(b, &q); continue; }
-                if (b[q] != '/') { q += 1; continue; }
-                const ns = q + 1;
-                var nq = ns;
-                while (nq < ee2 and !root.isSpace(b[nq]) and b[nq] != '/' and b[nq] != ']') nq += 1;
-                encSet(code, b[ns..nq]);
-                code += 1;
-                q = nq;
-            }
-        }
-    }
+    loadDifferences(b, fbody, fend, false);
 
     // 내장 인코딩의 이름으로 코드→글자 표를 채운다. ToUnicode 가 없고 PDF 의
     // /Differences 도 그 코드를 안 정했을 때만 — TeX 글꼴(fi 가 12번)처럼
@@ -289,13 +303,24 @@ pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) v
     // 글리프 프로그램을 풀 자리
     var w_at: u32 = dec_at + dn;
     if (w_at + 4096 > area.len) return;
-    if (!t1_pool_t.room(t1_pool_n + 256 + 512)) return;
-    f.t1_cs = @intCast(t1_pool_n);
+    // Subrs 수를 먼저 센다 — 칸을 그만큼 잡는다
+    var sub_cnt: u32 = 0;
+    var sub_q: usize = 0;
+    if (root.findIn(priv, "/Subrs", 0)) |sa| {
+        var q = sa + 6;
+        while (q < priv.len and root.isSpace(priv[q])) q += 1;
+        if (q < priv.len and root.isDigit(priv[q])) sub_cnt = @min(root.readUint(priv, &q), 8192);
+        sub_q = q;
+    }
+    if (!t1_pool_t.room(t1_pool_n + 256 + sub_cnt)) return;
+    f.t1_cs = t1_pool_n;
     var i: u32 = 0;
     while (i < 256) : (i += 1) poolSet(t1_pool_n + i, .{ .off = 0, .len = 0 });
     t1_pool_n += 256;
-    f.t1_sub = @intCast(t1_pool_n);
+    f.t1_sub = t1_pool_n;
     f.t1_sub_n = 0;
+    i = 0;
+    while (i < sub_cnt) : (i += 1) poolSet(t1_pool_n + i, .{ .off = 0, .len = 0 });
     @memset(&f.t1_std, 0);
 
     const stash = struct {
@@ -313,12 +338,11 @@ pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) v
     }.go;
 
     // Subrs
-    if (root.findIn(priv, "/Subrs", 0)) |sa| {
-        var q = sa + 6;
-        while (q < priv.len and root.isSpace(priv[q])) q += 1;
-        const cnt = if (q < priv.len and root.isDigit(priv[q])) root.readUint(priv, &q) else 0;
+    if (sub_cnt > 0) {
+        var q = sub_q;
+        const cnt = sub_cnt;
         var k: u32 = 0;
-        while (k < cnt and k < 512) : (k += 1) {
+        while (k < cnt) : (k += 1) {
             const at = root.findIn(priv, "dup ", q) orelse break;
             var r = at + 4;
             while (r < priv.len and root.isSpace(priv[r])) r += 1;
@@ -331,17 +355,15 @@ pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) v
             while (r < priv.len and !root.isSpace(priv[r])) r += 1;
             r += 1;
             if (r + len > priv.len) break;
-            if (idx < 512) {
+            if (idx < cnt) {
                 const rr = stash(area, &w_at, priv[r .. r + len], leniv);
                 poolSet(f.t1_sub + idx, rr);
-                if (idx + 1 > f.t1_sub_n) f.t1_sub_n = @intCast(idx + 1);
+                if (idx + 1 > f.t1_sub_n) f.t1_sub_n = idx + 1;
             }
             q = r + len;
         }
-        t1_pool_n += 512;
-    } else {
-        t1_pool_n += 512;
     }
+    t1_pool_n += sub_cnt;
 
     // CharStrings — 코드에 이름이 맞는 것만 담는다
     var got: u32 = 0;

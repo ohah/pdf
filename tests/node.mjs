@@ -418,7 +418,7 @@ const t = (name, cond, got) => {
       // 단언이 없어, 변환식을 고장 내도(k 를 0.9 배) 통과했다. 그림 맞대기는
       // 잡지만 그건 검증 실행기에서만 돈다.
       const cki = await px("img-cmyk.pdf", 60, 15);
-      t("CMYK 그림", near(cki, [43, 46, 52], 6), cki.join(","));
+      t("CMYK 그림", near(cki, [34, 31, 32], 6), cki.join(","));
       // CMYK *채우기*(k 연산자)는 견본이 하나도 없었다 — 고장 내기로 알았다.
       // cmykRgb 의 계수를 바꿔도 아무도 그 길을 안 밟아 통과했다.
       //
@@ -429,7 +429,8 @@ const t = (name, cond, got) => {
       const cf2 = await px("v-cmyk-fill.pdf", 145, 80);   // 검정
       const cf3 = await px("v-cmyk-fill.pdf", 50, 130);   // 섞은 색
       t("CMYK 채우기 — 시안", near(cf1, [0, 185, 242], 4), cf1.join(","));
-      t("CMYK 채우기 — 검정", near(cf2, [44, 46, 53], 4), cf2.join(","));
+      // 순검정(K=1)은 요즘 pdf.js(qcms+SWOP)·mupdf 가 내는 (35,31,32) 에 맞춘다
+      t("CMYK 채우기 — 검정", near(cf2, [35, 31, 32], 4), cf2.join(","));
       t("CMYK 채우기 — 섞은 색", near(cf3, [194, 145, 103], 4), cf3.join(","));
 
       const s1 = await px("t-sep.pdf", 50, 50);
@@ -595,10 +596,39 @@ const t = (name, cond, got) => {
       // 시험이 네온값을 지키고 있어서 결함이 통과로 굳어 있었다.
       const plain = await pick("img-cmyk");
       t("CMYK 그림: 시안이 인쇄한 시안 색이다", near(plain[0], [0, 184, 241], 10), plain[0]);
-      t("CMYK 그림: 검정이 인쇄한 검정 색이다", near(plain[3], [43, 46, 52], 10), plain[3]);
+      t("CMYK 그림: 검정이 인쇄한 검정 색이다", near(plain[3], [34, 31, 32], 10), plain[3]);
       const iccImg = await pick("img-icc");
       t("CMYK 그림 + ICC: 마젠타", near(iccImg[1], [215, 21, 126], 10), iccImg[1]);
       t("CMYK 그림 + ICC: 검정", near(iccImg[3], [26, 26, 26], 10), iccImg[3]);
+
+      // 실문서 100편 그리기 맞대기(tests/mkrender.mjs)에서 잡은 것들 — 200×200 쪽, PDF 좌표
+      const at = async (name, pts) => {
+        const d6 = await PDFDocument.open(`${FX}/${name}`);
+        const c6 = createCanvas(10, 10);
+        await d6.render(1, c6, { scale: 1, dpr: 1 });
+        const g6 = c6.getContext("2d").getImageData(0, 0, c6.width, c6.height).data;
+        const out = pts.map(([x, y]) => { const i = ((200 - y) * c6.width + x) * 4; return [g6[i], g6[i + 1], g6[i + 2]]; });
+        d6.close();
+        return out;
+      };
+      const [gr] = await at("groupref.pdf", [[100, 100]]);
+      t("폼의 /Group 이 딴 객체여도 투명 그룹 — 바깥 ca 0 이 먹는다", near(gr, [255, 255, 255], 2), gr.join(","));
+      const [fi] = await at("formimg.pdf", [[100, 100]]);
+      t("폼 안의 같은 이름 그림이 폼 자신보다 먼저", near(fi, [0, 0, 255], 2), fi.join(","));
+      const [dv0, dv1] = await at("devnsh.pdf", [[25, 100], [175, 100]]);
+      t("DeviceN 셰이딩(빈칸 없는 배열)이 시안→마젠타", near(dv0, [0, 182, 239], 12) && near(dv1, [245, 54, 156], 12), `${dv0} / ${dv1}`);
+      const [pb0, pb1] = await at("patbase.pdf", [[60, 100], [140, 100]]);
+      t("타일 무늬는 cm 이 아니라 쪽 기본 좌표계 기준", near(pb0, [255, 0, 0], 2) && near(pb1, [0, 0, 255], 2), `${pb0} / ${pb1}`);
+      const [r4a, r4b] = await at("rgb4.pdf", [[100, 160], [100, 40]]);
+      t("4비트 RGB + 예측기(DecodeParms 에 BPC 없음)", near(r4a, [255, 0, 0], 2) && near(r4b, [0, 0, 255], 2), `${r4a} / ${r4b}`);
+      const [sp1] = await at("sepimg.pdf", [[100, 100]]);
+      t("Separation 흑백 그림은 잉크 함수를 탄다(인쇄 검정)", near(sp1, [35, 31, 32], 4), sp1.join(","));
+      const [ix1] = await at("idxcmyk.pdf", [[100, 100]]);
+      t("Indexed /DeviceCMYK 팔레트는 칸이 4바이트", near(ix1, [35, 31, 32], 4), ix1.join(","));
+      const fw = await PDFDocument.open(`${FX}/fracw.pdf`);
+      const fwq = await fw.get(1, false);
+      t("/Widths 의 소수를 버리지 않는다", Math.abs(fwq.items[0].w - 55.56) < 0.01, fwq.items[0].w);
+      fw.close();
     }
   }
 }

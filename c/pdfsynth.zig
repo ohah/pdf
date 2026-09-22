@@ -157,9 +157,23 @@ pub fn patchFont(src: []const u8, f: *core.FontMap, dst: []u8) u32 {
         // 어긋나므로 같이 뺀다
         if (tt == 0x47535542 or tt == 0x47504F53 or tt == 0x47444546 or tt == 0x6B65726E or
             tt == 0x6D6F7278 or tt == 0x42415345 or tt == 0x4A535446 or tt == 0x66656174) continue;
+        // 박힌 비트맵(EBDT·EBLC·EBSC)도 뺀다. 부분집합이 색인만 남기고 그림은 비워 두면
+        // 브라우저가 작은 글자에서 외곽선 대신 빈 비트맵을 골라 n·m 이 통째로 사라졌다
+        // (Word 가 낸 Cambria 논문)
+        if (tt == 0x45424454 or tt == 0x45424C43 or tt == 0x45425343) continue;
         const off = core.be32(src, r + 8);
         const ln = core.be32(src, r + 12);
-        if (off > src.len or ln > src.len - off) return 0;
+        // 표 목록에 쓰레기 칸이 섞인 글꼴(HWP 가 낸 NanumSquare: numTables 9 에 진짜는 6)은
+        // 그 칸만 버린다 — 통째로 포기하면 원본을 그대로 실어 브라우저가 거절한다
+        if (off > src.len or ln > src.len - off) continue;
+        // post 는 늘 우리가 짓는다(형식 3). 원본의 형식 2 post 가 글리프 수와 안 맞으면
+        // (수원시 보고서의 683KB post) 브라우저가 글꼴을 거절한다
+        if (tt == 0x706F7374) continue;
+        // 길이 0 인 표(RFC 9110 의 name·OS/2·cvt)는 없는 것이다 — 그대로 두면 브라우저
+        // (OTS)가 "zero-length table" 로 글꼴을 거절해 Courier 로 떨어진다. 빼고, 있어야
+        // 하는 것은 아래서 지어 넣는다
+        if (ln == 0) continue;
+        if (ln < 6 and (tt == 0x6E616D65 or tt == 0x4F532F32 or tt == 0x706F7374)) continue;
         if (tt == 0x6E616D65) has_name = true;
         if (tt == 0x4F532F32) has_os2 = true;
         if (tt == 0x706F7374) has_post = true;
@@ -393,6 +407,9 @@ pub fn buildFontCmapFrom(src: ?[]const u8, f: *core.FontMap, nglyphs: u16, dst: 
         // 번호로 써서 InDesign 부분집합(코드 '3' → 글리프 51 = 'R')이 "Vol. 37" 을 "Vol. R" 로 그렸다
         const gid: u32 = if (f.cff_map) (if (code < 256) f.cff_gid[code] else 0) else if (f.identity or f.two_byte) code else simpleGid(src, code, u);
         if (u == 0 or gid == 0) continue;
+        // 글꼴에 없는 번호는 넣지 않는다 — cmap 이 numGlyphs 를 넘는 글리프를 가리키면
+        // 브라우저(OTS)가 글꼴을 통째로 거절한다(RFC 9110 의 RobotoMono: 코드 160 → 94 글리프)
+        if (nglyphs > 0 and gid >= nglyphs) continue;
         if (core.uni2gid[u] == 0) {
             core.uni2gid[u] = @intCast(@min(gid, 65535));
             if (has_n < has.len) { has[has_n] = u; has_n += 1; }

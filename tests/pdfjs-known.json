@@ -76,5 +76,9 @@
   "cols.pdf": {
     "max": 6,
     "why": "글자만 있는 두 단 쪽 — bare.pdf 와 같이 표준 Helvetica 를 시스템 글꼴로 대신 그려 테두리가 다르다. 줄이 마흔 개라 크다"
+  },
+  "devnsh.pdf": {
+    "max": 6,
+    "why": "DeviceN[/Cyan/Magenta] 축 셰이딩 — 잉크 변환 뒤 CMYK→RGB 가 우리는 다항식, pdf.js 는 qcms(SWOP 프로파일)라 시안·마젠타의 중간 톤이 조금 다르다(mupdf 와는 0.3%)"
   }
 }

@@ -161,3 +161,51 @@ mupdf 는 빈칸으로 내는데 우리는 한 번 낸다(gov-yeosu·gov-hampyeo
     node tests/corpus-dump.mjs <pdf디렉터리> <출력디렉터리> 8
     <venv>/bin/python tests/corpus-compare.py <pdf디렉터리> <출력디렉터리>
 
+
+## 그리기 — 실문서 100편에서 mupdf·pdf.js 와 화소로 맞댄 결과
+
+같은 100편 752쪽을 세 엔진이 1배(72dpi)로 그려 화소를 맞댔다(`tests/corpus-render.mjs`,
+mupdf 그림은 `tests/corpus-mupdf.py`). 잣대는 "어느 채널이든 32 넘게 다른 화소의 비율"
+(글자 테두리의 안티앨리어싱 차이는 대개 그 아래라 걸러진다).
+
+|  | 우리↔mupdf | pdf.js↔mupdf | 우리↔pdf.js |
+|---|---|---|---|
+| 처음(0.2.1) | 7.43% | 3.29% | — |
+| 고친 뒤 | **3.12%** | 3.21% | 2.70% |
+
+여기서 잡아 고친 결함(`tests/mkrender.mjs` 의 견본들로 못박았다):
+- 폼의 `/Group` 이 딴 객체(Illustrator)면 투명 그룹으로 안 묶여 `ca 0` 으로 숨긴 막대 수백
+  개가 그대로 찍혔다(attention 논문 15쪽 30%)
+- 폼 `/X1` 안의 그림 이름도 `/X1`(InDesign) — 폼이 제 자신을 여섯 번 다시 불러 배경 사진이
+  안 나왔다(총무성 백서 표지). 자기 자신을 부르는 폼도 막았다
+- `[/DeviceN[/Cyan/Magenta]/DeviceCMYK …]` 처럼 빈칸 없이 붙은 별색 배열에서 잉크 변환
+  함수를 못 찾아 셰이딩·채우기가 회색이 됐다
+- Type1 글꼴의 Subrs 를 512 개로 못박아 TeX Gyre(1441 개) 본문이 통째로 대체 글꼴로 나왔다
+- `/Widths` 의 소수(LM Roman 555.6)를 잘라 글자마다 0.006pt 씩 밀려 줄 끝에서 0.3pt 어긋났다
+- Type1·Type3 글리프의 기준선을 화소 줄에 맞춘다 — 글꼴 엔진들이 다 그렇게 찍어, 안 맞추면
+  본문 쪽마다 5~6% 가 달랐다(pdf.js 1.3%). 이것 하나로 arXiv 절반이 pdf.js 수준이 됐다
+- 브라우저(OTS)가 거절하던 글꼴 스물일곱: 길이 0 인 name·OS/2·cvt 표, numGlyphs 를 넘는
+  cmap, 표 목록의 쓰레기 칸(HWP 의 NanumSquare), 글리프 수와 안 맞는 post, Name INDEX 의
+  EUC-KR 글꼴 이름, 부분집합이 비워 둔 박힌 비트맵(Word 의 Cambria — n·m 이 사라졌다).
+  `opentype-sanitizer` 로 말뭉치 글꼴 1,274 개를 다 검사해 13 개(Corel 의 4글리프 CFF·빈
+  글리프 글꼴)만 남았다
+- 맨 CFF(FontFile3) 단순 글꼴이 `/Differences` 의 제 이름(g7267)으로 글리프를 고르지 못해
+  HWP 보고서의 글꼴 열다섯이 다 빠졌다; WinAnsi 같은 이름 인코딩이 CFF 제 인코딩보다 세다
+- 타일·셰이딩 무늬의 좌표계는 지금 변환이 아니라 쪽(폼)의 기본 변환 기준이다 — pdfTeX 이
+  `0.1 0 0 0.1 cm` 아래에서 무늬로 깐 사진이 열 배 작은 칸으로 되풀이됐다
+- 예측기 값은 `/DecodeParms` *안*의 것(BitsPerComponent 없으면 8) — 그림의 4 를 써서 4비트
+  RGB 천체 사진이 줄무늬가 됐다; 스트림이 잘려 마지막 줄이 모자라면 0 으로 채운다
+- 4비트 RGB·팔레트 그림을 회색으로 폈다; `/Indexed /DeviceCMYK` 팔레트를 3바이트 칸으로
+  읽어 사진이 잡음이 됐다; 필터 없는 팔레트 그림엔 색 표를 안 먹였다
+- `[/Separation /Black]` 흑백 JPEG(IRS 표지)와 AdobeRGB 프로파일의 JPEG(소식지 표지)은
+  브라우저가 회색·sRGB 로만 푸니 우리가 풀어 잉크 함수·프로파일을 먹인다
+- 순검정(K=1)을 (44,46,53) 으로 냈는데 요즘 pdf.js(qcms)·mupdf 는 (35,31,32) 다 — 맞췄다
+- 파일이 안 박힌 Arial-BoldMT 를 대신 그릴 때 굵기·기울기를 안 살렸다(ISO 규격 목차)
+
+남은 차이: JPEG 사진 쪽의 디코더 차이(~2%), Word 문서의 낱말 자리 서브픽셀(pdf.js 도 같다),
+Corel 이 낸 4글리프 CFF(OTS 가 FD 사전의 CIDCount 를 거절 — 시스템 Arial 로 대신 그린다).
+
+    <venv>/bin/python tests/corpus-mupdf.py <pdf디렉터리> <png디렉터리>
+    CORPUS=<pdf디렉터리> CORPUS_PNG=<png디렉터리> npx vite examples --port 4278 &
+    CORPUS=… CORPUS_PNG=… node tests/corpus-render.mjs out.json
+    node tests/corpus-png.mjs <출력> <문서> <쪽>   # 셋의 PNG 를 나란히

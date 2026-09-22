@@ -609,6 +609,7 @@ export class PDFDocument {
       fontFamily: (i) => fams[i - 1],
       fontName: (i) => q.fonts[i - 1]?.base,
       fontIsPua: (i) => q.fonts[i - 1]?.pua === true,
+      fontBold: (i) => ((q.fonts[i - 1]?.kind ?? 0) & 2048) !== 0,
       fontUnusable: (i) => {
         const f = q.fonts[i - 1];
         return !!f && (f.kind & 128) === 0 && !fams[i - 1];

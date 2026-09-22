@@ -55,7 +55,7 @@ fn meshColor(sh: *const root.Shade, r: *MeshR, bpc: u32, dec: []const f32, nd: u
         const t = meshVal(r.get(bpc), bpc, lo, hi);
         var v: [4]f32 = .{ 0, 0, 0, 0 };
         const nc = root.shadeFn(root.doc.items, sh, t, &v);
-        root.rgbFrom(nc, v, &out);
+        root.shadeRgb(sh, nc, v, &out);
         return out;
     }
     var v: [4]f32 = .{ 0, 0, 0, 0 };
@@ -65,7 +65,7 @@ fn meshColor(sh: *const root.Shade, r: *MeshR, bpc: u32, dec: []const f32, nd: u
         const hi: f32 = if (nd >= 4 + (c + 1) * 2) dec[5 + c * 2] else 1;
         v[c] = meshVal(r.get(bpc), bpc, lo, hi);
     }
-    root.rgbFrom(sh.ncomp, v, &out);
+    root.shadeRgb(sh, sh.ncomp, v, &out);
     return out;
 }
 
@@ -405,7 +405,7 @@ fn paintFnShade(sh: *const root.Shade) void {
             var v: [4]f32 = .{ 0, 0, 0, 0 };
             const nc = root.evalFnN(b, sh.fs, sh.fe, &[_]f32{ x, y }, &v);
             var rgb3: [3]f32 = .{ 0, 0, 0 };
-            if (nc != 0) root.rgbFrom(nc, v, &rgb3);
+            if (nc != 0) root.shadeRgb(sh, nc, v, &rgb3);
             row[i * 3] = rgb3[0];
             row[i * 3 + 1] = rgb3[1];
             row[i * 3 + 2] = rgb3[2];
@@ -425,7 +425,7 @@ fn shadeAvg(sh: *const root.Shade, out: *[3]f32) bool {
             const nc = root.shadeFn(root.doc.items, sh, @as(f32, @floatFromInt(i)) / 4, &v);
             if (nc == 0) return false;
             var c3: [3]f32 = .{ 0, 0, 0 };
-            root.rgbFrom(nc, v, &c3);
+            root.shadeRgb(sh, nc, v, &c3);
             acc[0] += c3[0] / 5;
             acc[1] += c3[1] / 5;
             acc[2] += c3[2] / 5;
@@ -459,7 +459,7 @@ fn emitShadeGrad(sh: *const root.Shade, code: f32) void {
     // 10 + 마디 8개 × 4 = 42 칸이 필요하다. 40 으로 두었더니 마지막 마디의
     // 뒤 두 칸이 배열 밖이었고(ReleaseSmall 이라 경계 검사도 없다), 자르는
     // 길이도 arg[0..42] 라 스택 8바이트를 그대로 실어 보냈다.
-    var arg: [10 + 32 * 4]f32 = undefined;
+    var arg: [10 + 32 * 4 + 6]f32 = undefined;
     arg[0] = @floatFromInt(sh.kind);
     var i: u32 = 0;
     while (i < 6) : (i += 1) arg[1 + i] = sh.coords[i];
@@ -473,6 +473,13 @@ fn emitShadeGrad(sh: *const root.Shade, code: f32) void {
         arg[12 + k * 4] = sh.stops[k * 4 + 2];
         arg[13 + k * 4] = sh.stops[k * 4 + 3];
     }
-    root.emitOp(code, arg[0 .. 10 + @as(usize, sh.stop_n) * 4]);
+    var n: usize = 10 + @as(usize, sh.stop_n) * 4;
+    if (code == 28) {
+        // 무늬로 쓰일 때는 무늬 행렬을 뒤에 붙인다
+        var j: usize = 0;
+        while (j < 6) : (j += 1) arg[n + j] = sh.pmat[j];
+        n += 6;
+    }
+    root.emitOp(code, arg[0..n]);
 }
 

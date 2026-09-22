@@ -1675,7 +1675,9 @@ pub const FontMap = struct {
     wn: u32,
     /// 글자 폭 표도 같은 식으로 잡는다(1024 개로 못박혀 있었다).
     wcodes: Table(u16, 256) = .{},
-    wvals: Table(u16, 256) = .{},
+    /// 폭은 소수까지 — LM Roman 의 555.6 을 555 로 자르면 글자마다 0.006pt 씩 밀려
+    /// 줄 끝에서 0.3pt 어긋난다(mupdf 와 화소 맞대기에서 뒷 낱말이 죄다 달랐다)
+    wvals: Table(f32, 256) = .{},
     /// Identity-H — 문자 코드가 곧 글리프 번호다
     identity: bool,
     /// 세로쓰기
@@ -1689,6 +1691,9 @@ pub const FontMap = struct {
     res: u32 = 0,
     /// ToUnicode 가 있었나. 있으면 인코딩 이름으로 짓는 표는 안 쓴다.
     has_tu: bool,
+    /// PDF 가 이름으로 준 밑바탕 인코딩 — 0 없음 1 WinAnsi 2 MacRoman. 있으면 맨 CFF 의
+    /// 제 인코딩보다 세다(IRS 안내서의 Helvetica Neue: 0x92 가 제 인코딩에선 딴 글리프)
+    base_enc: u8 = 0,
     /// 한 코드가 글자 여럿이 되는 것 — 합자 fi → "f","i" (<0C> <00660069>).
     /// 첫 글자는 unis 에, 나머지는 여기(코드, 글자) 쌍으로. 앞 4자리만 읽어
     /// "fgures" 가 되던 자리다.
@@ -1729,10 +1734,10 @@ pub const FontMap = struct {
     /// Type1 — 글리프가 암호화된 외곽선 프로그램으로 들어 있다
     t1: bool,
     /// 글리프 프로그램 자리 (pdft1.t1_pool 의 첫 칸). 코드 256 개가 이어진다.
-    t1_cs: u16,
-    /// 서브루틴 자리와 개수
-    t1_sub: u16,
-    t1_sub_n: u16,
+    t1_cs: u32,
+    /// 서브루틴 자리와 개수 — 글꼴이 정한 만큼(TeX Gyre 는 1441 개)
+    t1_sub: u32,
+    t1_sub_n: u32,
     /// 표준 인코딩 코드 → 글리프 자리 (seac 로 악센트를 합칠 때 쓴다)
     t1_std: [128]u16,
     /// 어떤 글꼴인지 — 화면의 "문서 정보"가 이걸 보여 준다.
@@ -1772,6 +1777,8 @@ const Img = struct {
     len: u32,
     flip: u8, // /Decode [1 0] — 켜고 끄는 값이 뒤집혀 있다
     smask: u8, // 부드러운 마스크가 든 칸 번호 + 1
+    /// 어느 자원 사전에서 왔나(쪽 0·폼 객체 번호) — 폼마다 /Im0 이 다른 그림인 문서(InDesign)
+    res: u32 = 0,
     /// /Interpolate true — 키워 그릴 때 부드럽게 하라는 표시. 기본은 또렷하게.
     interp: u8,
 };
@@ -1782,6 +1789,8 @@ pub const Form = struct {
     name: [24]u8,
     name_len: u8,
     obj: u32,
+    /// 어느 자원 사전에서 왔나(쪽 0·폼 객체 번호)
+    res: u32 = 0,
     mat: [6]f32,
     bbox: [4]f32,
     has_bbox: bool,
@@ -1795,6 +1804,8 @@ var forms: Table(Form, 16) = .{};
 const GState = struct {
     name: [24]u8,
     name_len: u8,
+    /// 어느 자원 사전에서 왔나(쪽 0·폼 객체 번호)
+    res: u32 = 0,
     ca: f32,
     CA: f32,
     lw: f32,
@@ -1894,6 +1905,7 @@ fn labToRgb(l: f32, a: f32, bb: f32) [3]f32 {
 const CSpace = struct {
     name: [24]u8,
     name_len: u8,
+    res: u32 = 0,
     kind: u8,
     comps: u8,
     /// ICC 프로파일 자리 (iccs.profs 의 번호). 없으면 -1.
@@ -1951,14 +1963,22 @@ var cspaces: Table(CSpace, 16) = .{};
 var cs_n: u32 = 0;
 
 fn findCs(name: []const u8) i32 {
+    // 같은 자원 범위의 것을 먼저 — 폼마다 같은 이름(GS0·Sh0·CS0)이 다른 것이다
     var i: u32 = 0;
+    while (i < cs_n) : (i += 1)
+        if (cspaces.all()[i].res == cur_scope and txEq(cspaces.all()[i].name[0..cspaces.all()[i].name_len], name)) return @intCast(i);
+    i = 0;
     while (i < cs_n) : (i += 1)
         if (txEq(cspaces.all()[i].name[0..cspaces.all()[i].name_len], name)) return @intCast(i);
     return -1;
 }
 
 fn findGs(name: []const u8) i32 {
+    // 같은 자원 범위의 것을 먼저 — 폼마다 같은 이름(GS0·Sh0·CS0)이 다른 것이다
     var i: u32 = 0;
+    while (i < gs_n) : (i += 1)
+        if (gstates.all()[i].res == cur_scope and txEq(gstates.all()[i].name[0..gstates.all()[i].name_len], name)) return @intCast(i);
+    i = 0;
     while (i < gs_n) : (i += 1)
         if (txEq(gstates.all()[i].name[0..gstates.all()[i].name_len], name)) return @intCast(i);
     return -1;
@@ -1995,6 +2015,9 @@ fn emitSMask(b: []const u8, g2: *const GState, dep: u32) void {
 fn findForm(name: []const u8) i32 {
     var i: u32 = 0;
     while (i < formn.n2) : (i += 1)
+        if (forms.all()[i].res == cur_scope and txEq(forms.all()[i].name[0..forms.all()[i].name_len], name)) return @intCast(i);
+    i = 0;
+    while (i < formn.n2) : (i += 1)
         if (txEq(forms.all()[i].name[0..forms.all()[i].name_len], name)) return @intCast(i);
     return -1;
 }
@@ -2022,7 +2045,14 @@ export fn slotInterp(i: u32) u32 { return if (i < img.n) imgs.all()[i].interp el
 ///
 /// 대체공간은 이름(/DeviceRGB…)이거나 딴 객체다. 함수는 거의 언제나 객체
 /// 번호로 온다 — 스트림일 수 있어서다(형식 0·4).
-fn tintOf(b: []const u8, vs: usize, ve: usize, dn: bool, fs: *usize, fe: *usize, alt: *u8) void {
+/// 이름(`/Name`)의 끝 — 빈칸이나 다음 구분자(`/ [ ] < > (`)에서 끝난다
+fn nameEnd(b: []const u8, from: usize, ve: usize) usize {
+    var p = from;
+    while (p < ve and !isSpace(b[p]) and b[p] != '/' and b[p] != '[' and b[p] != ']' and b[p] != '<' and b[p] != '>' and b[p] != '(') p += 1;
+    return p;
+}
+
+pub fn tintOf(b: []const u8, vs: usize, ve: usize, dn: bool, fs: *usize, fe: *usize, alt: *u8) void {
     fs.* = 0;
     fe.* = 0;
     alt.* = 3;
@@ -2032,8 +2062,10 @@ fn tintOf(b: []const u8, vs: usize, ve: usize, dn: bool, fs: *usize, fe: *usize,
     if (p >= ve) return;
     p += 1;
     while (p < ve and isSpace(b[p])) p += 1;
-    // /Separation 또는 /DeviceN 이름표를 지난다
-    while (p < ve and !isSpace(b[p])) p += 1;
+    // /Separation 또는 /DeviceN 이름표를 지난다. `[/DeviceN[/Cyan/Magenta]/DeviceCMYK …]`
+    // 처럼 빈칸 없이 붙어 오기도 하니 이름은 `[`·`/`·`<` 에서도 끝난다 — 빈칸만
+    // 보면 잉크 배열과 대체 공간을 통째로 건너뛰어 속성 사전을 함수로 잡았다
+    p = nameEnd(b, p + 1, ve);
     while (p < ve and isSpace(b[p])) p += 1;
     if (dn) {
         // 이름 배열 통째로 건너뛴다
@@ -2045,14 +2077,13 @@ fn tintOf(b: []const u8, vs: usize, ve: usize, dn: bool, fs: *usize, fe: *usize,
             }
         }
     } else {
-        while (p < ve and !isSpace(b[p])) p += 1; // 잉크 이름 하나
+        if (p < ve and b[p] == '/') p = nameEnd(b, p + 1, ve); // 잉크 이름 하나
     }
     while (p < ve and isSpace(b[p])) p += 1;
     // 대체 색공간
     if (p < ve and b[p] == '/') {
         const ns = p;
-        var w = p + 1;
-        while (w < ve and !isSpace(b[w]) and b[w] != '/' and b[w] != ']') w += 1;
+        const w = nameEnd(b, p + 1, ve); // `/DeviceCMYK<<` 처럼 붙어 오면 `<` 에서 끝난다
         const nm = b[ns..w];
         alt.* = if (findIn(nm, "CMYK", 0) != null) 4
             else if (findIn(nm, "Gray", 0) != null) 1
@@ -2104,23 +2135,49 @@ fn tintOf(b: []const u8, vs: usize, ve: usize, dn: bool, fs: *usize, fe: *usize,
 }
 
 /// 2·4비트 회색을 8비트로 편다. dst 안에서 제자리로 바꾼다.
+/// 풀린 바이트가 줄 길이 row 로 h 줄에 "거의" 맞는가 — 마지막 줄이 조금 모자란
+/// 것까지 받는다(arXiv 논문의 4비트 RGB 사진은 180바이트 짧았다. mupdf·pdf.js 는
+/// 모자란 자리를 0 으로 본다)
+fn nearRows(got: u32, row: u32, h: u32) bool {
+    const want = @as(usize, row) * h;
+    if (row == 0 or h == 0) return false;
+    // 한 줄이 통째로 모자란 것은 안 받는다 — RGB 3성분 48바이트가 "CMYK 에서 한 줄 빠진 것"
+    // 으로도 읽히기 때문이다(filters.pdf 의 4×4 바둑판이 검정·초록으로 깨졌다)
+    return got <= want and got + row > want;
+}
+
+/// want 바이트가 되도록 뒤를 0 으로 채운다. 자리가 없으면 그대로
+fn padRows(dst: [*]u8, got: u32, want: usize, room: usize) u32 {
+    if (got >= want or want > room) return got;
+    @memset(dst[got..want], 0);
+    return @intCast(want);
+}
+
+/// 2·4비트 표본을 8비트로 편다. ncomp 는 화소당 성분 수 — 4비트 RGB(arXiv 논문의
+/// 천체 사진)는 화소당 12비트라, 회색으로 보면 줄이 밀려 검은 바탕에 흰 줄무늬가 됐다.
+/// scale 이 거짓이면 값을 늘이지 않고 그대로 둔다(팔레트 번호)
 fn expandLowBpc(dst: [*]u8, w: u32, h: u32, bpc: u32, room: usize, got: *u32) bool {
-    const row_in = (w * bpc + 7) / 8;
-    const need = @as(usize, w) * @as(usize, h);
+    return expandLowBpcN(dst, w, h, bpc, 1, true, room, got);
+}
+
+fn expandLowBpcN(dst: [*]u8, w: u32, h: u32, bpc: u32, ncomp: u32, scale: bool, room: usize, got: *u32) bool {
+    const ws = w * ncomp; // 줄당 표본 수
+    const row_in = (ws * bpc + 7) / 8;
+    const need = @as(usize, ws) * @as(usize, h);
     if (need == 0 or need + @as(usize, row_in) * h > room) return false;
     const maxv: u32 = (@as(u32, 1) << @intCast(bpc)) - 1;
     // 뒤에서 앞으로 펴면 제자리로 바꿔도 아직 안 읽은 바이트를 안 덮는다
     var yy: u32 = h;
     while (yy > 0) {
         yy -= 1;
-        var xx: u32 = w;
+        var xx: u32 = ws;
         while (xx > 0) {
             xx -= 1;
             const bit = xx * bpc;
             const byte = dst[yy * row_in + bit / 8];
             const shift: u3 = @intCast(8 - bpc - (bit % 8));
             const v = (byte >> shift) & @as(u8, @intCast(maxv));
-            dst[yy * w + xx] = @intCast(@as(u32, v) * 255 / maxv);
+            dst[yy * ws + xx] = if (scale) @intCast(@as(u32, v) * 255 / maxv) else v;
         }
     }
     got.* = @intCast(need);
@@ -2183,47 +2240,112 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
     const length = lengthOf(b, ob, oe) orelse 0;
     if (w == 0 or h == 0 or length == 0 or w > 20000 or h > 20000) return null;
 
+    // 색공간이 딴 객체(/ColorSpace 48762 0 R)면 거기서 본다 — 안 따라가면 Indexed 팔레트를
+    // 못 찾아 번호가 회색값이 되어 한은 경제전망 표지의 옅은 사진이 검게 나왔다
+    var csr_s = ob;
+    var csr_e = oe;
+    if (find(b[ob..oe], "/ColorSpace", 0)) |ca0| {
+        var q0 = ob + ca0 + 11;
+        while (q0 < oe and isSpace(b[q0])) q0 += 1;
+        if (q0 < oe and isDigit(b[q0])) {
+            const cn0 = readUint(b, &q0);
+            if (findObj(b, cn0)) |cb0| { csr_s = cb0; csr_e = objDictEnd(b, cb0); }
+        }
+    }
     // Indexed 팔레트 — 값이 색이 아니라 표의 번호다
     var pal: [768]u8 = undefined;
     var pal_n: u32 = 0;
-    if (find(b[ob..oe], "/Indexed", 0)) |ia| {
-        var q = ob + ia + 8;
+    if (find(b[csr_s..csr_e], "/Indexed", 0)) |ia| {
+        var q = csr_s + ia + 8;
         // [/Indexed 바탕 최대값 팔레트]
-        while (q < oe and isSpace(b[q])) q += 1;
-        // 바탕 색공간을 건너뛴다
-        if (q < oe and b[q] == '/') { while (q < oe and !isSpace(b[q])) q += 1; }
-        else if (q < oe and b[q] == '[') { while (q < oe and b[q] != ']') q += 1; q += 1; }
-        else if (q < oe and isDigit(b[q])) { _ = readUint(b, &q); while (q < oe and isSpace(b[q])) q += 1;
-            if (q < oe and isDigit(b[q])) _ = readUint(b, &q);
-            while (q < oe and isSpace(b[q])) q += 1;
-            if (q < oe and b[q] == 'R') q += 1; }
-        while (q < oe and isSpace(b[q])) q += 1;
-        if (q < oe and isDigit(b[q])) _ = readUint(b, &q); // hival
-        while (q < oe and isSpace(b[q])) q += 1;
-        if (q < oe and b[q] == '<') {
-            q += 1;
-            var hi: ?u8 = null;
-            while (q < oe and b[q] != '>' and pal_n < pal.len) : (q += 1) {
-                const hv = hexVal(b[q]) orelse continue;
-                if (hi) |hh| { pal[pal_n] = (hh << 4) | hv; pal_n += 1; hi = null; } else hi = hv;
+        while (q < csr_e and isSpace(b[q])) q += 1;
+        // 바탕 색공간 — 팔레트 한 칸의 바이트 수를 정한다. CMYK 바탕(KDI 소식지의 사진)을
+        // RGB 로 읽으면 칸이 밀려 잡음 그림이 된다
+        var base_n: u32 = 3;
+        const bs = q;
+        if (q < csr_e and b[q] == '/') { while (q < csr_e and !isSpace(b[q]) and b[q] != '[' and b[q] != '<') q += 1; }
+        else if (q < csr_e and b[q] == '[') { var d5: u32 = 0; while (q < csr_e) : (q += 1) { if (b[q] == '[') d5 += 1; if (b[q] == ']') { d5 -= 1; if (d5 == 0) { q += 1; break; } } } }
+        else if (q < csr_e and isDigit(b[q])) { _ = readUint(b, &q); while (q < csr_e and isSpace(b[q])) q += 1;
+            if (q < csr_e and isDigit(b[q])) _ = readUint(b, &q);
+            while (q < csr_e and isSpace(b[q])) q += 1;
+            if (q < csr_e and b[q] == 'R') q += 1; }
+        {
+            var bv = b[bs..q];
+            var bb: usize = bs;
+            if (bv.len > 0 and isDigit(bv[0])) {
+                var w9 = bs;
+                const bn = readUint(b, &w9);
+                if (findObj(b, bn)) |bob| { bb = bob; bv = b[bob..objDictEnd(b, bob)]; }
             }
-        } else if (q < oe and b[q] == '(') {
-            q += 1;
-            while (q < oe and b[q] != ')' and pal_n < pal.len) : (q += 1) {
-                if (b[q] == '\\' and q + 1 < oe) q += 1;
-                pal[pal_n] = b[q];
-                pal_n += 1;
-            }
-        } else if (q < oe and isDigit(b[q])) {
-            const pn2 = readUint(b, &q);
-            if (streamOf(b, pn2)) |ps3| {
-                const n3 = @min(ps3.len, pal.len);
-                @memcpy(pal[0..n3], ps3[0..n3]);
-                pal_n = @intCast(n3);
+            if (findIn(bv, "CMYK", 0) != null) base_n = 4
+            else if (findIn(bv, "Gray", 0) != null or findIn(bv, "/Separation", 0) != null) base_n = 1
+            else if (findIn(bv, "ICCBased", 0) != null) {
+                var w9 = bb;
+                const be = bb + bv.len;
+                while (w9 < be and !isDigit(b[w9])) w9 += 1;
+                if (w9 < be) {
+                    var w10 = w9;
+                    const pn9 = readUint(b, &w10);
+                    if (findObj(b, pn9)) |pob| {
+                        if (intAfter(b, pob, objDictEnd(b, pob), "/N")) |nn| base_n = @intCast(@max(1, @min(4, nn)));
+                    }
+                }
             }
         }
+        while (q < csr_e and isSpace(b[q])) q += 1;
+        if (q < csr_e and isDigit(b[q])) _ = readUint(b, &q); // hival
+        while (q < csr_e and isSpace(b[q])) q += 1;
+        var praw: [1024]u8 = undefined;
+        var raw_n: u32 = 0;
+        if (q < csr_e and b[q] == '<') {
+            q += 1;
+            var hi: ?u8 = null;
+            while (q < csr_e and b[q] != '>' and raw_n < praw.len) : (q += 1) {
+                const hv = hexVal(b[q]) orelse continue;
+                if (hi) |hh| { praw[raw_n] = (hh << 4) | hv; raw_n += 1; hi = null; } else hi = hv;
+            }
+        } else if (q < csr_e and b[q] == '(') {
+            q += 1;
+            while (q < csr_e and b[q] != ')' and raw_n < praw.len) : (q += 1) {
+                if (b[q] == '\\' and q + 1 < oe) q += 1;
+                praw[raw_n] = b[q];
+                raw_n += 1;
+            }
+        } else if (q < csr_e and isDigit(b[q])) {
+            const pn2 = readUint(b, &q);
+            if (streamOf(b, pn2)) |ps3| {
+                const n3 = @min(ps3.len, praw.len);
+                @memcpy(praw[0..n3], ps3[0..n3]);
+                raw_n = @intCast(n3);
+            }
+        }
+        // 칸마다 RGB 로
+        // @min 이 u9 로 좁히면 cnt*3 이 넘친다 — 폭을 못박는다
+        const cnt: u32 = @min(raw_n / base_n, 256);
+        var ci: u32 = 0;
+        while (ci < cnt) : (ci += 1) {
+            const src = praw[ci * base_n ..][0..base_n];
+            if (base_n == 4) {
+                var rgb8: [3]f32 = .{ 0, 0, 0 };
+                cmykRgb(@as(f32, @floatFromInt(src[0])) / 255, @as(f32, @floatFromInt(src[1])) / 255, @as(f32, @floatFromInt(src[2])) / 255, @as(f32, @floatFromInt(src[3])) / 255, &rgb8);
+                pal[ci * 3] = @intFromFloat(@max(0, @min(255, rgb8[0] * 255 + 0.5)));
+                pal[ci * 3 + 1] = @intFromFloat(@max(0, @min(255, rgb8[1] * 255 + 0.5)));
+                pal[ci * 3 + 2] = @intFromFloat(@max(0, @min(255, rgb8[2] * 255 + 0.5)));
+            } else if (base_n == 1) {
+                pal[ci * 3] = src[0];
+                pal[ci * 3 + 1] = src[0];
+                pal[ci * 3 + 2] = src[0];
+            } else {
+                pal[ci * 3] = src[0];
+                pal[ci * 3 + 1] = src[1];
+                pal[ci * 3 + 2] = src[2];
+            }
+        }
+        pal_n = cnt * 3;
     }
 
+    // 색공간이 CMYK 인가(저비트 그림의 성분 수를 셀 때)
+    const cs_cmyk = find(b[csr_s..csr_e], "/DeviceCMYK", 0) != null;
     // 그림에 붙은 색 프로파일 — /ColorSpace [/ICCBased 6 0 R]
     var img_icc: i32 = -1;
     if (find(b[ob..oe], "/ColorSpace", 0)) |ca2| {
@@ -2242,6 +2364,67 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
                 var w6 = w5;
                 const pn5 = readUint(b, &w6);
                 if (streamOf(b, pn5)) |prof| img_icc = addIcc(prof);
+            }
+        }
+    }
+
+    // 별색 그림 — /ColorSpace [/Separation /Black /DeviceCMYK fn] 은 표본이 색이 아니라
+    // 잉크 양이다. 잉크 변환 함수를 표(256칸)로 만들어 화소마다 먹인다. 그냥 회색으로
+    // 보면 순검정(K=1)이 (35,31,32) 가 아니라 (0,0,0) 이 되고 중간 톤도 다 어긋난다
+    // (IRS 안내서 표지의 나침반 사진)
+    var sep_lut: [768]u8 = undefined;
+    var sep_on = false;
+    if (find(b[ob..oe], "/ColorSpace", 0)) |ca3| {
+        var q = ob + ca3 + 11;
+        while (q < oe and isSpace(b[q])) q += 1;
+        var vs: usize = 0;
+        var ve: usize = 0;
+        if (q < oe and b[q] == '[') {
+            vs = q;
+            var d2: u32 = 0;
+            var w7 = q;
+            while (w7 < oe) : (w7 += 1) {
+                if (b[w7] == '[') d2 += 1;
+                if (b[w7] == ']') { d2 -= 1; if (d2 == 0) { ve = w7 + 1; break; } }
+            }
+        } else if (q < oe and isDigit(b[q])) {
+            const cn3 = readUint(b, &q);
+            if (findObj(b, cn3)) |cb3| { vs = cb3; ve = find(b, "endobj", cb3) orelse b.len; }
+        }
+        if (ve > vs) {
+            const val = b[vs..ve];
+            const dn = findIn(val, "/DeviceN", 0) != null;
+            var one = !dn;
+            if (dn) {
+                // 잉크가 하나일 때만 — 둘 이상은 표본이 여럿이라 여기서 못 다룬다
+                if (findIn(val, "[", if (findIn(val, "/DeviceN", 0)) |x| x + 8 else 0)) |ns| {
+                    var cnt: u32 = 0;
+                    var w8 = vs + ns + 1;
+                    while (w8 < ve and b[w8] != ']') : (w8 += 1) {
+                        if (b[w8] == '/') cnt += 1;
+                    }
+                    one = cnt == 1;
+                }
+            }
+            if (one and (dn or findIn(val, "/Separation", 0) != null)) {
+                var ts: usize = 0;
+                var te: usize = 0;
+                var alt: u8 = 3;
+                tintOf(b, vs, ve, dn, &ts, &te, &alt);
+                if (te > ts) {
+                    var li: u32 = 0;
+                    sep_on = true;
+                    while (li < 256) : (li += 1) {
+                        const t: f32 = @as(f32, @floatFromInt(li)) / 255;
+                        var outv: [4]f32 = .{ 0, 0, 0, 0 };
+                        const n_out = pdffn.evalFnN(b, ts, te, &[_]f32{t}, &outv);
+                        var rgb9: [3]f32 = .{ 1 - t, 1 - t, 1 - t };
+                        if (n_out > 0) pdffn.rgbFrom(@min(n_out, @as(u32, alt)), outv, &rgb9) else if (li == 0) sep_on = false;
+                        sep_lut[li * 3] = @intFromFloat(@max(0, @min(255, rgb9[0] * 255 + 0.5)));
+                        sep_lut[li * 3 + 1] = @intFromFloat(@max(0, @min(255, rgb9[1] * 255 + 0.5)));
+                        sep_lut[li * 3 + 2] = @intFromFloat(@max(0, @min(255, rgb9[2] * 255 + 0.5)));
+                    }
+                }
             }
         }
     }
@@ -2365,8 +2548,46 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
             // 브라우저는 CMYK JPEG 을 못 푼다 — 성분이 넷이면 우리가 푼다.
             // 안 그러면 createImageBitmap 이 조용히 실패해 그림이 사라진다.
             const nfo = jpeg.probe(dst[0..got]);
+            // 별색 흑백 JPEG 은 우리가 풀어 잉크 표를 먹인다 — 브라우저는 회색으로만 푼다
+            if (sep_on and nfo.comps == 1 and nfo.w == w and nfo.h == h and bpc == 8) {
+                const px = @as(usize, nfo.w) * nfo.h;
+                const extra: usize = if (nfo.progressive) px * 7 else px * 5;
+                if (got + px * 3 + extra <= room) {
+                    const rgb = dst[got..][0 .. px * 3];
+                    const scratch = dst[got + px * 3 ..][0..extra];
+                    if (jpeg.decodeAny(dst[0..got], rgb, scratch) > 0) {
+                        var mv: usize = 0;
+                        while (mv < px) : (mv += 1) {
+                            const v: usize = if (flip) 255 - rgb[mv * 3] else rgb[mv * 3];
+                            dst[mv * 3] = sep_lut[v * 3];
+                            dst[mv * 3 + 1] = sep_lut[v * 3 + 1];
+                            dst[mv * 3 + 2] = sep_lut[v * 3 + 2];
+                        }
+                        got = @intCast(px * 3);
+                        kind = 1;
+                        flip_done = true;
+                    }
+                }
+            }
+            // 넓은 색역 프로파일(AdobeRGB)의 RGB JPEG — 브라우저는 sRGB 로 보고 풀어 빨강이
+            // 뜬다(국가데이터처 소식지 표지 하늘). 우리가 풀어 프로파일을 먹인다
+            else if (img_icc >= 0 and nfo.comps == 3 and nfo.w == w and nfo.h == h and iccRgbLut(img_icc) != null) {
+                const px = @as(usize, nfo.w) * nfo.h;
+                const extra: usize = if (nfo.progressive) px * 7 else px * 5;
+                if (got + px * 3 + extra <= room) {
+                    const rgb = dst[got..][0 .. px * 3];
+                    const scratch = dst[got + px * 3 ..][0..extra];
+                    if (jpeg.decodeAny(dst[0..got], rgb, scratch) > 0) {
+                        var mv: usize = 0;
+                        while (mv < px * 3) : (mv += 1) dst[mv] = rgb[mv];
+                        rgbViaIcc(dst, px, img_icc);
+                        got = @intCast(px * 3);
+                        kind = 1;
+                    }
+                }
+            }
             // 크기가 딕셔너리와 다르면 손대지 않는다 — 바깥이 /Width·/Height 로 읽는다
-            if (nfo.comps == 4 and nfo.w == w and nfo.h == h) {
+            else if (nfo.comps == 4 and nfo.w == w and nfo.h == h) {
                 const px = @as(usize, nfo.w) * nfo.h;
                 // 원본 뒤에 RGB 자리와 성분별 중간 자리를 잡는다.
                 // 프로그레시브는 계수를 다 들고 있어야 해서 더 든다.
@@ -2476,7 +2697,11 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
                 }
             } else if (bpc == 8) {
                 const n_px = @as(usize, w) * @as(usize, h);
-                const comps = @as(usize, @intCast(r)) / (if (n_px == 0) 1 else n_px);
+                // 마지막 줄이 모자란 스트림은 0 으로 채운다 — 안 채우면 성분 수를
+                // 하나 적게 세어 색이 밀린다
+                var comps = @as(usize, @intCast(r)) / (if (n_px == 0) 1 else n_px);
+                if (comps < 4 and nearRows(got, w * @as(u32, @intCast(comps + 1)), h)) comps += 1;
+                got = padRows(dst, got, n_px * comps, room);
                 if (comps == 4) {
                     // CMYK 다. 예전에는 3성분으로 읽어 화소가 통째로 밀렸다 —
                     // 시안이 빨강으로, 검정이 초록으로 나왔다.
@@ -2499,31 +2724,84 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
                     kind = 1;
                 } else if (comps >= 3) kind = 1 else if (comps >= 1) kind = 2;
             } else if (bpc == 2 or bpc == 4) {
-                // 2·4비트 회색은 8비트로 펴 둔다
-                const row_in = (w * bpc + 7) / 8;
-                const need2 = w * h;
-                if (img.used + got + need2 <= img.cap) {
-                    const out2 = dst + got;
-                    var yy: u32 = 0;
-                    while (yy < h) : (yy += 1) {
-                        var xx: u32 = 0;
-                        while (xx < w) : (xx += 1) {
-                            const bit = xx * bpc;
-                            const byte = dst[yy * row_in + bit / 8];
-                            const shift: u3 = @intCast(8 - bpc - (bit % 8));
-                            const maxv: u32 = (@as(u32, 1) << @intCast(bpc)) - 1;
-                            const v3 = (byte >> shift) & @as(u8, @intCast(maxv));
-                            out2[yy * w + xx] = @intCast(@as(u32, v3) * 255 / maxv);
+                // 2·4비트는 8비트로 펴 둔다 — 성분 수는 색공간이 정한다. 팔레트 그림은
+                // 번호 그대로 펴서 색 표를 먹인다(늘이면 번호가 깨져 엉뚱한 색이 된다)
+                const n_px = @as(usize, w) * @as(usize, h);
+                if (pal_n >= 3) {
+                    if (expandLowBpcN(dst, w, h, bpc, 1, false, room, &got) and img.used + got + n_px * 3 <= img.cap) {
+                        const out3 = dst + got;
+                        var k3: usize = 0;
+                        while (k3 < n_px) : (k3 += 1) {
+                            const idx = @as(usize, dst[k3]) * 3;
+                            out3[k3 * 3] = if (idx + 2 < pal_n) pal[idx] else 0;
+                            out3[k3 * 3 + 1] = if (idx + 2 < pal_n) pal[idx + 1] else 0;
+                            out3[k3 * 3 + 2] = if (idx + 2 < pal_n) pal[idx + 2] else 0;
                         }
+                        @memcpy(dst[0 .. n_px * 3], out3[0 .. n_px * 3]);
+                        got = @intCast(n_px * 3);
+                        kind = 1;
                     }
-                    @memcpy(dst[0..need2], out2[0..need2]);
-                    got = need2;
-                    kind = 2;
+                } else {
+                    // 줄 길이로 성분 수를 어림한다 — 풀린 바이트가 RGB 줄에 맞으면 셋
+                    const row3 = (w * 3 * bpc + 7) / 8;
+                    const row4 = (w * 4 * bpc + 7) / 8;
+                    const nc: u32 = if (nearRows(got, row4, h) and cs_cmyk) 4 else if (nearRows(got, row3, h)) 3 else 1;
+                    const rown = if (nc == 4) row4 else if (nc == 3) row3 else (w * bpc + 7) / 8;
+                    got = padRows(dst, got, @as(usize, rown) * h, room);
+                    if (expandLowBpcN(dst, w, h, bpc, nc, true, room, &got)) {
+                        if (nc == 4) {
+                            got = cmykToRgb(dst, n_px, img_icc, flip);
+                            flip_done = true;
+                            kind = 1;
+                        } else kind = if (nc == 3) 1 else 2;
+                    }
                 }
             }
         }
     }
     if (kind == 0) return null;
+
+    // 팔레트 그림이 아직 번호 그대로면(필터 없는 갈래) 색 표를 먹인다
+    if (pal_n >= 3 and kind == 2 and bpc == 8 and got == @as(u32, @intCast(@as(usize, w) * h))) {
+        const n_px = @as(usize, w) * h;
+        if (img.used + n_px * 3 <= img.cap) {
+            var k8: usize = n_px;
+            while (k8 > 0) {
+                k8 -= 1;
+                const idx = @as(usize, dst[k8]) * 3;
+                dst[k8 * 3] = if (idx + 2 < pal_n) pal[idx] else 0;
+                dst[k8 * 3 + 1] = if (idx + 2 < pal_n) pal[idx + 1] else 0;
+                dst[k8 * 3 + 2] = if (idx + 2 < pal_n) pal[idx + 2] else 0;
+            }
+            got = @intCast(n_px * 3);
+            kind = 1;
+        }
+    }
+
+    // 넓은 색역 프로파일의 RGB 그림(flate 등)도 프로파일을 먹인다
+    if (img_icc >= 0 and kind == 1 and !flip_done and bpc == 8 and pal_n == 0 and !is_jpeg and
+        got == @as(u32, @intCast(@as(usize, w) * h * 3)))
+    {
+        rgbViaIcc(dst, @as(usize, w) * h, img_icc);
+    }
+
+    // 별색 회색 그림(flate 등)도 잉크 표를 먹여 RGB 로
+    if (sep_on and kind == 2 and got == @as(u32, @intCast(@as(usize, w) * h)) and !flip_done) {
+        const n_px = @as(usize, w) * h;
+        if (img.used + n_px * 3 <= img.cap) {
+            var k9: usize = n_px;
+            while (k9 > 0) {
+                k9 -= 1;
+                const v: usize = if (flip) 255 - dst[k9] else dst[k9];
+                dst[k9 * 3] = sep_lut[v * 3];
+                dst[k9 * 3 + 1] = sep_lut[v * 3 + 1];
+                dst[k9 * 3 + 2] = sep_lut[v * 3 + 2];
+            }
+            got = @intCast(n_px * 3);
+            kind = 1;
+            flip_done = true;
+        }
+    }
 
     // /Decode [1 0] — 값을 뒤집는다.
     //
@@ -2540,6 +2818,7 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
     var k: usize = 0;
     while (k < nl) : (k += 1) im.name[k] = name[k];
     im.name_len = @intCast(nl);
+    im.res = scan_scope;
     im.kind = kind;
     im.w = w;
     im.h = h;
@@ -2756,6 +3035,82 @@ fn cmykToRgb(dst: [*]u8, n_px: usize, ix: i32, invert: bool) u32 {
     return @intCast(n_px * 3);
 }
 
+/// RGB 그림의 프로파일(AdobeRGB 같은 넓은 색역)을 sRGB 로 옮기는 3차원 표.
+/// 17^3 × 3 바이트. 프로파일이 sRGB 와 거의 같으면 표를 안 만들고 그대로 둔다.
+var lut3: struct {
+    t: [17 * 17 * 17 * 3]u8 = undefined,
+    of: i32 = -1,
+    /// 0 아직 모름 1 sRGB 와 같음(안 옮김) 2 표 있음
+    state: u8 = 0,
+} = .{};
+
+fn iccRgbLut(ix: i32) ?[]const u8 {
+    if (lut3.of == ix and lut3.state != 0) return if (lut3.state == 2) lut3.t[0..] else null;
+    lut3.of = ix;
+    lut3.state = 1;
+    const G: usize = 17;
+    const inv: f32 = @floatFromInt(G - 1);
+    var idx: usize = 0;
+    var far = false;
+    var ri: usize = 0;
+    while (ri < G) : (ri += 1) {
+        var gi: usize = 0;
+        while (gi < G) : (gi += 1) {
+            var bi: usize = 0;
+            while (bi < G) : (bi += 1) {
+                const in = [_]f32{ @as(f32, @floatFromInt(ri)) / inv, @as(f32, @floatFromInt(gi)) / inv, @as(f32, @floatFromInt(bi)) / inv };
+                var rgb: [3]f32 = .{ 0, 0, 0 };
+                if (!iccToRgb(ix, &in, &rgb)) return null;
+                var c: usize = 0;
+                while (c < 3) : (c += 1) {
+                    const v = @max(0, @min(1, rgb[c]));
+                    if (@abs(v - in[c]) > 3.0 / 255.0) far = true;
+                    lut3.t[idx + c] = @intFromFloat(v * 255 + 0.5);
+                }
+                idx += 3;
+            }
+        }
+    }
+    if (!far) return null;
+    lut3.state = 2;
+    return lut3.t[0..];
+}
+
+/// RGB 바이트를 프로파일 표로 옮긴다(제자리). 표가 없으면 그대로.
+fn rgbViaIcc(dst: [*]u8, n_px: usize, ix: i32) void {
+    const t = iccRgbLut(ix) orelse return;
+    const G: usize = 17;
+    var i: usize = 0;
+    while (i < n_px) : (i += 1) {
+        const p0 = i * 3;
+        var lo: [3]usize = undefined;
+        var fr: [3]f32 = undefined;
+        var c: usize = 0;
+        while (c < 3) : (c += 1) {
+            const v = @as(f32, @floatFromInt(dst[p0 + c])) * (@as(f32, @floatFromInt(G - 1)) / 255.0);
+            const f0 = @floor(v);
+            lo[c] = @min(G - 2, @as(usize, @intFromFloat(f0)));
+            fr[c] = v - @as(f32, @floatFromInt(lo[c]));
+        }
+        var acc: [3]f32 = .{ 0, 0, 0 };
+        var corner: u32 = 0;
+        while (corner < 8) : (corner += 1) {
+            const dr: usize = corner & 1;
+            const dg: usize = (corner >> 1) & 1;
+            const db: usize = (corner >> 2) & 1;
+            const wgt = (if (dr == 1) fr[0] else 1 - fr[0]) * (if (dg == 1) fr[1] else 1 - fr[1]) * (if (db == 1) fr[2] else 1 - fr[2]);
+            if (wgt == 0) continue;
+            const at = (((lo[0] + dr) * G + (lo[1] + dg)) * G + (lo[2] + db)) * 3;
+            acc[0] += wgt * @as(f32, @floatFromInt(t[at]));
+            acc[1] += wgt * @as(f32, @floatFromInt(t[at + 1]));
+            acc[2] += wgt * @as(f32, @floatFromInt(t[at + 2]));
+        }
+        dst[p0] = @intFromFloat(@max(0, @min(255, acc[0] + 0.5)));
+        dst[p0 + 1] = @intFromFloat(@max(0, @min(255, acc[1] + 0.5)));
+        dst[p0 + 2] = @intFromFloat(@max(0, @min(255, acc[2] + 0.5)));
+    }
+}
+
 var luts: struct {
     /// 프로파일마다 만들어 두는 CMYK→RGB 표 (17^4 × 3바이트 ≈ 250KB)
     at: usize = 0,
@@ -2839,7 +3194,11 @@ fn lutLookup(t: []const u8, g: usize, c: f32, m: f32, y: f32, k: f32, out: *[3]f
 }
 
 fn findImg(name: []const u8) i32 {
+    // 같은 자원 범위의 것을 먼저 — 쪽의 /Im0(QR) 과 폼의 /Im0(삽화)이 이름만 같다
     var i: u32 = 0;
+    while (i < img.n) : (i += 1)
+        if (imgs.all()[i].res == cur_scope and txEq(imgs.all()[i].name[0..imgs.all()[i].name_len], name)) return @intCast(i);
+    i = 0;
     while (i < img.n) : (i += 1)
         if (txEq(imgs.all()[i].name[0..imgs.all()[i].name_len], name)) return @intCast(i);
     return -1;
@@ -3273,6 +3632,7 @@ fn addFont(name: [*]const u8, name_len: u32, cmap: [*]const u8, cmap_len: u32, b
     f.identity = false;
     f.vertical = false;
     f.has_tu = false;
+    f.base_enc = 0;
     f.mx_n = 0;
     f.diff = [_]u8{0} ** 32;
     f.dw2 = .{ 880, -1000 };
@@ -3299,7 +3659,7 @@ fn addFont(name: [*]const u8, name_len: u32, cmap: [*]const u8, cmap_len: u32, b
 /// 지금 그리는 자원의 범위 — 쪽이면 0, 폼 XObject 안이면 그 객체 번호
 var cur_scope: u32 = 0;
 /// 자원을 훑는 동안의 범위 — scanFonts 가 글꼴에 붙인다
-var scan_scope: u32 = 0;
+pub var scan_scope: u32 = 0;
 
 fn selectFont(name: []const u8) void {
     // 같은 범위의 것을 먼저, 없으면 이름만 맞는 것
@@ -3662,11 +4022,15 @@ fn t3Record(num: u32, start: u32, snap: T3Snap) void {
 /// 깊이마다 폼 스트림을 옮겨 두는 자리. 예전에는 2MB 로 못박아, 그보다 큰 폼(arXiv 에
 /// 포함된 PDF 그림 쪽, 풀면 수 MB)은 뒤가 잘렸다 — 잘린 자리의 q 가 짝을 잃어 바깥
 /// 글자까지 밀렸다. 필요한 만큼 zone 에서 잡고 모자라면 배로 늘린다
-var sub_at: [3]usize = .{ 0, 0, 0 };
-var sub_cap: [3]usize = .{ 0, 0, 0 };
+/// 폼 안의 폼 — 여섯 겹까지. 예전엔 둘까지라 arXiv 그림(PDF 안의 PDF 안의 그림) 속 열지도가 안 나왔다
+const SUB_DEPTH = 6;
+/// 지금 그리는 중인 폼의 객체 번호(깊이별) — 자기 자신을 부르는 폼을 막는다
+var form_stack: [SUB_DEPTH]u32 = .{0} ** SUB_DEPTH;
+var sub_at: [SUB_DEPTH]usize = .{0} ** SUB_DEPTH;
+var sub_cap: [SUB_DEPTH]usize = .{0} ** SUB_DEPTH;
 
 pub fn subStream(num: u32, depth: u32) ?[]const u8 {
-    if (depth >= 3) return null;
+    if (depth >= SUB_DEPTH) return null;
     if (subcFind(num)) |s| return s;
     const cs = streamOf(doc.items, num) orelse return null;
     const dst = pdfform.growBuf(&sub_at[depth], &sub_cap[depth], cs.len, 2 * 1024 * 1024, 0) orelse return null;
@@ -4354,16 +4718,32 @@ pub fn runOps(b: []const u8, depth: u32) void {
         else if (eqs(op, "Do")) {
             draw_count += 1;
             const nm2 = name_buf[0..name_len];
-            const fi = findForm(nm2);
-            if (fi >= 0 and depth < 2) {
+            var fi = findForm(nm2);
+            // 폼 안의 /X1(그림)이 쪽의 /X1(그 폼 자신)과 이름만 같으면 같은 범위의
+            // 그림이 이긴다 — 안 그러면 폼이 제 자신을 끝없이 다시 불러 그림은 안 나온다
+            if (fi >= 0 and forms.all()[@intCast(fi)].res != cur_scope) {
+                const ii = findImg(nm2);
+                if (ii >= 0 and imgs.all()[@intCast(ii)].res == cur_scope) fi = -1;
+            }
+            // 제 자신(또는 조상)을 다시 부르는 폼은 건너뛴다 — 깊이 6까지 허용하니 안 막으면
+            // 자기 자신을 그리는 폼 하나가 명령 400만 개, 20초가 된다
+            if (fi >= 0) {
+                const fobj = forms.all()[@intCast(fi)].obj;
+                var fd: u32 = 0;
+                while (fd < depth and fd < SUB_DEPTH) : (fd += 1) if (form_stack[fd] == fobj) { fi = -1; break; };
+            }
+            if (fi >= 0 and depth + 1 < SUB_DEPTH) {
                 // 폼 XObject — 제 변환을 걸고 BBox 로 자른 뒤 안을 그린다
                 const fo = &forms.all()[@intCast(fi)];
+                if (depth < SUB_DEPTH) form_stack[depth] = fo.obj;
                 // 투명 그룹은 통째로 딴 판에 그려 한 번에 겹친다. 안 그러면
                 // 겹친 것끼리 각자 투명해져 겹친 데가 더 진해진다.
                 const grp = fo.group and (cur.alpha < 0.999 or cur.bm > 0);
                 if (grp) emitOp(33, &[_]f32{ cur.alpha, @floatFromInt(cur.bm) });
                 emitOp(14, &[_]f32{});
                 emitOp(16, &[_]f32{ fo.mat[0], fo.mat[1], fo.mat[2], fo.mat[3], fo.mat[4], fo.mat[5] });
+                // 폼 안의 무늬는 폼의 좌표계가 기준이다 — 그리는 쪽에 기준 변환을 알린다
+                emitOp(41, &[_]f32{});
                 if (fo.has_bbox) {
                     emitOp(5, &[_]f32{
                         fo.bbox[0], fo.bbox[1],
@@ -4383,6 +4763,8 @@ pub fn runOps(b: []const u8, depth: u32) void {
                     cur_scope = saved_scope;
                 }
                 while (dev_n > dn) emitOp(15, &[_]f32{});
+                if (depth < SUB_DEPTH) form_stack[depth] = 0;
+                emitOp(42, &[_]f32{});
                 emitOp(15, &[_]f32{});
                 if (grp) emitOp(34, &[_]f32{});
             } else {
@@ -4413,6 +4795,20 @@ pub fn inheritedKey(b: []const u8, body0: usize, end0: usize, key: []const u8) ?
         e2 = find(b, "endobj", pb) orelse b.len;
     }
     return null;
+}
+
+/// `/Group 4380 0 R` — 그룹 딕셔너리가 딴 객체일 때 그것이 투명 그룹인지 본다.
+/// Illustrator 가 넣은 그림은 수백 개 폼이 다 이 꼴이라, 안 따라가면 `ca 0` 으로
+/// 숨긴 막대가 그룹으로 안 묶여 안의 `/GS0 gs`(ca 1) 가 그대로 찍혔다.
+fn groupRef(b: []const u8, ob: usize, oe: usize) bool {
+    const at = find(b[ob..oe], "/Group", 0) orelse return false;
+    var p = ob + at + 6;
+    while (p < oe and isSpace(b[p])) p += 1;
+    if (p >= oe or !isDigit(b[p])) return false;
+    const gn = readUint(b, &p);
+    const gb = findObj(b, gn) orelse return false;
+    const ge = objDictEnd(b, gb);
+    return find(b[gb..ge], "/Transparency", 0) != null;
 }
 
 /// 리소스 딕셔너리를 훑어 글꼴·그림·폼을 등록한다.
@@ -4482,6 +4878,7 @@ fn scanShadings(b: []const u8, rs: usize, re_: usize) void {
                         if (find(b[ds..de3], "/Shading", 0)) |sa2| {
                             var sp2 = ds + sa2 + 8;
                             while (sp2 < de3 and isSpace(b[sp2])) sp2 += 1;
+                            const before = shade_n;
                             if (sp2 < de3 and b[sp2] == '<') {
                                 readShade(b, sp2, dictEnd(b, sp2, de3), nm5);
                             } else if (sp2 < de3 and isDigit(b[sp2])) {
@@ -4489,6 +4886,12 @@ fn scanShadings(b: []const u8, rs: usize, re_: usize) void {
                                 if (findObj(b, s2n)) |s2b| {
                                     readShade(b, s2b, find(b, "endobj", s2b) orelse b.len, nm5);
                                 }
+                            }
+                            // 무늬의 /Matrix — 셰이딩 사전이 아니라 무늬 사전의 것
+                            if (shade_n > before) {
+                                const sh2 = &shades.all()[shade_n - 1];
+                                sh2.pmat = .{ 1, 0, 0, 1, 0, 0 };
+                                _ = readArr(b, ds, de3, "/Matrix", &sh2.pmat);
                             }
                         }
                     } else if (pt == 1 and tiles.room(tile_n + 1)) {
@@ -4498,6 +4901,7 @@ fn scanShadings(b: []const u8, rs: usize, re_: usize) void {
                         var k5: usize = 0;
                         while (k5 < nl5) : (k5 += 1) t2.name[k5] = nm5[k5];
                         t2.name_len = @intCast(nl5);
+                        t2.res = scan_scope;
                         t2.r = 0.6;
                         t2.g = 0.6;
                         t2.b = 0.6;
@@ -4663,6 +5067,7 @@ fn scanColorSpaces(b: []const u8, rs: usize, re_: usize) void {
                 var k4: usize = 0;
                 while (k4 < nl4) : (k4 += 1) c2.name[k4] = nm4[k4];
                 c2.name_len = @intCast(nl4);
+                c2.res = scan_scope;
                 c2.kind = kind;
                 c2.comps = comps;
                 c2.icc = icc_ix;
@@ -4764,6 +5169,7 @@ fn scanExtGStates(b: []const u8, rs: usize, re_: usize) void {
                 var k3: usize = 0;
                 while (k3 < nl3) : (k3 += 1) g2.name[k3] = nm3[k3];
                 g2.name_len = @intCast(nl3);
+                g2.res = scan_scope;
                 g2.ca = -1;
                 g2.CA = -1;
                 g2.lw = -1;
@@ -4983,16 +5389,17 @@ fn scanXObjects(b: []const u8, rs: usize, re_: usize, depth: u32) void {
                             var k2: usize = 0;
                             while (k2 < nl2) : (k2 += 1) fo.name[k2] = nm[k2];
                             fo.name_len = @intCast(nl2);
+                            fo.res = scan_scope;
                             fo.obj = onum;
                             fo.mat = .{ 1, 0, 0, 1, 0, 0 };
                             fo.has_bbox = false;
                             // 투명 그룹인가 — 통째로 한 판에 그려 겹쳐야 한다
-                            fo.group = find(b[ob..oe], "/Transparency", 0) != null;
+                            fo.group = find(b[ob..oe], "/Transparency", 0) != null or groupRef(b, ob, oe);
                             _ = readArr(b, ob, oe, "/Matrix", &fo.mat);
                             if (readArr(b, ob, oe, "/BBox", &fo.bbox) > 0) fo.has_bbox = true;
                             formn.n2 += 1;
                             // 폼 안의 글꼴·그림도 등록해 둔다 — 폼의 범위로
-                            if (depth < 2) {
+                            if (depth + 1 < SUB_DEPTH) {
                                 const saved = scan_scope;
                                 scan_scope = onum;
                                 scanFormResources(b, ob, oe, depth);
@@ -7718,6 +8125,8 @@ export fn annDateLen(i: u32) u32 { return pdfannot.annDateLen(i); }
 pub const Shade = struct {
     name: [24]u8,
     name_len: u8,
+    /// 어느 자원 사전에서 왔나(쪽 0·폼 객체 번호)
+    res: u32 = 0,
     /// 1 함수 · 2 축 · 3 방사 · 4·5 삼각 그물 · 6·7 이음 조각
     kind: u8,
     /// 딕셔너리 자리. 그물은 그릴 때 스트림을 다시 읽는다.
@@ -7726,6 +8135,14 @@ pub const Shade = struct {
     /// 함수 자리 (없으면 0)
     fs: u32,
     fe: u32,
+    /// 색공간이 Separation·DeviceN 이면 잉크 변환 함수 자리와 대체 색공간 성분 수.
+    /// 안 태우면 [/Cyan /Magenta] 두 잉크로 물들인 그러데이션이 회색이 된다.
+    tint_s: u32 = 0,
+    tint_e: u32 = 0,
+    tint_alt: u8 = 3,
+    /// 셰이딩 *무늬*(PatternType 2)의 /Matrix — 무늬 공간은 쪽(또는 폼)의 기본 좌표계
+    /// 기준이라, 그리는 쪽이 지금 변환 대신 기본 변환에 이걸 곱해 그라데이션을 건다
+    pmat: [6]f32 = .{ 1, 0, 0, 1, 0, 0 },
     /// 성분마다 함수가 따로 오기도 한다 — /Function [f1 f2 f3]
     fx: [4][2]u32,
     fxn: u8,
@@ -7753,6 +8170,8 @@ pub var shade_n: u32 = 0;
 const Tile = struct {
     name: [24]u8,
     name_len: u8,
+    /// 어느 자원 사전에서 왔나(쪽 0·폼 객체 번호)
+    res: u32 = 0,
     r: f32,
     g: f32,
     b: f32,
@@ -7845,14 +8264,22 @@ fn propMcid(name: []const u8) i32 {
 }
 
 fn findTile(name: []const u8) i32 {
+    // 같은 자원 범위의 것을 먼저 — 폼마다 같은 이름(GS0·Sh0·CS0)이 다른 것이다
     var i: u32 = 0;
+    while (i < tile_n) : (i += 1)
+        if (tiles.all()[i].res == cur_scope and txEq(tiles.all()[i].name[0..tiles.all()[i].name_len], name)) return @intCast(i);
+    i = 0;
     while (i < tile_n) : (i += 1)
         if (txEq(tiles.all()[i].name[0..tiles.all()[i].name_len], name)) return @intCast(i);
     return -1;
 }
 
 fn findShade(name: []const u8) i32 {
+    // 같은 자원 범위의 것을 먼저 — 폼마다 같은 이름(GS0·Sh0·CS0)이 다른 것이다
     var i: u32 = 0;
+    while (i < shade_n) : (i += 1)
+        if (shades.all()[i].res == cur_scope and txEq(shades.all()[i].name[0..shades.all()[i].name_len], name)) return @intCast(i);
+    i = 0;
     while (i < shade_n) : (i += 1)
         if (txEq(shades.all()[i].name[0..shades.all()[i].name_len], name)) return @intCast(i);
     return -1;
@@ -7964,6 +8391,7 @@ const pdffn = @import("pdffn.zig");
 pub const evalFnN = pdffn.evalFnN;
 const readShade = pdffn.readShade;
 pub const rgbFrom = pdffn.rgbFrom;
+pub const shadeRgb = pdffn.shadeRgb;
 pub const shadeFn = pdffn.shadeFn;
 
 // ===== 그물 셰이딩(4~7형) — 꼭짓점 삼각형·좌표 격자 (c/pdfmesh.zig) =====
@@ -7975,7 +8403,7 @@ const emitShade = pdfmesh.emitShade;
 // ===== Type1 글꼴 — 외곽선 프로그램(charstring)을 푼다 (c/pdftype1.zig) =====
 //
 // 부르는 자리를 안 건드리도록 이름만 이어 둔다.
-const pdft1 = @import("pdftype1.zig");
+pub const pdft1 = @import("pdftype1.zig");
 pub const attachType1 = pdft1.attachType1;
 const drawType1 = pdft1.drawType1;
 
@@ -8498,7 +8926,7 @@ pub fn std14For(b: []const u8, fbody: usize, fend: usize) ?*const [256]u16 {
 
 pub fn widthOf(f: *const FontMap, code: u32) f32 {
     var i: u16 = 0;
-    while (i < f.wn) : (i += 1) if (f.wcodes.all()[i] == code) return @floatFromInt(f.wvals.all()[i]);
+    while (i < f.wn) : (i += 1) if (f.wcodes.all()[i] == code) return f.wvals.all()[i];
     // 표준 14종은 문서가 /Widths 를 안 적어도 된다. 그때는 Adobe 가 낸
     // AFM 값을 쓴다 — 없으면 글자마다 500 으로 잡아 자간이 통째로 어긋난다.
     if (f.std_w) |w| {
@@ -8531,7 +8959,7 @@ pub fn pushWidth(f: *FontMap, code: u32, v: f32) void {
     if (code > 65535 or !widthRoom(f, f.wn + 1)) return;
     const c: f32 = @max(0, @min(65535, v));
     f.wcodes.all()[f.wn] = @intCast(code);
-    f.wvals.all()[f.wn] = @intFromFloat(c);
+    f.wvals.all()[f.wn] = c;
     f.wn += 1;
 }
 

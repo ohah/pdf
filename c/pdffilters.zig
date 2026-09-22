@@ -195,16 +195,17 @@ pub fn unpredict(buf: []u8, pred: u32, colors: u32, bpc: u32, columns: u32) u32 
         }
         return @intCast(buf.len);
     }
-    // PNG — 줄마다 앞에 방식 바이트가 하나 붙는다
+    // PNG — 줄마다 앞에 방식 바이트가 하나 붙는다. 마지막 줄이 모자라면(스트림이
+    // 잘린 문서) 없는 바이트를 0 으로 보고 그 줄까지 낸다 — mupdf·pdf.js 와 같다
     const in_row = row + 1;
     var out: u32 = 0;
     var y: usize = 0;
-    while ((y + 1) * in_row <= buf.len) : (y += 1) {
+    while (y * in_row + 1 < buf.len) : (y += 1) {
         const ft = buf[y * in_row];
         const src = y * in_row + 1;
         var x: usize = 0;
         while (x < row) : (x += 1) {
-            const raw = buf[src + x];
+            const raw: u8 = if (src + x < buf.len) buf[src + x] else 0;
             const a: u8 = if (x >= bpp) buf[out + x - bpp] else 0;
             const b: u8 = if (y > 0) buf[out + x - row] else 0;
             const c: u8 = if (y > 0 and x >= bpp) buf[out + x - row - bpp] else 0;

@@ -180,6 +180,31 @@ fn buildName(dst: []u8) u32 {
 }
 
 /// 맨 CFF 를 OTTO 로 감싼다. 성공하면 길이, 실패하면 0.
+/// Name INDEX 의 글꼴 이름을 브라우저가 받는 글자로 고친다.
+///
+/// 한글 문서(HWP 가 낸 PDF)는 글꼴 이름을 EUC-KR 바이트 그대로 적는다 — OTS 는
+/// Name INDEX 에 0x21~0x7E 밖 글자가 있으면 글꼴을 통째로 거절한다. 길이는 그대로
+/// 두고(뒤의 자리들이 안 밀리게) 글자만 'X' 로 바꾼다
+fn sanitizeCffName(cff: []u8) void {
+    if (cff.len < 8 or cff[0] != 1) return;
+    const at: usize = cff[2];
+    if (at + 3 > cff.len) return;
+    const count = root.be16(cff, at);
+    if (count == 0) return;
+    const os = cff[at + 2];
+    if (os < 1 or os > 4) return;
+    const offs = at + 3;
+    const data = offs + (@as(usize, count) + 1) * os - 1;
+    const end = cffIndexEnd(cff, at) orelse return;
+    var i: usize = data + 1;
+    while (i < end and i < cff.len) : (i += 1) {
+        const c = cff[i];
+        const bad = c < 0x21 or c > 0x7E or c == '[' or c == ']' or c == '(' or c == ')' or
+            c == '{' or c == '}' or c == '<' or c == '>' or c == '/' or c == '%';
+        if (bad) cff[i] = 'X';
+    }
+}
+
 fn buildOtto(cff: []const u8, f: *root.FontMap, dst: []u8) u32 {
     const ng = cffGlyphCount(cff);
     if (ng == 0 or ng > 65535) return 0;
@@ -220,6 +245,7 @@ fn buildOtto(cff: []const u8, f: *root.FontMap, dst: []u8) u32 {
     // CFF
     if (pos + cff.len > scratch) return 0;
     @memcpy(dst[pos..][0..cff.len], cff);
+    sanitizeCffName(dst[pos..][0..cff.len]);
     if (!put(dst, &pos, &tags, &offs, &lens, &t, 0x43464620, @intCast(cff.len), @intCast(scratch))) return 0;
 
     // OS/2 (판 4)
@@ -310,7 +336,11 @@ fn buildOtto(cff: []const u8, f: *root.FontMap, dst: []u8) u32 {
             var c: u32 = 0;
             while (c < 256) : (c += 1) {
                 const gg = f.cff_gid[c];
-                if (gg != 0 and gid2code[gg] == 0xFFFF) gid2code[gg] = @intCast(c);
+                if (gg == 0) continue;
+                // 한 글리프에 코드가 둘이면(제 인코딩의 0x27 과 WinAnsi 의 0x92 가 다
+                // quoteright) /Widths 에 폭이 적힌 코드를 고른다 — 0 인 코드를 잡으면
+                // 글리프 폭이 0 이 되어 뒷글자가 겹쳤다(IRS 안내서의 "What's")
+                if (gid2code[gg] == 0xFFFF or root.widthOf(f, gid2code[gg]) <= 0) gid2code[gg] = @intCast(c);
             }
         }
         var g: u32 = 0;
@@ -573,14 +603,24 @@ fn cffSimpleMap(cff: []const u8, f: *root.FontMap) bool {
             }
         }
     }
-    // 2) PDF 의 /Differences 가 준 이름이 이긴다 — 유니코드에서 이름을 되짚는다
+    // 2) PDF 의 /Differences 가 준 이름이 이긴다 — 이름 그대로(g7267 같은 제 이름도)
+    //    맞춰 보고, 안 맞으면 유니코드에서 이름을 되짚는다
     var i: u32 = 0;
     while (i < f.n) : (i += 1) {
         const code = f.codes.all()[i];
         const uni = f.unis.all()[i];
-        if (code > 255 or uni == 0) continue;
+        if (code > 255) continue;
         const has_diff = (f.diff[code >> 3] & (@as(u8, 1) << @intCast(code & 7))) != 0;
-        if (!has_diff and f.cff_gid[code] != 0) continue;
+        // PDF 가 WinAnsi 같은 이름 인코딩을 줬으면 그 이름이 제 안의 인코딩보다 세다
+        if (!has_diff and f.base_enc == 0 and f.cff_gid[code] != 0) continue;
+        const dn = root.pdft1.diffName(code);
+        if (dn.len > 0) {
+            if (nameSid(cff, str_at, dn)) |sid| {
+                const g = gidOfSid(&sids, ng, sid);
+                if (g != 0) { f.cff_gid[code] = g; continue; }
+            }
+        }
+        if (uni == 0) continue;
         var nb: [64]u8 = undefined;
         const nm = pdfenc.uniToName(uni, &nb);
         if (nm.len == 0) continue;

@@ -432,6 +432,56 @@ pub fn evalFnN(b: []const u8, fs: usize, fe: usize, in: []const f32, out: *[4]f3
     return 0;
 }
 
+/// 셰이딩의 색 값을 화면 색으로 — 별색이면 잉크 변환 함수를 먼저 태운다.
+pub fn shadeRgb(sh: *const root.Shade, comps: u32, v: [4]f32, out: *[3]f32) void {
+    if (sh.tint_e > sh.tint_s and comps > 0) {
+        var outv: [4]f32 = .{ 0, 0, 0, 0 };
+        const n_out = evalFnN(root.searchSlice(), sh.tint_s, sh.tint_e, v[0..@min(comps, 4)], &outv);
+        if (n_out > 0) {
+            rgbFrom(@min(n_out, @as(u32, sh.tint_alt)), outv, out);
+            return;
+        }
+        // 함수를 못 돌리면 잉크 양을 뒤집어 회색으로
+        out[0] = 1 - v[0];
+        out[1] = out[0];
+        out[2] = out[0];
+        return;
+    }
+    rgbFrom(comps, v, out);
+}
+
+/// 셰이딩의 /ColorSpace 가 Separation·DeviceN 이면 변환 함수 자리를 적어 둔다.
+fn shadeTint(b: []const u8, ds: usize, de: usize, sh: *root.Shade) void {
+    const a = root.find(b[ds..de], "/ColorSpace", 0) orelse return;
+    var p = ds + a + 11;
+    while (p < de and root.isSpace(b[p])) p += 1;
+    var vs = p;
+    var ve = de;
+    if (p < de and root.isDigit(b[p])) {
+        const n = root.readUint(b, &p);
+        const ob = root.findObj(b, n) orelse return;
+        vs = ob;
+        ve = root.find(b, "endobj", ob) orelse b.len;
+    } else if (p < de and b[p] == '[') {
+        var d2: i32 = 0;
+        var w = p;
+        while (w < de) : (w += 1) {
+            if (b[w] == '[') d2 += 1;
+            if (b[w] == ']') { d2 -= 1; if (d2 == 0) { ve = w + 1; break; } }
+        }
+    } else return;
+    const val = b[vs..ve];
+    const dn = root.findIn(val, "/DeviceN", 0) != null;
+    if (!dn and root.findIn(val, "/Separation", 0) == null) return;
+    var fs: usize = 0;
+    var fe: usize = 0;
+    var alt: u8 = 3;
+    root.tintOf(b, vs, ve, dn, &fs, &fe, &alt);
+    sh.tint_s = @intCast(fs);
+    sh.tint_e = @intCast(fe);
+    sh.tint_alt = alt;
+}
+
 pub fn rgbFrom(comps: u32, v: [4]f32, out: *[3]f32) void {
     if (comps >= 4) {
         root.cmykRgb(v[0], v[1], v[2], v[3], out);
@@ -460,10 +510,15 @@ pub fn readShade(b: []const u8, ds: usize, de: usize, name: []const u8) void {
     sh.mat = .{ 1, 0, 0, 1, 0, 0 };
     sh.dom = .{ 0, 1, 0, 1 };
     sh.ncomp = 3;
+    sh.tint_s = 0;
+    sh.tint_e = 0;
+    sh.tint_alt = 3;
+    shadeTint(b, ds, de, sh);
     const nl = @min(name.len, 24);
     var k: usize = 0;
     while (k < nl) : (k += 1) sh.name[k] = name[k];
     sh.name_len = @intCast(nl);
+    sh.res = root.scan_scope;
     sh.kind = @intCast(st2);
     sh.ext0 = false;
     sh.ext1 = false;
@@ -569,7 +624,7 @@ pub fn readShade(b: []const u8, ds: usize, de: usize, name: []const u8) void {
         var v: [4]f32 = .{ 0, 0, 0, 0 };
         const nc = shadeFn(b, sh, t, &v);
         var rgb3: [3]f32 = .{ 0, 0, 0 };
-        rgbFrom(nc, v, &rgb3);
+        shadeRgb(sh, nc, v, &rgb3);
         const c3 = if (sh.cal == 1)
             root.calRgbToRgb(rgb3[0], rgb3[1], rgb3[2], sh.cal_gamma, sh.cal_mat)
         else

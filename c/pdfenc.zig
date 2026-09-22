@@ -176,9 +176,19 @@ pub fn nameToUni(nm: []const u8) u32 {
 
 /// 한 바이트 글꼴의 코드 → 유니코드 표를 인코딩에서 짓는다.
 fn attachEncoding(b: []const u8, fbody: usize, fend: usize, f: *core.FontMap) void {
-    // ToUnicode 가 있으면 그게 낫다
-    if (f.n > 0) { f.has_tu = true; return; }
     var base: u8 = 0; // 0 표준 1 WinAnsi 2 MacRoman
+    defer f.base_enc = base;
+    // ToUnicode 가 있으면 그게 낫다 — 다만 이름 인코딩이 있는지는 적어 둔다(맨 CFF 가
+    // 제 안의 인코딩 대신 이걸 따라야 한다)
+    if (f.n > 0) {
+        f.has_tu = true;
+        if (core.find(b[fbody..fend], "/Encoding", 0)) |ea| {
+            const w = b[fbody + ea .. @min(fend, fbody + ea + 40)];
+            if (core.findIn(w, "WinAnsi", 0) != null) base = 1
+            else if (core.findIn(w, "MacRoman", 0) != null) base = 2;
+        }
+        return;
+    }
     var ds: usize = 0;
     var de: usize = 0;
     if (core.find(b[fbody..fend], "/Encoding", 0)) |ea| {
@@ -708,6 +718,8 @@ pub fn attachEmbedded(b: []const u8, fbody: usize) void {
     }
     if (fobj == 0) return;
     const data = pdfform.streamOf(b, fobj) orelse return;
+    // 맨 CFF 의 단순 글꼴은 /Differences 의 이름으로 글리프를 고른다
+    if (is_cff and !f.two_byte) core.pdft1.loadDifferences(b, fbody, fend, true);
     core.attachFontFile(data, is_cff);
     if (is_cff and f.file_len == 0) f.kind |= 16; // 껍데기를 못 지었다
 }

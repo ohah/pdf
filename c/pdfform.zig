@@ -625,10 +625,12 @@ pub fn drawAnnots(b: []const u8, body: usize, end: usize) void {
         core.emitOp(24, &[_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 });
         core.emitOp(16, &[_]f32{ sx, 0, 0, sy, rect[0] - minx * sx, rect[1] - miny * sy });
         core.emitOp(16, &[_]f32{ mat[0], mat[1], mat[2], mat[3], mat[4], mat[5] });
+        core.emitOp(41, &[_]f32{});
         core.emitOp(5, &[_]f32{ bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1] });
         core.emitOp(10, &[_]f32{0});
         core.emitOp(9, &[_]f32{});
         if (core.subStream(form_obj, 0)) |fs3| core.runOps(fs3, 1);
+        core.emitOp(42, &[_]f32{});
         core.emitOp(15, &[_]f32{});
     }
 }
@@ -835,13 +837,29 @@ pub fn decodeChain(b: []const u8, ds: usize, de: usize, data: usize, length: usi
         @memcpy(dst[0..out_n], tmp[0..out_n]);
     }
 
-    // 예측기
-    if (core.find(b[ds..de], "/Predictor", 0)) |_| {
-        const pred = core.intAfter(b, ds, de, "/Predictor") orelse 1;
+    // 예측기 — 값은 /DecodeParms 사전 *안*의 것이다. /BitsPerComponent 가 거기 없으면
+    // 그림의 것이 아니라 8 이다: 4비트 RGB 사진(arXiv)의 DecodeParms 에 그게 없어
+    // 그림의 4 를 썼더니 줄 길이가 반이 되어 필터 바이트가 엉뚱한 자리를 가리켰다
+    var ps = ds;
+    var pe = de;
+    if (core.find(b[ds..de], "/DecodeParms", 0) orelse core.find(b[ds..de], "/DP", 0)) |da| {
+        var q = ds + da;
+        while (q < de and b[q] != '<' and b[q] != '[' and !core.isDigit(b[q])) q += 1;
+        if (q < de and b[q] == '[') { q += 1; while (q < de and core.isSpace(b[q])) q += 1; }
+        if (q < de and b[q] == '<') {
+            ps = q;
+            pe = core.dictEnd(b, q, de);
+        } else if (q < de and core.isDigit(b[q])) {
+            const pn = core.readUint(b, &q);
+            if (core.findObj(b, pn)) |pb| { ps = pb; pe = core.objDictEnd(b, pb); }
+        }
+    }
+    if (core.find(b[ps..pe], "/Predictor", 0)) |_| {
+        const pred = core.intAfter(b, ps, pe, "/Predictor") orelse 1;
         if (pred > 1) {
-            const colors = core.intAfter(b, ds, de, "/Colors") orelse 1;
-            const bpc2 = core.intAfter(b, ds, de, "/BitsPerComponent") orelse 8;
-            const cols = core.intAfter(b, ds, de, "/Columns") orelse 1;
+            const colors = core.intAfter(b, ps, pe, "/Colors") orelse 1;
+            const bpc2 = core.intAfter(b, ps, pe, "/BitsPerComponent") orelse 8;
+            const cols = core.intAfter(b, ps, pe, "/Columns") orelse 1;
             out_n = core.filt.unpredict(dst[0..out_n], pred, colors, bpc2, cols);
         }
     }

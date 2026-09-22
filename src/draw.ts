@@ -17,6 +17,7 @@ export const OP = {
   FNSHADE: 37, FNROW: 38,
   /** Type1·Type3 글리프 외곽선 묶음의 시작·끝 — 그리기에는 뜻이 없고, 괘선을 찾는 쪽이 건너뛰는 표시 */
   GLYPH_BEGIN: 39, GLYPH_END: 40,
+  BASE_PUSH: 41, BASE_POP: 42,
 } as const;
 
 const BLENDS = [
@@ -36,6 +37,14 @@ function generic(name: string | undefined): string {
   if (/courier|mono/.test(n)) return "monospace";
   if (/times|roman|serif|georgia|garamond|bookman|century/.test(n)) return "serif";
   return "system-ui, sans-serif";
+}
+
+/** 대신 그리는 글꼴의 "bold italic " 접두 — 이름(Arial-BoldItalicMT)이나 서술자로 안다 */
+function faceStyle(name: string | undefined, bold: boolean): string {
+  const n = (name ?? "").toLowerCase();
+  const b = bold || /bold|black|heavy|semibold|demibold/.test(n);
+  const i = /italic|oblique/.test(n);
+  return `${b ? "bold " : ""}${i ? "italic " : ""}`;
 }
 
 /** 셰이딩 명령에서 캔버스 그라데이션을 만든다. */
@@ -104,6 +113,10 @@ export type DrawInput = {
   /** 글꼴 번호 → 문서가 적어 둔 글꼴 이름(BaseFont).
    *  파일이 안 박힌 표준 14글꼴을 어느 갈래로 대신 그릴지 정하는 데 쓴다. */
   fontName?: (idx: number) => string | undefined;
+  /** 글꼴 번호 → 서술자가 굵다고 했는가(/FontWeight·/StemV·ForceBold).
+   *  파일이 안 박힌 Arial-BoldMT 를 대신 그릴 때 굵게 찍는다 — 안 그러면 ISO 규격
+   *  목차의 굵은 항목이 다 가늘게 나왔다 */
+  fontBold?: (idx: number) => boolean;
   /** 글꼴 번호 → 글리프를 번호로 집는 글꼴인가.
    *  그런 글꼴은 문서 글꼴을 못 실으면 그리지 않는다 — 시스템 글꼴로
    *  대신 그려 봐야 뜻 없는 네모만 나온다. */
@@ -365,9 +378,33 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
 
   let i = 0;
   let depth = 0;
+  // 무늬(타일·셰이딩 무늬)의 좌표계는 지금 변환이 아니라 쪽(또는 폼)의 *기본* 변환
+  // 기준이다. pdfTeX 그림처럼 `0.1 0 0 0.1 cm` 아래에서 무늬로 그림을 깔면, 지금
+  // 변환에 무늬 행렬을 곱해선 열 배 작은 칸이 수십 번 되풀이됐다(arXiv 논문의 사진)
+  let baseT = g.getTransform();
+  const baseStack: DOMMatrix[] = [];
+  /** 지금 채우기 색이 셰이딩 무늬면 그 무늬 행렬 */
+  type PatMat = [number, number, number, number, number, number];
+  let fillPat: PatMat | null = null;
+  const patFill = (rule: CanvasFillRule) => {
+    if (!fillPat) { g.fill(rule); return; }
+    // 경로는 이미 화면 좌표로 굳어 있다 — 변환을 바꿔도 안 움직이고 그라데이션만 옮겨진다
+    const m = g.getTransform();
+    g.setTransform(baseT);
+    g.transform(fillPat[0], fillPat[1], fillPat[2], fillPat[3], fillPat[4], fillPat[5]);
+    g.fill(rule);
+    g.setTransform(m);
+  };
   // 마스크 그림은 지금 채우기 색으로 칠한다
   let fillCss = "#000000";
+  // Type1·Type3 글리프 묶음 안인가. 묶음의 첫 변환이 글자 원점이다 — 그 원점의
+  // 화면 y 를 정수 화소에 맞춘다. 글꼴 엔진(브라우저·FreeType)은 기준선을 화소
+  // 줄에 맞춰 찍는데 경로를 그대로 채우면 반 화소 어긋나, 줄기 위아래가 흐려져
+  // mupdf 와 화소 맞대기에서 본문 쪽이 5~6% 달랐다(pdf.js 는 1.3%)
+  let glyph = 0;
+  let glyphFresh = false;
   const fillStack: string[] = [];
+  const patStack: (PatMat | null)[] = [];
   // 글자층에 쓸 자리 모으기
   // 화면 배율. node-canvas 처럼 style 이 없는 판도 있으므로 없으면 1 로 본다.
   const shown = parseFloat((canvas as { style?: { width: string } }).style?.width ?? "");
@@ -475,13 +512,13 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
 
 
     switch (code) {
-      case OP.SAVE: g.save(); fillStack.push(fillCss); depth++; break;
+      case OP.SAVE: g.save(); fillStack.push(fillCss); patStack.push(fillPat); depth++; break;
       case OP.RESTORE:
         // 층(가리개·글자 오려 내기)을 먼저 얹고 부모로 돌아간 다음에 되돌린다.
         // 순서를 바꾸면 층에는 save 가 없어 restore 가 헛돌고, 부모의 q 는
         // 영영 안 닫혀 그 뒤 내용까지 오려진 채 남는다.
         while (clips.length > 0 && clips[clips.length - 1].depth >= depth) closeClip();
-        if (depth > 0) { g.restore(); fillCss = fillStack.pop() ?? "#000000"; depth--; }
+        if (depth > 0) { g.restore(); fillCss = fillStack.pop() ?? "#000000"; fillPat = patStack.pop() ?? null; depth--; }
         break;
       case OP.SMASK_BEGIN: {
         // 가리개 그림을 딴 판에 그린다. 밝기로 가리는 것이면 바탕색을
@@ -532,8 +569,11 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
         const ys = Math.abs(ops[a + 1]) || 1;
         const m = [ops[a + 2], ops[a + 3], ops[a + 4], ops[a + 5], ops[a + 6], ops[a + 7]] as
           [number, number, number, number, number, number];
-        // 지금 화면 밀도. 무늬 판을 그 밀도로 그려야 흐려지지 않는다.
-        const cur = g.getTransform();
+        // 무늬가 찍힐 화면 밀도(기본 변환 × 무늬 행렬). 판을 그 밀도로 그려야 흐려지지 않는다.
+        const cur = {
+          a: baseT.a * m[0] + baseT.c * m[1], b: baseT.b * m[0] + baseT.d * m[1],
+          c: baseT.a * m[2] + baseT.c * m[3], d: baseT.b * m[2] + baseT.d * m[3],
+        };
         const sx = Math.max(0.05, Math.hypot(cur.a, cur.b));
         const sy = Math.max(0.05, Math.hypot(cur.c, cur.d));
         // 너무 큰 판은 만들지 않는다 — 4096 화소를 넘으면 밀도를 낮춘다
@@ -575,6 +615,7 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
         //
         // 판의 화소 수를 그대로 XStep×YStep 에 맞춘다. 그러면 올림을 하든
         // 크기를 줄이든 간격은 정확하다.
+        g.setTransform(baseT);
         g.transform(top.mat[0], top.mat[1], top.mat[2], top.mat[3], top.mat[4], top.mat[5]);
         g.scale(top.xs / top.tw, top.ys / top.th);
         const bw = top.tw;
@@ -639,7 +680,15 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
       }
       case OP.TRANSFORM:
         g.transform(ops[a], ops[a + 1], ops[a + 2], ops[a + 3], ops[a + 4], ops[a + 5]);
+        if (glyphFresh) {
+          glyphFresh = false;
+          const m = g.getTransform();
+          // 가로 글줄일 때만 — 기울거나 세로면 기준선이 화소 줄이 아니다
+          if (Math.abs(m.b) < 1e-6 && Math.abs(m.c) < 1e-6) g.setTransform(m.a, m.b, m.c, m.d, m.e, Math.round(m.f));
+        }
         break;
+      case OP.GLYPH_BEGIN: glyph++; glyphFresh = true; break;
+      case OP.GLYPH_END: if (glyph > 0) glyph--; glyphFresh = false; break;
       case OP.MOVE: g.beginPath === undefined ? null : null; g.moveTo(ops[a], ops[a + 1]); break;
       case OP.LINE: g.lineTo(ops[a], ops[a + 1]); break;
       case OP.CURVE:
@@ -648,15 +697,17 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
       case OP.CLOSE: g.closePath(); break;
       case OP.RECT: g.rect(ops[a], ops[a + 1], ops[a + 2], ops[a + 3]); break;
       case OP.FILL:
-        g.fill(ops[a] ? "evenodd" : "nonzero");
+        patFill(ops[a] ? "evenodd" : "nonzero");
         g.beginPath();
         break;
       case OP.STROKE: g.stroke(); g.beginPath(); break;
       case OP.FILLSTROKE:
-        g.fill(ops[a] ? "evenodd" : "nonzero");
+        patFill(ops[a] ? "evenodd" : "nonzero");
         g.stroke();
         g.beginPath();
         break;
+      case OP.BASE_PUSH: baseStack.push(baseT); baseT = g.getTransform(); break;
+      case OP.BASE_POP: baseT = baseStack.pop() ?? baseT; break;
       case OP.ENDPATH: g.beginPath(); break;
       case OP.CLIP:
         g.clip(ops[a] ? "evenodd" : "nonzero");
@@ -665,6 +716,7 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
       case OP.FILLCOLOR:
         fillCss = rgb(ops[a], ops[a + 1], ops[a + 2]);
         g.fillStyle = fillCss;
+        fillPat = null;
         break;
       case OP.STROKECOLOR:
         g.strokeStyle = rgb(ops[a], ops[a + 1], ops[a + 2]);
@@ -741,7 +793,15 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
       }
       case OP.SHCOLOR: {
         const grad = gradientFrom(g, ops, a);
-        if (grad) { g.fillStyle = grad; fillCss = "rgb(128,128,128)"; }
+        if (grad) {
+          g.fillStyle = grad;
+          fillCss = "rgb(128,128,128)";
+          const n = Math.max(0, Math.min(32, ops[a + 9]));
+          const at = a + 10 + n * 4;
+          fillPat = argc >= 10 + n * 4 + 6
+            ? [ops[at], ops[at + 1], ops[at + 2], ops[at + 3], ops[at + 4], ops[at + 5]]
+            : [1, 0, 0, 1, 0, 0];
+        }
         break;
       }
       case OP.MITER:
@@ -782,7 +842,9 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
         g.transform(1, 0, 0, -1, 0, 0);
         // 부분집합 글꼴에 없는 글자는 시스템 글꼴로 넘어가게 뒤를 받쳐 둔다.
         const fam = emb ? `"${emb}", system-ui, sans-serif` : generic(input.fontName?.(fontIdx));
-        g.font = `${fontPx}px ${fam}`;
+        // 대신 그릴 때는 이름·서술자의 굵기와 기울기를 살린다
+        const style = emb ? "" : faceStyle(input.fontName?.(fontIdx), input.fontBold?.(fontIdx) === true);
+        g.font = `${style}${fontPx}px ${fam}`;
         // 대신 그린 글꼴이 제 칸보다 넓으면 가로로 눌러 넣는다.
         // 이렇게 해야 글꼴이 바뀌어도 글자가 서로 겹치지 않는다.
         if (adv > 0) {
