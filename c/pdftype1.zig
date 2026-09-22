@@ -19,8 +19,21 @@ const pdfenc = @import("pdfenc.zig");
 // 외곽선을 바로 해석해 그린다 — 그리기 명령을 이미 갖고 있어 훨씬 짧다.
 
 const T1Range = struct { off: u32, len: u32 };
-pub var t1_pool: [8192]T1Range = undefined;
+/// 글꼴마다 768 칸(코드 256 + Subrs 512). 예전에는 8192 로 못박혀 한 쪽에 Type1 글꼴이
+/// 열 개 넘으면(pdfTeX 논문의 그림 쪽) 그 뒤 글꼴은 조용히 빠졌다 — 필요한 만큼 늘린다
+var t1_pool_t: root.Table(T1Range, 8192) = .{};
 var t1_pool_n: u32 = 0;
+/// 쪽을 새로 그릴 때 글꼴과 함께 비운다
+pub fn resetPool() void { t1_pool_n = 0; }
+/// i 번째 칸 — 자리가 없으면 빈 칸
+pub fn poolAt(i: u32) T1Range {
+    const all = t1_pool_t.all();
+    return if (i < all.len) all[i] else .{ .off = 0, .len = 0 };
+}
+fn poolSet(i: u32, r: T1Range) void {
+    if (!t1_pool_t.room(i + 1)) return;
+    t1_pool_t.all()[i] = r;
+}
 
 /// 코드 → 글리프 이름 (지금 읽고 있는 글꼴 하나에만 쓰는 임시 자리)
 var enc_off: [256]u16 = undefined;
@@ -276,10 +289,10 @@ pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) v
     // 글리프 프로그램을 풀 자리
     var w_at: u32 = dec_at + dn;
     if (w_at + 4096 > area.len) return;
-    if (t1_pool_n + 256 + 512 > t1_pool.len) return;
+    if (!t1_pool_t.room(t1_pool_n + 256 + 512)) return;
     f.t1_cs = @intCast(t1_pool_n);
     var i: u32 = 0;
-    while (i < 256) : (i += 1) { t1_pool[t1_pool_n + i] = .{ .off = 0, .len = 0 }; }
+    while (i < 256) : (i += 1) poolSet(t1_pool_n + i, .{ .off = 0, .len = 0 });
     t1_pool_n += 256;
     f.t1_sub = @intCast(t1_pool_n);
     f.t1_sub_n = 0;
@@ -290,7 +303,10 @@ pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) v
             const cap = ar.len - wp.*;
             if (cap < src.len + 8) return .{ .off = 0, .len = 0 };
             const n = t1Decrypt(src, ar[wp.*..], 4330, iv);
-            const r = T1Range{ .off = wp.*, .len = n };
+            // 자리는 글꼴 구역 전체 기준으로 — ar 은 이 글꼴 몫(t1s.used 뒤)이라 ar 기준
+            // 오프셋을 그대로 두면 둘째 글꼴부터 딴 글꼴의 바이트를 읽었다. 한 쪽에 Type1
+            // 글꼴이 둘 넘는 문서(pdfTeX 논문 전부)에서 본문 글리프가 조각나거나 비었다
+            const r = T1Range{ .off = @intCast(@intFromPtr(ar.ptr) - root.t1Area() + wp.*), .len = n };
             wp.* += n;
             return r;
         }
@@ -317,7 +333,7 @@ pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) v
             if (r + len > priv.len) break;
             if (idx < 512) {
                 const rr = stash(area, &w_at, priv[r .. r + len], leniv);
-                t1_pool[f.t1_sub + idx] = rr;
+                poolSet(f.t1_sub + idx, rr);
                 if (idx + 1 > f.t1_sub_n) f.t1_sub_n = @intCast(idx + 1);
             }
             q = r + len;
@@ -344,11 +360,11 @@ pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) v
                 if (!used) {
                     const rr = stash(area, &w_at, priv[e.off .. e.off + e.len], leniv);
                     if (rr.len == 0) break;
-                    t1_pool[f.t1_cs + c] = rr;
+                    poolSet(f.t1_cs + c, rr);
                     used = true;
                     got += 1;
                 } else {
-                    t1_pool[f.t1_cs + c] = t1_pool[f.t1_cs + c - 1];
+                    poolSet(f.t1_cs + c, poolAt(f.t1_cs + c - 1));
                 }
             }
             if (used) {
@@ -360,7 +376,7 @@ pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) v
                     var c3: u32 = 0;
                     while (c3 < 256) : (c3 += 1) {
                         if (enc_len[c3] == 0 or !root.txEq(encGet(c3), e.name)) continue;
-                        if (t1_pool[f.t1_cs + c3].len > 0) f.t1_std[sc2] = @intCast(c3);
+                        if (poolAt(f.t1_cs + c3).len > 0) f.t1_std[sc2] = @intCast(c3);
                         break;
                     }
                 }
@@ -369,7 +385,7 @@ pub fn attachType1(b: []const u8, fbody: usize, fend: usize, data: []const u8) v
                 var first: ?T1Range = null;
                 while (c2 < 256) : (c2 += 1) {
                     if (enc_len[c2] == 0 or !root.txEq(encGet(c2), e.name)) continue;
-                    if (first == null) first = t1_pool[f.t1_cs + c2] else t1_pool[f.t1_cs + c2] = first.?;
+                    if (first == null) first = poolAt(f.t1_cs + c2) else poolSet(f.t1_cs + c2, first.?);
                 }
             }
         }
@@ -537,7 +553,7 @@ fn t1Run(f: *const root.FontMap, r: T1Range, s: *T1State, dep: u32) void {
                 const idx = t1Pop(s);
                 const k: i32 = @intFromFloat(idx);
                 if (k >= 0 and @as(u32, @intCast(k)) < f.t1_sub_n)
-                    t1Run(f, t1_pool[f.t1_sub + @as(u32, @intCast(k))], s, dep + 1);
+                    t1Run(f, poolAt(f.t1_sub + @as(u32, @intCast(k))), s, dep + 1);
             },
             11 => return, // return
             14 => { s.done = true; return; }, // endchar
@@ -615,7 +631,7 @@ fn t1Run(f: *const root.FontMap, r: T1Range, s: *T1State, dep: u32) void {
 /// 코드 하나를 외곽선으로 그린다. 그렸으면 true.
 pub fn drawType1(f: *const root.FontMap, code: u32) bool {
     if (!f.t1 or code > 255) return false;
-    const r = t1_pool[f.t1_cs + code];
+    const r = poolAt(f.t1_cs + code);
     if (r.len == 0) return false;
     var s = T1State{};
     t1Run(f, r, &s, 0);
@@ -624,24 +640,24 @@ pub fn drawType1(f: *const root.FontMap, code: u32) bool {
         const bi = if (s.bchar < 128) f.t1_std[s.bchar] else 0;
         const ai = if (s.achar < 128) f.t1_std[s.achar] else 0;
         var drew = false;
-        if (bi != 0 and t1_pool[f.t1_cs + bi].len > 0) {
+        if (bi != 0 and poolAt(f.t1_cs + bi).len > 0) {
             var sb2 = T1State{};
-            t1Run(f, t1_pool[f.t1_cs + bi], &sb2, 0);
-            if (sb2.drew) { root.emitOp(4, &[_]f32{}); root.emitOp(6, &[_]f32{0}); drew = true; }
+            t1Run(f, poolAt(f.t1_cs + bi), &sb2, 0);
+            if (sb2.drew) { root.emitOp(4, &[_]f32{}); root.glyphPaint(); drew = true; }
         }
-        if (ai != 0 and t1_pool[f.t1_cs + ai].len > 0) {
+        if (ai != 0 and poolAt(f.t1_cs + ai).len > 0) {
             root.emitOp(14, &[_]f32{});
             root.emitOp(16, &[_]f32{ 1, 0, 0, 1, s.sb - s.asb + s.adx, s.ady });
             var sa2 = T1State{};
-            t1Run(f, t1_pool[f.t1_cs + ai], &sa2, 0);
-            if (sa2.drew) { root.emitOp(4, &[_]f32{}); root.emitOp(6, &[_]f32{0}); drew = true; }
+            t1Run(f, poolAt(f.t1_cs + ai), &sa2, 0);
+            if (sa2.drew) { root.emitOp(4, &[_]f32{}); root.glyphPaint(); drew = true; }
             root.emitOp(15, &[_]f32{});
         }
         return drew;
     }
     if (!s.drew) return false;
     root.emitOp(4, &[_]f32{}); // closepath
-    root.emitOp(6, &[_]f32{0}); // 채우기 (비영 감김)
+    root.glyphPaint(); // Tr 모드대로 — 보통은 채우기(비영 감김)
     return true;
 }
 

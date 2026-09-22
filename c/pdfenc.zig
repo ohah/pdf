@@ -69,6 +69,63 @@ const GNAMES =
     "acute 180 circumflex 710 dieresis 168 caron 711 breve 728 tilde 732 " ++
     "macron 175 ring 730 cedilla 184 ogonek 731 dotaccent 729 hungarumlaut 733";
 
+/// 유니코드 → 글리프 이름 (nameToUni 의 거꾸로). 표에 있으면 그 이름, 아스키 글자·숫자는
+/// 표준 이름, 나머지는 uniXXXX. 밑글자+악센트(aacute) 도 짓는다
+pub fn uniToName(uni: u32, out: *[64]u8) []const u8 {
+    if (uni == 0) return &[_]u8{};
+    if ((uni >= 'A' and uni <= 'Z') or (uni >= 'a' and uni <= 'z')) { out[0] = @intCast(uni); return out[0..1]; }
+    var p: usize = 0;
+    while (p < GNAMES.len) {
+        const s0 = p;
+        while (p < GNAMES.len and GNAMES[p] != ' ') p += 1;
+        const key = GNAMES[s0..p];
+        while (p < GNAMES.len and GNAMES[p] == ' ') p += 1;
+        const v0 = p;
+        while (p < GNAMES.len and GNAMES[p] != ' ') p += 1;
+        var v: u32 = 0;
+        var k = v0;
+        while (k < p) : (k += 1) v = v * 10 + (GNAMES[k] - '0');
+        while (p < GNAMES.len and GNAMES[p] == ' ') p += 1;
+        if (v == uni) {
+            const n = @min(key.len, 64);
+            @memcpy(out[0..n], key[0..n]);
+            return out[0..n];
+        }
+    }
+    // 합자 ff·ffi·ffl
+    if (uni == 0xFB00) { @memcpy(out[0..2], "ff"); return out[0..2]; }
+    if (uni == 0xFB03) { @memcpy(out[0..3], "ffi"); return out[0..3]; }
+    if (uni == 0xFB04) { @memcpy(out[0..3], "ffl"); return out[0..3]; }
+    // 밑글자 + 악센트 (라틴-1·확장 A 의 흔한 것)
+    const ACC = [_]struct { u: u32, base: u8, acc: []const u8 }{
+        .{ .u = 0xE1, .base = 'a', .acc = "acute" }, .{ .u = 0xE0, .base = 'a', .acc = "grave" }, .{ .u = 0xE2, .base = 'a', .acc = "circumflex" }, .{ .u = 0xE3, .base = 'a', .acc = "tilde" }, .{ .u = 0xE4, .base = 'a', .acc = "dieresis" }, .{ .u = 0xE5, .base = 'a', .acc = "ring" },
+        .{ .u = 0xE7, .base = 'c', .acc = "cedilla" }, .{ .u = 0xE9, .base = 'e', .acc = "acute" }, .{ .u = 0xE8, .base = 'e', .acc = "grave" }, .{ .u = 0xEA, .base = 'e', .acc = "circumflex" }, .{ .u = 0xEB, .base = 'e', .acc = "dieresis" },
+        .{ .u = 0xED, .base = 'i', .acc = "acute" }, .{ .u = 0xEC, .base = 'i', .acc = "grave" }, .{ .u = 0xEE, .base = 'i', .acc = "circumflex" }, .{ .u = 0xEF, .base = 'i', .acc = "dieresis" }, .{ .u = 0xF1, .base = 'n', .acc = "tilde" },
+        .{ .u = 0xF3, .base = 'o', .acc = "acute" }, .{ .u = 0xF2, .base = 'o', .acc = "grave" }, .{ .u = 0xF4, .base = 'o', .acc = "circumflex" }, .{ .u = 0xF5, .base = 'o', .acc = "tilde" }, .{ .u = 0xF6, .base = 'o', .acc = "dieresis" },
+        .{ .u = 0xFA, .base = 'u', .acc = "acute" }, .{ .u = 0xF9, .base = 'u', .acc = "grave" }, .{ .u = 0xFB, .base = 'u', .acc = "circumflex" }, .{ .u = 0xFC, .base = 'u', .acc = "dieresis" }, .{ .u = 0xFD, .base = 'y', .acc = "acute" }, .{ .u = 0xFF, .base = 'y', .acc = "dieresis" },
+        .{ .u = 0xC1, .base = 'A', .acc = "acute" }, .{ .u = 0xC0, .base = 'A', .acc = "grave" }, .{ .u = 0xC2, .base = 'A', .acc = "circumflex" }, .{ .u = 0xC3, .base = 'A', .acc = "tilde" }, .{ .u = 0xC4, .base = 'A', .acc = "dieresis" }, .{ .u = 0xC5, .base = 'A', .acc = "ring" },
+        .{ .u = 0xC7, .base = 'C', .acc = "cedilla" }, .{ .u = 0xC9, .base = 'E', .acc = "acute" }, .{ .u = 0xC8, .base = 'E', .acc = "grave" }, .{ .u = 0xCA, .base = 'E', .acc = "circumflex" }, .{ .u = 0xCB, .base = 'E', .acc = "dieresis" },
+        .{ .u = 0xCD, .base = 'I', .acc = "acute" }, .{ .u = 0xCC, .base = 'I', .acc = "grave" }, .{ .u = 0xCE, .base = 'I', .acc = "circumflex" }, .{ .u = 0xCF, .base = 'I', .acc = "dieresis" }, .{ .u = 0xD1, .base = 'N', .acc = "tilde" },
+        .{ .u = 0xD3, .base = 'O', .acc = "acute" }, .{ .u = 0xD2, .base = 'O', .acc = "grave" }, .{ .u = 0xD4, .base = 'O', .acc = "circumflex" }, .{ .u = 0xD5, .base = 'O', .acc = "tilde" }, .{ .u = 0xD6, .base = 'O', .acc = "dieresis" },
+        .{ .u = 0xDA, .base = 'U', .acc = "acute" }, .{ .u = 0xD9, .base = 'U', .acc = "grave" }, .{ .u = 0xDB, .base = 'U', .acc = "circumflex" }, .{ .u = 0xDC, .base = 'U', .acc = "dieresis" }, .{ .u = 0xDD, .base = 'Y', .acc = "acute" },
+        .{ .u = 0x161, .base = 's', .acc = "caron" }, .{ .u = 0x160, .base = 'S', .acc = "caron" }, .{ .u = 0x17E, .base = 'z', .acc = "caron" }, .{ .u = 0x17D, .base = 'Z', .acc = "caron" },
+    };
+    for (ACC) |a| if (a.u == uni) {
+        out[0] = a.base;
+        @memcpy(out[1 .. 1 + a.acc.len], a.acc);
+        return out[0 .. 1 + a.acc.len];
+    };
+    if (uni > 0xFFFF) return &[_]u8{};
+    // uniXXXX
+    const hex = "0123456789ABCDEF";
+    @memcpy(out[0..3], "uni");
+    out[3] = hex[(uni >> 12) & 15];
+    out[4] = hex[(uni >> 8) & 15];
+    out[5] = hex[(uni >> 4) & 15];
+    out[6] = hex[uni & 15];
+    return out[0..7];
+}
+
 /// "aacute" 처럼 밑글자+악센트인 이름은 밑글자만이라도 살린다.
 const ACCENTS = "acute grave circumflex tilde dieresis ring cedilla caron breve macron ogonek";
 
@@ -317,6 +374,10 @@ pub fn attachWidths(b: []const u8, fbody: usize) void {
     if (core.fontarea.n == 0) return;
     const f = &core.fonts.all()[core.fontarea.n - 1];
     const fend = core.find(b, "endobj", fbody) orelse b.len;
+    // 두 바이트 코드는 Type0(합성) 글꼴만이다. ToUnicode 의 codespacerange 가 <0000> <FFFF>
+    // 여도(InDesign 은 단순 글꼴에도 그렇게 적는다) 단순 글꼴은 한 바이트다 — 안 그러면
+    // 낱말 사이(Tw)가 안 먹고 기본 폭이 1000 이 되고 글리프를 코드 번호로 집는다
+    if (core.find(b[fbody..fend], "/Type0", 0) == null) f.two_byte = false;
     // Identity-H 는 두 바이트 코드가 곧 CID 다
     if (core.find(b[fbody..fend], "/Encoding", 0)) |ea2| {
         var q = fbody + ea2 + 9;

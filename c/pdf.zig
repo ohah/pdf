@@ -141,6 +141,26 @@ fn areaOf(off: *usize, cap: usize) usize {
     return off.*;
 }
 fn imgArea() usize { return areaOf(&img.off, img.cap); }
+
+/// 그림 자리에 need 바이트가 더 들어가게 한다. 모자라면 배로 늘려 옮긴다(1.5GB 까지).
+///
+/// 예전에는 48MB 로 못박혀, 그보다 큰 그림(A4 전면 CMYK JPEG 2489×3517 → RGB 26MB +
+/// 작업 44MB)은 우리가 못 풀고 브라우저에 넘겼다 — 브라우저는 CMYK JPEG 을 뒤집어 그려
+/// 쪽이 통째로 검게 나왔다(순천시 업무계획 표지). 담은 그림은 imgArea() 기준 자리(off)로
+/// 가리키므로 통째로 옮겨도 된다.
+fn imgEnsure(need: usize) bool {
+    if (imgArea() == 0) return false;
+    if (img.cap - img.used >= need) return true;
+    const limit: usize = 1536 * 1024 * 1024;
+    var want: usize = @max(img.cap * 2, img.used + need + 1024 * 1024);
+    if (want > limit) want = limit;
+    if (img.used + need > want) return false;
+    const at = zoneAlloc(want) orelse return false;
+    if (img.used > 0) @memcpy(@as([*]u8, @ptrFromInt(at))[0..img.used], @as([*]const u8, @ptrFromInt(img.off))[0..img.used]);
+    img.off = at;
+    img.cap = want;
+    return true;
+}
 pub fn fontArea() usize { return areaOf(&fontarea.off, fontarea.cap); }
 fn inlArea() usize { return areaOf(&inl.off, inl.cap); }
 fn subArea() usize { return areaOf(&subs.off, subs.cap); }
@@ -1660,6 +1680,9 @@ pub const FontMap = struct {
     identity: bool,
     /// 세로쓰기
     vertical: bool,
+    /// 단순 CFF(Type1C)의 코드→글리프 표. cff_map 이 서면 cmap 을 이걸로 짓는다
+    cff_gid: [256]u16 = [_]u16{0} ** 256,
+    cff_map: bool = false,
     /// 어느 자원 사전에서 왔나 — 쪽이면 0, 폼 XObject 면 그 객체 번호. 폼이 제 글꼴을
     /// 쪽과 같은 이름(C2_0)으로 갖는 문서(InDesign)에서 이름만 보면 남의 ToUnicode 를 써
     /// 글자가 통째로 깨졌다
@@ -2249,6 +2272,8 @@ fn takeImage(b: []const u8, ob: usize, name: []const u8) ?u32 {
     if (data < b.len and b[data] == '\n') data += 1;
     if (data > b.len or length > b.len - data) return null; // 넘침 없이 견준다
 
+    // 풀어 담을 자리를 먼저 넉넉히 — 원본 + 화소당 열두 바이트(CMYK JPEG 의 RGB 와 작업 자리)
+    _ = imgEnsure(@as(usize, length) + @as(usize, w) * @as(usize, h) * 12 + 64 * 1024);
     const room = img.cap - img.used;
     if (room < 4096) return null;
     const dst = @as([*]u8, @ptrFromInt(imgArea() + img.used));
@@ -2592,7 +2617,7 @@ fn stencilAlpha(mi: u32) ?u32 {
     const im = imgs.all()[mi];
     if (im.kind != 4 or im.w == 0 or im.h == 0) return null;
     const px = @as(usize, im.w) * im.h;
-    if (px == 0 or px + 4 > img.cap - img.used) return null;
+    if (px == 0 or !imgEnsure(px + 4)) return null;
     const stride = (@as(usize, im.w) + 7) / 8;
     if (im.len < stride * im.h) return null;
     const src = @as([*]const u8, @ptrFromInt(imgArea() + im.off));
@@ -2621,7 +2646,7 @@ fn colorKeyMask(slot: u32, lo: []const u32, hi: []const u32) void {
     if (slot >= img.n or !imgs.room(img.n + 1)) return;
     const im = imgs.all()[slot];
     const px = @as(usize, im.w) * im.h;
-    if (px == 0 or px > img.cap - img.used) return;
+    if (px == 0 or !imgEnsure(px)) return;
     const comps: u32 = if (im.kind == 1) 3 else 1;
     if (lo.len < comps) return;
     const src = @as([*]const u8, @ptrFromInt(imgArea() + im.off));
@@ -2657,7 +2682,7 @@ export fn jpegToRgb(i: u32) i32 {
     if (im.kind != 3 or im.w == 0 or im.h == 0) return -1;
     const px = @as(usize, im.w) * im.h;
     const need = px * 3;
-    if (need + 4096 > img.cap - img.used) return -1;
+    if (!imgEnsure(need + 4096)) return -1;
     if (!imgs.room(img.n + 1)) return -1;
     const src = @as([*]const u8, @ptrFromInt(imgArea() + im.off))[0..im.len];
     const dst = @as([*]u8, @ptrFromInt(imgArea() + img.used))[0..need];
@@ -2690,30 +2715,7 @@ export fn jpegToRgb(i: u32) i32 {
 /// 여기 쓴 이차식은 pdf.js 것이다(Apache-2.0, THIRD-PARTY-NOTICES.md 참고).
 /// 박힌 ICC 프로파일이 있으면 그쪽이 먼저다 — 이건 프로파일이 없을 때다.
 pub fn cmykRgb(c: f32, m: f32, y: f32, k: f32, out: *[3]f32) void {
-    const r = 255 +
-        c * (-4.387332384609988 * c + 54.48615194189176 * m + 18.82290502165302 * y +
-            212.25662451639585 * k - 285.2331026137004) +
-        m * (1.7149763477362134 * m - 5.6096736904047315 * y - 17.873870861415444 * k -
-            5.497006427196366) +
-        y * (-2.5217340131683033 * y - 21.248923337353073 * k + 17.5119270841813) +
-        k * (-21.86122147463605 * k - 189.48180835922747);
-    const g = 255 +
-        c * (8.841041422036149 * c + 60.118027045597366 * m + 6.871425592049007 * y +
-            31.159100130055922 * k - 79.2970844816548) +
-        m * (-15.310361306967817 * m + 17.575251261109482 * y + 131.35250912493976 * k -
-            190.9453302588951) +
-        y * (4.444339102852739 * y + 9.8632861493405 * k - 24.86741582555878) +
-        k * (-20.737325471181034 * k - 187.80453709719578);
-    const b = 255 +
-        c * (0.8842522430003296 * c + 8.078677503112928 * m + 30.89978309703729 * y -
-            0.23883238689178934 * k - 14.183576799673286) +
-        m * (10.49593273432072 * m + 63.02378494754052 * y + 50.606957656360734 * k -
-            112.23884253719248) +
-        y * (0.03296041114873217 * y + 115.60384449646641 * k - 193.58209356861505) +
-        k * (-22.33816807309886 * k - 180.12613974708367);
-    out[0] = @max(0, @min(1, r / 255));
-    out[1] = @max(0, @min(1, g / 255));
-    out[2] = @max(0, @min(1, b / 255));
+    jpeg.cmykRgb(c, m, y, k, out);
 }
 
 fn cmykToRgb(dst: [*]u8, n_px: usize, ix: i32, invert: bool) u32 {
@@ -2860,6 +2862,23 @@ export fn itemAngle(i: u32) f32 { return if (i < item_n) items.all()[i].ang else
 export fn itemMcid(i: u32) i32 { return if (i < item_n) items.all()[i].mcid else -1; }
 /// 지금 그리는 표시 구간(/MCID). 폼 XObject 안에서도 바깥 구간을 물려받는다.
 var cur_mcid: i32 = -1;
+/// 지금 선 굵기(w) — 외곽선 글자(Tr 1·2)를 글꼴 행렬 안에서 긋자면 되돌려 줘야 한다
+var cur_lw: f32 = 1;
+/// 외곽선 글리프(Type1·Type3)를 그릴 때의 Tr 모드. 0 채움, 1 획, 2 둘 다, 3·7 안 그림
+pub var glyph_mode: i32 = 0;
+/// 글리프 좌표 한 단위가 사용자 좌표 몇인가 — 획 굵기를 글리프 단위로 되돌리는 데 쓴다
+pub var glyph_unit: f32 = 0.001;
+
+/// 외곽선 글리프의 경로를 Tr 모드대로 칠한다. 외곽선 글자(Tr 1)를 채움으로 그리면
+/// 통계청 소식지 표지의 큰 "DATA" 가 파란 덩어리로 나왔다
+pub fn glyphPaint() void {
+    switch (glyph_mode) {
+        1, 5 => { emitOp(13, &[_]f32{cur_lw / @max(1e-6, glyph_unit)}); emitOp(7, &[_]f32{}); },
+        2, 6 => { emitOp(13, &[_]f32{cur_lw / @max(1e-6, glyph_unit)}); emitOp(8, &[_]f32{0}); },
+        3, 7 => emitOp(9, &[_]f32{}),
+        else => emitOp(6, &[_]f32{0}),
+    }
+}
 export fn itemOff(i: u32) u32 { return items.all()[i].off; }
 /// 이 항목을 그린 글꼴 번호(1부터, 없으면 0). 이름은 fontNamePtr 로 읽는다.
 export fn itemFont(i: u32) u32 {
@@ -3202,10 +3221,15 @@ fn resetPage(w: f32, h: f32) void {
     dev = .{};
     dev_n = 0;
     cur_mcid = -1;
+    cur_lw = 1;
     cur_scope = 0;
     scan_scope = 0;
     fontarea.n = 0;
     fontarea.used = 0;
+    // Type1 글리프 프로그램 자리도 쪽마다 비운다 — 안 비우면 글꼴 열 개(8192/768)째부터
+    // 조용히 못 담아 그 뒤 Type1 글자가 다 시스템 글꼴로 떨어졌다(ResNet 논문 2쪽)
+    t1s.used = 0;
+    pdft1.resetPool();
     c2g.used = 0;
     fnReset();
     cur.font = -1;
@@ -3674,7 +3698,7 @@ pub fn runOps(b: []const u8, depth: u32) void {
     // 글자 상태(Tc·Tw·Tz·TL·Ts·Tr·글꼴)는 그래픽 상태의 일부라 q/Q 에 함께 묻고
     // 되살린다. 안 하면 앞 q…Q 안에서 준 "0.396 Tc" 가 다음 글에 새어 글자마다
     // 0.4pt 씩 벌어지고, 줄 뒤쪽 글자 자리가 13pt 밀려 다른 글꼴 조각과 겹쳤다(Word)
-    const TState = struct { tc: f32, tw: f32, th: f32, lead: f32, rise: f32, render: i32, font: i32, size: f32 };
+    const TState = struct { tc: f32, tw: f32, th: f32, lead: f32, rise: f32, render: i32, font: i32, size: f32, lw: f32 };
     var ts_stack: [32]TState = undefined;
     var ts_n: u32 = 0;
     var mc_depth: u32 = 0; // 표시 구간 깊이
@@ -3826,14 +3850,21 @@ pub fn runOps(b: []const u8, depth: u32) void {
                     const ey2 = m.f + m.d * rise + m.b * vshift[0] + m.d * vshift[1];
                     // Type1 은 글리프가 외곽선 프로그램이다. 그 자리에 그린다.
                     if (ff) |g| {
-                        if (g.t1 and code < 256 and pdft1.t1_pool[g.t1_cs + code].len > 0) {
+                        if (g.t1 and code < 256 and pdft1.poolAt(g.t1_cs + code).len > 0) {
                             runFlush();
+                            // 글리프 외곽선 묶음의 시작·끝(39·40) — 괘선·그림 상자를 찾는 쪽이
+                            // 글자 획을 도형으로 세지 않게 한다(Type1 논문에서 제목이 그림 글자로 몰렸다)
+                            emitOp(39, &[_]f32{});
                             emitOp(14, &[_]f32{});
                             emitOp(16, &[_]f32{ m.a, m.b, m.c, m.d, ex2, ey2 });
                             emitOp(16, &[_]f32{ size * th2, 0, 0, size, 0, 0 });
                             emitOp(16, &[_]f32{ g.fm[0], g.fm[1], g.fm[2], g.fm[3], g.fm[4], g.fm[5] });
+                            glyph_mode = mode;
+                            glyph_unit = size * g.fm[0];
                             const ok = drawType1(g, code);
+                            glyph_mode = 0;
                             emitOp(15, &[_]f32{});
+                            emitOp(40, &[_]f32{});
                             if (ok) {
                                 m.* = advance(ff, adv, m.*);
                                 return;
@@ -3849,6 +3880,7 @@ pub fn runOps(b: []const u8, depth: u32) void {
                             const gs_opt = if (rec == null) subStream(gnum, dep) else null;
                             if (rec != null or gs_opt != null) {
                                 runFlush();
+                                emitOp(39, &[_]f32{});
                                 emitOp(14, &[_]f32{});
                                 emitOp(16, &[_]f32{ m.a, m.b, m.c, m.d, ex2, ey2 });
                                 emitOp(16, &[_]f32{ size * th2, 0, 0, size, 0, 0 });
@@ -3862,6 +3894,7 @@ pub fn runOps(b: []const u8, depth: u32) void {
                                     t3Record(gnum, start, snap);
                                 }
                                 emitOp(15, &[_]f32{});
+                                emitOp(40, &[_]f32{});
                                 m.* = advance(ff, adv, m.*);
                                 return;
                             }
@@ -4034,14 +4067,14 @@ pub fn runOps(b: []const u8, depth: u32) void {
         }.f;
 
         if (eqs(op, "q")) {
-            if (ts_n < ts_stack.len) { ts_stack[ts_n] = .{ .tc = tc, .tw = tw, .th = th, .lead = lead, .rise = t_rise, .render = t_render, .font = cur.font, .size = tf_size }; ts_n += 1; }
+            if (ts_n < ts_stack.len) { ts_stack[ts_n] = .{ .tc = tc, .tw = tw, .th = th, .lead = lead, .rise = t_rise, .render = t_render, .font = cur.font, .size = tf_size, .lw = cur_lw }; ts_n += 1; }
             emitOp(14, &[_]f32{});
         }
         else if (eqs(op, "Q")) {
             if (ts_n > 0) {
                 ts_n -= 1;
                 const t = ts_stack[ts_n];
-                tc = t.tc; tw = t.tw; th = t.th; lead = t.lead; t_rise = t.rise; t_render = t.render; tf_size = t.size;
+                tc = t.tc; tw = t.tw; th = t.th; lead = t.lead; t_rise = t.rise; t_render = t.render; tf_size = t.size; cur_lw = t.lw;
                 if (t.font >= 0) cur.font = t.font;
             }
             emitOp(15, &[_]f32{});
@@ -4094,7 +4127,7 @@ pub fn runOps(b: []const u8, depth: u32) void {
             cmykRgb(st[0], st[1], st[2], st[3], &rgb4);
             emitOp(12, &[_]f32{ rgb4[0], rgb4[1], rgb4[2] });
         }
-        else if (eqs(op, "w") and sp >= 1) emitOp(13, &[_]f32{st[0]})
+        else if (eqs(op, "w") and sp >= 1) { cur_lw = st[0]; emitOp(13, &[_]f32{st[0]}); }
         else if (eqs(op, "J") and sp >= 1) emitOp(19, &[_]f32{st[0]})
         else if (eqs(op, "j") and sp >= 1) emitOp(20, &[_]f32{st[0]})
         else if (eqs(op, "BT")) { tm = Mat{}; tlm = Mat{}; t_clip = false; }

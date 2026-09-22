@@ -129,6 +129,19 @@ const t = (name, cond, got) => {
   { const pdf = await open("cropclip"); t("CropBox 밖 워터마크는 text() 에 안 나온다", (await pdf.text(1)) === "Body text inside crop", JSON.stringify(await pdf.text(1))); pdf.close(); }
 }
 
+// Type1 글꼴이 한 쪽에 둘 — 둘째 글꼴의 글리프도 온전히 그린다(글리프 자리가 첫 글꼴 기준으로 어긋나던 것)
+{
+  const pdf = await PDFDocument.open(`${FX}/type1x2.pdf`);
+  const q = await pdf.get(1, false);
+  const groups = [];
+  let i = 0, cur = null;
+  while (i < q.ops.length) { const c = q.ops[i]; if (c === 39) cur = { path: 0, fill: 0 }; else if (c === 40) { groups.push(cur); cur = null; } else if (cur) { if (c === 1 || c === 2 || c === 3) cur.path++; if (c === 6) cur.fill++; } i += 2 + q.ops[i + 1]; }
+  t("Type1 둘: 글리프 다섯 묶음", groups.length === 5, groups.length);
+  t("Type1 둘: 둘째 글꼴 글리프도 외곽선이 있다", groups.slice(1).every((g) => g.path >= 3 && g.fill === 1), JSON.stringify(groups));
+  t("Type1 둘: 글자로도 읽힌다", (await pdf.text(1)) === "A\nABCD", JSON.stringify(await pdf.text(1)));
+  pdf.close();
+}
+
 // 암호가 걸린 문서
 {
   const pdf = await PDFDocument.open(`${FX}/enc-perm.pdf`, { password: "" });

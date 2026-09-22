@@ -15,6 +15,8 @@ export const OP = {
   LINECAP: 19, LINEJOIN: 20, ALPHA: 21, INLINE: 22, SALPHA: 23, DASH: 24,
   MITER: 25, BLEND: 26, SHFILL: 27, SHCOLOR: 28,
   FNSHADE: 37, FNROW: 38,
+  /** Type1·Type3 글리프 외곽선 묶음의 시작·끝 — 그리기에는 뜻이 없고, 괘선을 찾는 쪽이 건너뛰는 표시 */
+  GLYPH_BEGIN: 39, GLYPH_END: 40,
 } as const;
 
 const BLENDS = [
@@ -769,16 +771,22 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
         const lost = !emb && input.fontIsPua?.(fontIdx) === true;
         const paintStr = lost ? shown : str;
         g.save();
+        // 텍스트 행렬의 배율은 글꼴 크기에 접어 넣는다. "Tf 1 · Tm 173" 처럼 1px 글꼴을
+        // 행렬로 키우면 브라우저가 1px 로 만든 글리프(힌팅·단순화된 외곽선)를 173배 늘려
+        // 통계청 소식지 표지의 큰 DATA 가 각진 선 몇 가닥으로 나왔다. 획 굵기(w)도
+        // 사용자 좌표 그대로가 되어 따로 되돌릴 것이 없다
+        const ts = Math.sqrt(Math.abs(ta * td - tb * tc)) || 1;
+        const fontPx = Math.max(size * ts, 0.01);
         // 텍스트 행렬을 태우고, 글자만 다시 뒤집는다(페이지를 뒤집어 뒀으므로).
-        g.transform(ta, tb, tc, td, x, y);
+        g.transform(ta / ts, tb / ts, tc / ts, td / ts, x, y);
         g.transform(1, 0, 0, -1, 0, 0);
         // 부분집합 글꼴에 없는 글자는 시스템 글꼴로 넘어가게 뒤를 받쳐 둔다.
         const fam = emb ? `"${emb}", system-ui, sans-serif` : generic(input.fontName?.(fontIdx));
-        g.font = `${Math.max(size, 0.01)}px ${fam}`;
+        g.font = `${fontPx}px ${fam}`;
         // 대신 그린 글꼴이 제 칸보다 넓으면 가로로 눌러 넣는다.
         // 이렇게 해야 글꼴이 바뀌어도 글자가 서로 겹치지 않는다.
         if (adv > 0) {
-          const m = g.measureText(paintStr).width;
+          const m = g.measureText(paintStr).width / ts;
           // 글꼴이 아예 안 박힌 문서는 대신 그리는 것이 정상이다. 뷰어들이
           // 다 그렇게 하고, 폭만 맞춰 눌러 넣는다.
           //
@@ -816,7 +824,7 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
           if (run) {
             run.text += str;
             const m3 = g.getTransform();
-            run.endX = m3.e / dpr + (adv > 0 ? adv : size * 0.3) * Math.hypot(m3.a, m3.b) / dpr;
+            run.endX = m3.e / dpr + (adv > 0 ? adv * ts : fontPx * 0.3) * Math.hypot(m3.a, m3.b) / dpr;
           }
           g.restore();
           break;
@@ -826,9 +834,9 @@ export function drawOps(canvas: HTMLCanvasElement, input: DrawInput): TextRun[] 
           const m2 = g.getTransform();
           const px = m2.e / dpr;
           const py = m2.f / dpr;
-          const hh = Math.hypot(m2.b, m2.d) * size / dpr;
+          const hh = Math.hypot(m2.b, m2.d) * fontPx / dpr;
           const ang = Math.atan2(m2.b, m2.a);
-          const adv2 = (adv > 0 ? adv : size * 0.5) * Math.hypot(m2.a, m2.b) / dpr;
+          const adv2 = (adv > 0 ? adv * ts : fontPx * 0.5) * Math.hypot(m2.a, m2.b) / dpr;
           if (run && Math.abs(run.y - py) < 0.6 && Math.abs(run.endX - px) < hh * 0.9
               && Math.abs(run.angle - ang) < 0.01) {
             // PDF 에는 빈칸 글자가 없는 경우가 많다. 낱말 사이를 자리로만

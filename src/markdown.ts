@@ -75,6 +75,8 @@ export function rulesOf(ops: Float32Array, pageH: number, y0page = 0): { rules: 
   let path: number[][] = [];
   let sub: number[][] = [];
   const top = (y: number) => y0page + pageH - y;
+  // 글리프 외곽선(39…40)은 도형이 아니다 — 세면 글자마다 도형 수십 개가 되어 모든 줄이 그림 글자가 된다
+  let glyph = 0;
   const flush = (paint: boolean) => {
     if (sub.length) path.push(...sub);
     if (paint && path.length >= 2) {
@@ -98,6 +100,13 @@ export function rulesOf(ops: Float32Array, pageH: number, y0page = 0): { rules: 
   let strokeRect = false;
   for (let i = 0; i < ops.length;) {
     const k = ops[i], n = ops[i + 1], a = i + 2;
+    if (k === 39) { glyph++; i += 2 + n; continue; }
+    if (k === 40) { glyph = Math.max(0, glyph - 1); i += 2 + n; continue; }
+    if (glyph > 0) {
+      // 글리프 안에서는 행렬만 따라간다 — 경로·칠은 도형이 아니다
+      if (k === 14) stack.push(m); else if (k === 15) m = stack.pop() ?? m; else if (k === 16) m = mul([ops[a], ops[a + 1], ops[a + 2], ops[a + 3], ops[a + 4], ops[a + 5]], m);
+      i += 2 + n; continue;
+    }
     switch (k) {
       case 14: stack.push(m); break;
       case 15: m = stack.pop() ?? m; break;

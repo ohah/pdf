@@ -134,7 +134,7 @@ pub fn patchFont(src: []const u8, f: *core.FontMap, dst: []u8) u32 {
         }
     }
 
-    const cmap_len = buildFontCmap(f, @intCast(@min(nglyphs, 65535)), dst[scratch..]);
+    const cmap_len = buildFontCmapFrom(src, f, @intCast(@min(nglyphs, 65535)), dst[scratch..]);
     if (cmap_len == 0) return 0;
 
     // 표 하나: from 0 이면 원본, 1 이면 임시 자리(dst[scratch..])
@@ -151,6 +151,12 @@ pub fn patchFont(src: []const u8, f: *core.FontMap, dst: []u8) u32 {
         const r = 12 + @as(usize, t) * 16;
         const tt = core.be32(src, r);
         if (tt == 0x636D6170) continue; // 'cmap'
+        // 글리프 치환·자리 표(GSUB·GPOS·GDEF·kern·morx)는 뺀다. PDF 는 글리프를 이미 골라
+        // 놓았는데 브라우저가 부분집합 글꼴의 GSUB 를 다시 먹여 숫자 글리프를 (빠진)
+        // 대체 글리프로 바꿔 "2026"·"37" 이 비어 나왔다(통계청 소식지). 커닝도 PDF 자리와
+        // 어긋나므로 같이 뺀다
+        if (tt == 0x47535542 or tt == 0x47504F53 or tt == 0x47444546 or tt == 0x6B65726E or
+            tt == 0x6D6F7278 or tt == 0x42415345 or tt == 0x4A535446 or tt == 0x66656174) continue;
         const off = core.be32(src, r + 8);
         const ln = core.be32(src, r + 12);
         if (off > src.len or ln > src.len - off) return 0;
@@ -263,7 +269,112 @@ pub fn patchFont(src: []const u8, f: *core.FontMap, dst: []u8) u32 {
 /// Identity-H 는 문자 코드가 곧 글리프 번호라, 유니코드를 거치지 않고
 /// 사용자 영역(U+E000~)에 번호를 그대로 붙인다. 그렇지 않으면 ToUnicode 를
 /// 뒤집어 "유니코드 → 글리프" 표를 만든다.
+/// 트루타입 원본 cmap 에서 (platform, encoding) 부표의 코드 하나를 찾는다. 형식 0·4·6·12.
+fn ttfCmapGid(src: []const u8, plat: u16, enc: u16, code: u32) ?u16 {
+    if (src.len < 12) return null;
+    const num = core.be16(src, 4);
+    var t: u16 = 0;
+    var cmap: usize = 0;
+    var clen: usize = 0;
+    while (t < num) : (t += 1) {
+        const r = 12 + @as(usize, t) * 16;
+        if (r + 16 > src.len) return null;
+        if (core.be32(src, r) == 0x636D6170) { cmap = core.be32(src, r + 8); clen = core.be32(src, r + 12); }
+    }
+    if (cmap == 0 or cmap + 4 > src.len) return null;
+    const nt = core.be16(src, cmap + 2);
+    var k: u16 = 0;
+    while (k < nt) : (k += 1) {
+        const e = cmap + 4 + @as(usize, k) * 8;
+        if (e + 8 > src.len) return null;
+        if (core.be16(src, e) != plat or core.be16(src, e + 2) != enc) continue;
+        const so = cmap + core.be32(src, e + 4);
+        if (so + 4 > src.len) return null;
+        const fmt = core.be16(src, so);
+        if (fmt == 0) {
+            if (code > 255 or so + 6 + code >= src.len) return null;
+            const g = src[so + 6 + code];
+            return if (g == 0) null else g;
+        }
+        if (fmt == 6) {
+            const first = core.be16(src, so + 6);
+            const cnt = core.be16(src, so + 8);
+            if (code < first or code >= @as(u32, first) + cnt) return null;
+            const at = so + 10 + (code - first) * 2;
+            if (at + 2 > src.len) return null;
+            const g = core.be16(src, at);
+            return if (g == 0) null else g;
+        }
+        if (fmt == 4) {
+            if (code > 0xFFFF) return null;
+            const segx2 = core.be16(src, so + 6);
+            const seg = segx2 / 2;
+            const ends = so + 14;
+            const starts = ends + segx2 + 2;
+            const deltas = starts + segx2;
+            const ranges = deltas + segx2;
+            if (ranges + segx2 > src.len) return null;
+            var i: usize = 0;
+            while (i < seg) : (i += 1) {
+                const end = core.be16(src, ends + i * 2);
+                if (code > end) continue;
+                const start = core.be16(src, starts + i * 2);
+                if (code < start) return null;
+                const delta = core.be16(src, deltas + i * 2);
+                const ro = core.be16(src, ranges + i * 2);
+                var g: u16 = 0;
+                if (ro == 0) {
+                    g = @intCast((code + delta) & 0xFFFF);
+                } else {
+                    const at = ranges + i * 2 + ro + (code - start) * 2;
+                    if (at + 2 > src.len) return null;
+                    g = core.be16(src, at);
+                    if (g != 0) g = @intCast((@as(u32, g) + delta) & 0xFFFF);
+                }
+                return if (g == 0) null else g;
+            }
+            return null;
+        }
+        if (fmt == 12) {
+            const ngroups = core.be32(src, so + 12);
+            var i: usize = 0;
+            while (i < ngroups and i < 100000) : (i += 1) {
+                const at = so + 16 + i * 12;
+                if (at + 12 > src.len) return null;
+                const sc = core.be32(src, at);
+                const ec = core.be32(src, at + 4);
+                if (code < sc) return null;
+                if (code <= ec) {
+                    const g = core.be32(src, at + 8) + (code - sc);
+                    return if (g == 0 or g > 0xFFFF) null else @intCast(g);
+                }
+            }
+            return null;
+        }
+        return null;
+    }
+    return null;
+}
+
+/// 단순 트루타입 글꼴에서 코드 하나의 글리프 번호 — pdf.js 와 같은 차례로 원본 cmap 을 본다.
+/// (3,1) 은 유니코드로, (3,0) 은 F0xx·코드로, (1,0) 은 코드로. 아무 표도 없으면 코드 = 번호.
+fn simpleGid(src: ?[]const u8, code: u32, uni: u32) u32 {
+    const b = src orelse return code;
+    if (uni != 0) if (ttfCmapGid(b, 3, 1, uni)) |g| return g;
+    if (ttfCmapGid(b, 3, 0, 0xF000 | (code & 0xFF))) |g| return g;
+    if (ttfCmapGid(b, 3, 0, code)) |g| return g;
+    if (ttfCmapGid(b, 1, 0, code)) |g| return g;
+    if (ttfCmapGid(b, 0, 3, uni)) |g| return g;
+    if (ttfCmapGid(b, 0, 4, uni)) |g| return g;
+    if (ttfCmapGid(b, 0, 6, uni)) |g| return g;
+    return code;
+}
+
 pub fn buildFontCmap(f: *core.FontMap, nglyphs: u16, dst: []u8) u32 {
+    return buildFontCmapFrom(null, f, nglyphs, dst);
+}
+
+pub fn buildFontCmapFrom(src: ?[]const u8, f: *core.FontMap, nglyphs: u16, dst: []u8) u32 {
     f.pua = false;
     if (f.identity and nglyphs > 0 and nglyphs <= 6400) {
         const n = core.buildPuaCmap(dst, nglyphs);
@@ -277,10 +388,13 @@ pub fn buildFontCmap(f: *core.FontMap, nglyphs: u16, dst: []u8) u32 {
     var i: u16 = 0;
     while (i < f.n) : (i += 1) {
         const u = f.unis.all()[i];
-        const gid = f.codes.all()[i];
+        const code = f.codes.all()[i];
+        // 단순 트루타입은 코드가 글리프 번호가 아니다 — 원본 cmap 으로 찾는다. 예전에는 코드를
+        // 번호로 써서 InDesign 부분집합(코드 '3' → 글리프 51 = 'R')이 "Vol. 37" 을 "Vol. R" 로 그렸다
+        const gid: u32 = if (f.cff_map) (if (code < 256) f.cff_gid[code] else 0) else if (f.identity or f.two_byte) code else simpleGid(src, code, u);
         if (u == 0 or gid == 0) continue;
         if (core.uni2gid[u] == 0) {
-            core.uni2gid[u] = gid;
+            core.uni2gid[u] = @intCast(@min(gid, 65535));
             if (has_n < has.len) { has[has_n] = u; has_n += 1; }
         }
     }

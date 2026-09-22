@@ -25,6 +25,9 @@ const assets = {
         : url === "/sample.pdf" ? join(repo, "tests/fixtures/korean.pdf")
         // 시험용 — 붙임감을 이름으로 꺼내 쓴다
         : url.startsWith("/fixtures/") ? join(repo, "tests", url)
+        // 실문서 표본 맞대기(tests/corpus-render.mjs) — CORPUS 환경 변수가 가리키는 디렉터리
+        : url.startsWith("/corpus/") && process.env.CORPUS ? join(process.env.CORPUS, url.slice(8))
+        : url.startsWith("/corpus-png/") && process.env.CORPUS_PNG ? join(process.env.CORPUS_PNG, url.slice(12))
         : url.startsWith("/cmaps/") ? join(repo, url)
         // pdf.js 는 JPX(openjpeg)·JBIG2·ICC(qcms) 를 따로 실린 wasm 으로 푼다.
         // 이걸 안 내어 주면 그런 문서를 "못 그린다" — pdf.js 탓이 아니라
@@ -38,6 +41,8 @@ const assets = {
         file.endsWith(".wasm") ? "application/wasm"
         : file.endsWith(".js") ? "text/javascript"
         : file.endsWith(".pdf") ? "application/pdf"
+        : file.endsWith(".png") ? "image/png"
+        : file.endsWith(".json") ? "application/json"
         : "application/octet-stream");
       createReadStream(file).pipe(res);
     });

@@ -1,0 +1,89 @@
+<!doctype html>
+<!-- 실문서 표본의 쪽을 우리·pdf.js·mupdf(미리 그린 PNG) 셋으로 그려 화소를 맞댄다.
+     tests/corpus-render.mjs 가 띄운다. ?docs=이름,… &pages=JSON -->
+<meta charset="utf-8">
+<canvas id="a"></canvas><canvas id="b"></canvas><canvas id="c"></canvas>
+<pre id="out"></pre>
+<script type="module">
+import { PDFDocument } from "@ohah/pdf";
+import * as pdfjs from "pdfjs-dist";
+import workerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+
+const Q = new URLSearchParams(location.search);
+const SCALE = Number(Q.get("scale") || "1");
+const DOCS = (Q.get("docs") || "").split(",").filter(Boolean);
+const WANT_PNG = Q.get("png") === "1";
+const ONLY = Q.get("page") ? Number(Q.get("page")) : 0;
+const bytesOf = async (u) => new Uint8Array(await (await fetch(u)).arrayBuffer());
+const PAGES = await (await fetch("/corpus-png/pages.json")).json();
+
+function stats(A, B, w, h) {
+  let tot = 0, bad = 0, inkA = 0, inkB = 0;
+  const n = w * h;
+  for (let i = 0; i < n; i++) {
+    const o = i * 4;
+    let d = 0;
+    for (let c = 0; c < 3; c++) { const e = Math.abs(A[o + c] - B[o + c]); if (e > d) d = e; tot += e; }
+    if (d > 32) bad++;
+    if (A[o] < 200) inkA++;
+    if (B[o] < 200) inkB++;
+  }
+  return { mean: +(tot / (n * 3)).toFixed(2), bad: +((bad / n) * 100).toFixed(2), inkA: +((inkA / n) * 100).toFixed(2), inkB: +((inkB / n) * 100).toFixed(2) };
+}
+const A = document.getElementById("a"), B = document.getElementById("b"), C = document.getElementById("c");
+const rows = [];
+for (const name of DOCS) {
+  const ps = PAGES[name];
+  if (!Array.isArray(ps)) { rows.push({ name, err: "mupdf 못 엶" }); continue; }
+  let bytes, pdf, task, doc;
+  try {
+    bytes = await bytesOf(`/corpus/${name}.pdf`);
+    pdf = await PDFDocument.open(bytes.slice(), { wasm: "/pdf.wasm", cmaps: "/cmaps" });
+    task = pdfjs.getDocument({ data: bytes.slice(), cMapUrl: "/cmaps/", cMapPacked: true, wasmUrl: "/pdfjs/wasm/", iccUrl: "/pdfjs/iccs/", standardFontDataUrl: "/pdfjs/standard_fonts/" });
+    doc = await task.promise;
+  } catch (e) { rows.push({ name, err: "열기: " + String(e?.message ?? e).slice(0, 80) }); continue; }
+  for (const p of (ONLY ? [ONLY] : ps)) {
+    const row = { name, page: p };
+    try {
+      const t0 = performance.now();
+      await pdf.render(p, A, { scale: SCALE, dpr: 1 });
+      row.msA = Math.round(performance.now() - t0);
+      const pg = await doc.getPage(p);
+      const vp = pg.getViewport({ scale: SCALE });
+      B.width = Math.round(vp.width); B.height = Math.round(vp.height);
+      const g = B.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, B.width, B.height);
+      const t1 = performance.now();
+      await pg.render({ canvasContext: g, viewport: vp, canvas: B }).promise;
+      row.msB = Math.round(performance.now() - t1);
+      pg.cleanup();
+      const img = new Image();
+      await new Promise((ok, no) => { img.onload = ok; img.onerror = no; img.src = `/corpus-png/${name}-${p}.png`; });
+      C.width = img.width; C.height = img.height;
+      C.getContext("2d").drawImage(img, 0, 0);
+      row.w = A.width; row.h = A.height;
+      if (A.width !== B.width || A.height !== B.height) row.err = `크기 다름 우리 ${A.width}x${A.height} pdfjs ${B.width}x${B.height}`;
+      else {
+        const ga = A.getContext("2d").getImageData(0, 0, A.width, A.height).data;
+        const gb = B.getContext("2d").getImageData(0, 0, B.width, B.height).data;
+        row.ab = stats(ga, gb, A.width, A.height);
+        if (Math.abs(C.width - A.width) <= 1 && Math.abs(C.height - A.height) <= 1) {
+          // mupdf 그림은 1픽셀 차이가 날 수 있어 우리 크기로 맞춰 다시 그린다
+          const D = document.createElement("canvas"); D.width = A.width; D.height = A.height;
+          D.getContext("2d").drawImage(img, 0, 0, A.width, A.height);
+          const gc = D.getContext("2d").getImageData(0, 0, A.width, A.height).data;
+          row.ac = stats(ga, gc, A.width, A.height);
+          row.bc = stats(gb, gc, A.width, A.height);
+        } else row.cerr = `mupdf 크기 ${C.width}x${C.height}`;
+        if (WANT_PNG) { row.pngA = A.toDataURL(); row.pngB = B.toDataURL(); row.pngC = C.toDataURL(); }
+      }
+    } catch (e) { row.err = String(e?.message ?? e).slice(0, 90); }
+    rows.push(row);
+    document.getElementById("out").textContent = rows.length + " 쪽";
+  }
+  pdf.close();
+  await task.destroy();
+}
+window.__cmp = rows;
+document.title = "done";
+</script>
