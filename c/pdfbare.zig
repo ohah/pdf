@@ -476,7 +476,10 @@ pub fn draw(b: []const u8, ab: usize, abe: usize, rect: [4]f32) bool {
                         var x = x3;
                         var up = false;
                         move(x, y3 + dy);
-                        while (x < x4) {
+                        // 마디 수를 못박는다 — /QuadPoints 가 4294967295(퍼저)면 끝없이 돌았고,
+                        // f32 라 x += dy 가 제자리를 맴돌기도 한다
+                        var seg: u32 = 0;
+                        while (x < x4 and seg < 4000) : (seg += 1) {
                             x += dy;
                             line(@min(x, x4), if (up) y3 + dy else y3);
                             up = !up;

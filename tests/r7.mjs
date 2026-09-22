@@ -821,3 +821,11 @@ for (const f of ['crop.pdf', 'cmyk.pdf', 'mask-stencil.pdf', 'mask-key.pdf', 'bp
     ['SOS 뒤 잘림', (b) => { const c = Buffer.from(b); const i = c.indexOf(Buffer.from([0xff, 0xda])); return i > 0 ? Buffer.concat([c.subarray(0, i + 20), c.subarray(c.length - 200)]) : c; }],
   ]) await run(`CMYK ${nm}`, mk(src));
 }
+{
+  // 퍼저(씨앗 52)가 찾은 것 — 주석의 좌표·예측기 값이 4294967295 면 끝없이 돌거나 밖을 읽었다
+  const noap = fs.readFileSync(`${S}/noap.pdf`).toString('latin1');
+  const filt = fs.readFileSync(`${S}/filters.pdf`).toString('latin1');
+  await run('구불선 QuadPoints 4294967295', Buffer.from(noap.replace(/\/QuadPoints \[25 150 135 150 25 120 135 120\]/, '/QuadPoints [25 150 135 150 25 120 4294967295 120]'), 'latin1'));
+  await run('모든 좌표 4294967295', Buffer.from(noap.replace(/\b(\d{2,3})\b/g, '4294967295'), 'latin1'));
+  await run('예측기 /Colors 4294967295', Buffer.from(filt.replace('/Colors 3', '/Colors 4294967295'), 'latin1'));
+}

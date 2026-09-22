@@ -180,11 +180,17 @@ pub fn lzw(src: []const u8, dst: []u8, early: u32) u32 {
 }
 
 /// PNG·TIFF 예측기를 되돌린다.
-pub fn unpredict(buf: []u8, pred: u32, colors: u32, bpc: u32, columns: u32) u32 {
+pub fn unpredict(buf: []u8, pred: u32, colors0: u32, bpc0: u32, columns0: u32) u32 {
     if (pred < 2) return @intCast(buf.len);
-    const bpp = @max(1, (colors * bpc + 7) / 8);
-    const row = (columns * colors * bpc + 7) / 8;
-    if (row == 0) return @intCast(buf.len);
+    // 엉터리 값(/Colors 4294967295 — 퍼저)은 규격 범위로 자른다. 곱하면 u32 를 넘어
+    // 줄 길이가 엉뚱해지고 buf 밖을 읽었다
+    const colors: u64 = @min(@max(colors0, 1), 64);
+    const bpc: u64 = if (bpc0 == 1 or bpc0 == 2 or bpc0 == 4 or bpc0 == 8 or bpc0 == 16) bpc0 else 8;
+    const columns: u64 = @min(@max(columns0, 1), 1 << 24);
+    const bpp: usize = @intCast(@max(1, (colors * bpc + 7) / 8));
+    const row64 = (columns * colors * bpc + 7) / 8;
+    if (row64 == 0 or row64 > buf.len) return @intCast(buf.len);
+    const row: usize = @intCast(row64);
     if (pred == 2) {
         // TIFF — 앞 화소를 더한다 (8비트만)
         if (bpc != 8) return @intCast(buf.len);
