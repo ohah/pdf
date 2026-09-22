@@ -1,6 +1,6 @@
 {
   "name": "@ohah/pdf",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "브라우저에서 PDF 를 읽고 그리고 고친다. Zig 로 짠 wasm 엔진을 워커에서 돌린다.",
   "license": "MIT",
   "type": "module",
