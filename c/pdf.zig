@@ -77,9 +77,24 @@ pub var t1s: struct {
 pub fn heapBase() usize { return @intFromPtr(&__heap_base); }
 
 /// 입력·출력에 쓸 자리를 확보한다. 모자라면 메모리를 늘린다.
+/// 객체 스트림을 펼치다 자리가 모자랐을 때, 다 펼치려면 얼마나 필요한지.
+/// 0 이면 다 들어갔다. 쓰는 쪽이 setExpExtra 로 더 달라고 한 뒤 다시 연다.
+var exp_need: usize = 0;
+var exp_extra: usize = 0;
+/// 객체 스트림 하나를 푸는 여벌 자리(bin2)가 모자랐을 때 필요한 크기. 0 이면 넉넉했다
+var exp_need2: usize = 0;
+export fn expNeed() usize { return exp_need; }
+export fn expNeedSecond() usize { return exp_need2; }
+export fn setExpExtra(n: usize) void { exp_extra = n; }
+
 export fn reserve(want_in: usize, want_out: usize) u32 {
     // 원본 · 펼친 객체 · 출력 순으로 잡는다. 펼친 객체는 원본만큼 여유를 준다.
-    exp.cap = want_in + 1024 * 1024;
+    //
+    // 원본만큼으로는 모자란 문서가 있다 — IRS 1040 설명서(4.4MB)는 객체 7만 7천
+    // 개가 거의 다 객체 스트림 안이라 펼치면 원본보다 크다. 예전에는 자리가
+    // 차면 조용히 멈춰 /Pages 가 빠지고 "쪽 나무 없음" 이 됐다. 모자라면
+    // expNeed 로 알리고, 쓰는 쪽이 exp_extra 를 주어 다시 잡는다.
+    exp.cap = want_in + 1024 * 1024 + exp_extra;
     // 여벌 자리.
     //
     // 이어 붙일 둘째 문서를 담기도 하고, 스트림 하나를 풀거나 푸는 동안
@@ -1000,6 +1015,11 @@ pub fn intAfter(b: []const u8, from: usize, to: usize, key: []const u8) ?u32 {
 /// 뒤에 이어 두면 이후 로직은 평문 PDF 를 다루듯 그대로 동작한다.
 fn expandObjectStreams() void {
     exp.len = 0;
+    exp_need = 0;
+    exp_need2 = 0;
+    // 펼친 것이 자리를 넘치면 더는 안 적되, 얼마나 필요한지는 끝까지 센다
+    var need: usize = 0;
+    var short = false;
     const b = @as([*]u8, @ptrFromInt(heapBase()))[0..in_len];
     var scan: usize = 0;
     while (scan < in_len) {
@@ -1017,13 +1037,22 @@ fn expandObjectStreams() void {
         const length = fixStreamLen(b, data, raw_len);
         if (data + length > in_len) continue;
 
-        // 임시로 뒤쪽에 풀고, 앞쪽에 객체 형태로 다시 적는다.
-        if (exp.len + 1024 >= exp.cap) return;
-        const tmp_off = exp.len + (exp.cap - exp.len) / 2;
-        const room = exp.cap - tmp_off;
-        const got = pw_inflate(b[data..].ptr, @intCast(length), expBuf() + tmp_off, @intCast(room));
-        if (got <= 0) continue;
-        const dec = expBuf()[tmp_off .. tmp_off + @as(usize, @intCast(got))];
+        // 여벌 자리(bin2)에 풀고, 펼침 자리에 객체 형태로 다시 적는다.
+        //
+        // 예전에는 펼침 자리의 남은 반에 풀었다 — 자리가 차 갈수록 풀 곳이 줄어
+        // 큰 객체 스트림 하나가 통째로 빠졌다. 여벌 자리는 원본만큼(128MB 까지)이라
+        // 객체 스트림 하나가 그보다 클 일은 없다.
+        const got = pw_inflate(b[data..].ptr, @intCast(length), @as([*]u8, @ptrFromInt(bin2.off)), @intCast(bin2.cap));
+        if (got <= 0) {
+            // 못 풀었다 — 망가진 것일 수도, 자리가 모자란 것일 수도 있다(arXiv 의 pikepdf 는
+            // 객체 스트림 하나가 원본 두 배로 풀리기도 한다). 자리를 크게 잡고 한 번 더 해 본다
+            // 얼마나 풀릴지는 모른다(잘 눌리는 글은 천 배도 된다) — 네 배로 키워 다시 해 보라고
+            // 하고, 쓰는 쪽이 몇 번 되풀이한다(512MB 까지)
+            const want = @min(@as(usize, 512 * 1024 * 1024), @max(bin2.cap * 4, @as(usize, length) * 8 + 1024 * 1024));
+            if (want > bin2.cap) { exp_need2 = @max(exp_need2, want); need += want; short = true; }
+            continue;
+        }
+        const dec = @as([*]u8, @ptrFromInt(bin2.off))[0..@as(usize, @intCast(got))];
 
         var write = exp.len;
         var hp: usize = 0;
@@ -1040,7 +1069,8 @@ fn expandObjectStreams() void {
             const s0 = first + off;
             const s1 = @min(first + end_off, dec.len);
             if (s1 <= s0 or s0 >= dec.len) continue;
-            if (write + (s1 - s0) + 32 >= tmp_off) return;
+            need += (s1 - s0) + 32;
+            if (short or write + (s1 - s0) + 32 >= exp.cap) { short = true; continue; }
             var w = write;
             var tmp: [12]u8 = undefined;
             var tn: usize = 0;
@@ -1059,6 +1089,7 @@ fn expandObjectStreams() void {
         }
         exp.len = write;
     }
+    if (short) exp_need = need + 1024 * 1024;
 }
 
 pub export fn parse(len: usize) u32 {
@@ -1629,6 +1660,10 @@ pub const FontMap = struct {
     identity: bool,
     /// 세로쓰기
     vertical: bool,
+    /// 어느 자원 사전에서 왔나 — 쪽이면 0, 폼 XObject 면 그 객체 번호. 폼이 제 글꼴을
+    /// 쪽과 같은 이름(C2_0)으로 갖는 문서(InDesign)에서 이름만 보면 남의 ToUnicode 를 써
+    /// 글자가 통째로 깨졌다
+    res: u32 = 0,
     /// ToUnicode 가 있었나. 있으면 인코딩 이름으로 짓는 표는 안 쓴다.
     has_tu: bool,
     /// 한 코드가 글자 여럿이 되는 것 — 합자 fi → "f","i" (<0C> <00660069>).
@@ -3167,6 +3202,8 @@ fn resetPage(w: f32, h: f32) void {
     dev = .{};
     dev_n = 0;
     cur_mcid = -1;
+    cur_scope = 0;
+    scan_scope = 0;
     fontarea.n = 0;
     fontarea.used = 0;
     c2g.used = 0;
@@ -3235,8 +3272,19 @@ fn addFont(name: [*]const u8, name_len: u32, cmap: [*]const u8, cmap_len: u32, b
     fontarea.n += 1;
 }
 
+/// 지금 그리는 자원의 범위 — 쪽이면 0, 폼 XObject 안이면 그 객체 번호
+var cur_scope: u32 = 0;
+/// 자원을 훑는 동안의 범위 — scanFonts 가 글꼴에 붙인다
+var scan_scope: u32 = 0;
+
 fn selectFont(name: []const u8) void {
+    // 같은 범위의 것을 먼저, 없으면 이름만 맞는 것
     var i: u8 = 0;
+    while (i < fontarea.n) : (i += 1) {
+        const f = &fonts.all()[i];
+        if (f.res == cur_scope and txEq(f.name[0..f.name_len], name)) { cur.font = i; return; }
+    }
+    i = 0;
     while (i < fontarea.n) : (i += 1) {
         if (txEq(fonts.all()[i].name[0..fonts.all()[i].name_len], name)) {
             cur.font = i;
@@ -3587,16 +3635,20 @@ fn t3Record(num: u32, start: u32, snap: T3Snap) void {
     t3c.used += n;
 }
 
+/// 깊이마다 폼 스트림을 옮겨 두는 자리. 예전에는 2MB 로 못박아, 그보다 큰 폼(arXiv 에
+/// 포함된 PDF 그림 쪽, 풀면 수 MB)은 뒤가 잘렸다 — 잘린 자리의 q 가 짝을 잃어 바깥
+/// 글자까지 밀렸다. 필요한 만큼 zone 에서 잡고 모자라면 배로 늘린다
+var sub_at: [3]usize = .{ 0, 0, 0 };
+var sub_cap: [3]usize = .{ 0, 0, 0 };
+
 pub fn subStream(num: u32, depth: u32) ?[]const u8 {
-    if (depth >= 3 or subArea() == 0) return null;
+    if (depth >= 3) return null;
     if (subcFind(num)) |s| return s;
-    const slot = subs.cap / 3;
     const cs = streamOf(doc.items, num) orelse return null;
-    const n = @min(cs.len, slot);
-    const dst = @as([*]u8, @ptrFromInt(subArea() + depth * slot));
-    @memcpy(dst[0..n], cs[0..n]);
-    subcPut(num, dst[0..n]);
-    return dst[0..n];
+    const dst = pdfform.growBuf(&sub_at[depth], &sub_cap[depth], cs.len, 2 * 1024 * 1024, 0) orelse return null;
+    @memcpy(dst[0..cs.len], cs);
+    subcPut(num, dst[0..cs.len]);
+    return dst[0..cs.len];
 }
 
 pub fn runOps(b: []const u8, depth: u32) void {
@@ -4287,7 +4339,17 @@ pub fn runOps(b: []const u8, depth: u32) void {
                     emitOp(10, &[_]f32{0});
                     emitOp(9, &[_]f32{});
                 }
-                if (subStream(fo.obj, depth)) |fs2| runOps(fs2, depth + 1);
+                // 폼 안의 q/Q 가 안 맞아도(스트림이 잘렸거나 짝이 없는 문서) 바깥이
+                // 흔들리면 안 된다 — 남은 q 만큼 Q 를 채워 넣는다. arXiv 그림(포함된 PDF
+                // 쪽)에서 .9 배율이 새어 나와 그 뒤 캡션 글자가 다 밀려 있었다
+                const dn = dev_n;
+                if (subStream(fo.obj, depth)) |fs2| {
+                    const saved_scope = cur_scope;
+                    cur_scope = fo.obj;
+                    runOps(fs2, depth + 1);
+                    cur_scope = saved_scope;
+                }
+                while (dev_n > dn) emitOp(15, &[_]f32{});
                 emitOp(15, &[_]f32{});
                 if (grp) emitOp(34, &[_]f32{});
             } else {
@@ -4814,7 +4876,9 @@ fn scanFonts(b: []const u8, rs: usize, re_: usize) void {
                         }
                     }
                 }
+                const before = fontarea.n;
                 addFont(b[q + 1 ..].ptr, nlen, cmap_ptr, cmap_len, base_name);
+                if (fontarea.n > before) fonts.all()[fontarea.n - 1].res = scan_scope;
                 if (findObj(b, fobj)) |fbody| {
                     attachWidths(b, fbody);
                     attachType3(b, fbody);
@@ -4894,8 +4958,13 @@ fn scanXObjects(b: []const u8, rs: usize, re_: usize, depth: u32) void {
                             _ = readArr(b, ob, oe, "/Matrix", &fo.mat);
                             if (readArr(b, ob, oe, "/BBox", &fo.bbox) > 0) fo.has_bbox = true;
                             formn.n2 += 1;
-                            // 폼 안의 글꼴·그림도 등록해 둔다
-                            if (depth < 2) scanFormResources(b, ob, oe, depth);
+                            // 폼 안의 글꼴·그림도 등록해 둔다 — 폼의 범위로
+                            if (depth < 2) {
+                                const saved = scan_scope;
+                                scan_scope = onum;
+                                scanFormResources(b, ob, oe, depth);
+                                scan_scope = saved;
+                            }
                         }
                     }
                     _ = takeImage(b, ob, nm);
@@ -4929,16 +4998,13 @@ pub export fn renderPage(idx: u32) u32 {
     cpage.x0 = 0;
     cpage.y0 = 0;
     if (inheritedKey(b, body, end, "/MediaBox")) |n| {
-        var p = n.at + 9;
-        while (p < n.e and b[p] != '[') p += 1;
-        p += 1;
         var v: [4]f32 = .{ 0, 0, 612, 792 };
-        var i: u32 = 0;
-        while (i < 4 and p < n.e) : (i += 1) v[i] = readFloat(b, &p);
-        pw = v[2] - v[0];
-        ph = v[3] - v[1];
-        cpage.x0 = v[0];
-        cpage.y0 = v[1];
+        if (readArrFrom(b, n.at + 9, n.e, &v) == 4) {
+            pw = v[2] - v[0];
+            ph = v[3] - v[1];
+            cpage.x0 = v[0];
+            cpage.y0 = v[1];
+        }
     }
     // CropBox 는 "이만큼만 보여 준다" 는 뜻이다.
     //
@@ -4946,18 +5012,9 @@ pub export fn renderPage(idx: u32) u32 {
     // 준다. 이걸 안 보면 쪽이 크게 잡혀 여백이 딸려 나오고 가운데가 어긋난다.
     // 겹치는 데만 쓴다 — MediaBox 밖을 가리키는 CropBox 는 규격상 무시한다.
     if (inheritedKey(b, body, end, "/CropBox")) |n| crop: {
-        var p = n.at + 8;
-        while (p < n.e and b[p] != '[') p += 1;
-        p += 1;
         var v: [4]f32 = .{ 0, 0, 0, 0 };
-        var i: u32 = 0;
-        while (i < 4 and p < n.e) : (i += 1) {
-            while (p < n.e and isSpace(b[p])) p += 1;
-            if (p >= n.e or !(isDigit(b[p]) or b[p] == '-' or b[p] == '.')) break;
-            v[i] = readFloat(b, &p);
-        }
         // 넷이 다 있어야 상자다. 모자라면 없는 셈 친다.
-        if (i < 4) break :crop;
+        if (readArrFrom(b, n.at + 8, n.e, &v) < 4) break :crop;
         const cx0 = @min(v[0], v[2]);
         const cy0 = @min(v[1], v[3]);
         const cx1 = @max(v[0], v[2]);
@@ -7775,9 +7832,25 @@ pub fn readArr(b: []const u8, ds: usize, de: usize, key: []const u8, dst: []f32)
 }
 
 /// 열쇠 바로 뒤 자리부터 [ … ] 의 수를 읽는다. 열쇠를 keyPos 로 찾은 쪽(pdfbare)도 쓴다.
-pub fn readArrFrom(b: []const u8, p0: usize, de: usize, dst: []f32) u32 {
+pub fn readArrFrom(b: []const u8, p0: usize, de0: usize, dst: []f32) u32 {
     var p = p0;
+    var de = de0;
     while (p < de and isSpace(b[p])) p += 1;
+    // "/MediaBox 395 0 R" — 배열을 딴 객체에 둔 것(arXiv 의 pikepdf 출력, luatex 의 /Border).
+    // 안 따라가면 다음 '[' 를 집거나 기본값(Letter)으로 떨어져 A4 쪽의 글자 자리가 50pt 어긋났다
+    if (p < de and isDigit(b[p])) {
+        var q = p;
+        const num = readUint(b, &q);
+        while (q < de and isSpace(b[q])) q += 1;
+        if (q >= de or !isDigit(b[q])) return 0;
+        _ = readUint(b, &q);
+        while (q < de and isSpace(b[q])) q += 1;
+        if (q >= de or b[q] != 'R') return 0;
+        const ob = findObj(b, num) orelse return 0;
+        de = find(b, "endobj", ob) orelse b.len;
+        p = ob;
+        while (p < de and b[p] != '[') p += 1;
+    }
     if (p >= de or b[p] != '[') return 0;
     p += 1;
     var n: u32 = 0;

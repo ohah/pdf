@@ -118,6 +118,9 @@ type Exports = {
   pageCount: () => number;
   pagesTruncated?: () => number;
   parse: (len: number) => number;
+  expNeed?: () => number;
+  expNeedSecond?: () => number;
+  setExpExtra?: (n: number) => void;
   setFormLayer?: (on: number) => void;
   clearNotes?: () => void;
   addNote?: (kind: number, page: number, x0: number, y0: number, x1: number, y1: number,
@@ -525,6 +528,9 @@ function rtl(t: string): boolean {
 async function open(bytes: Uint8Array, pw: string) {
   const e = await engine();
   if (bytes.byteLength > e.maxInput()) return { err: "too-large", max: e.maxInput() };
+  // 앞 문서가 늘려 둔 펼침·여벌 자리는 이 문서 것이 아니다 — 처음 크기로 돌린다
+  e.setExpExtra?.(0);
+  e.setSecondRoom?.(0);
   // 여는 데는 출력 자리가 필요 없다. 예전에는 파일 크기만큼 함께 잡아,
   // 보기만 해도 파일의 세 배를 들고 있었다 — 만들거나 이어 붙일 때 늘린다.
   if (!e.reserve(bytes.byteLength, 1024 * 1024)) return { err: "no-memory" };
@@ -532,7 +538,7 @@ async function open(bytes: Uint8Array, pw: string) {
   e.clearPassword?.();
   chars(e, pw, (c) => e.addPasswordChar?.(c));
   openSeq += 1;
-  const ok = e.parse(bytes.byteLength);
+  const ok = parseWithRoom(e, bytes, 1024 * 1024);
   if (e.needPassword?.()) return { needPw: true };
   if (!ok) return { err: "no-page-tree" };
   await loadCmaps(e as unknown as Parameters<typeof loadCmaps>[0]);
@@ -713,7 +719,9 @@ async function page(i: number, formOn: boolean, light = false) {
   const e = await engine();
   e.setFormLayer?.(formOn ? 1 : 0);
   const cnt = e.renderPage(i);
-  const buf = new Uint8Array(e.memory.buffer, e.textPtr(), 256 * 1024);
+  // 글자 곳간은 메모리 끝(zone)에 있어 256KB 로 못박은 창이 메모리를 넘기도 한다 —
+  // memoir 안내서 첫 쪽에서 "Invalid typed array length" 로 터졌다. 실제 길이만큼만 본다
+  const buf = new Uint8Array(e.memory.buffer, e.textPtr(), Math.min(e.textLen(), e.memory.buffer.byteLength - e.textPtr()));
   const items = [];
   for (let k = 0; k < cnt; k++) {
     const len = e.itemLen(k);
@@ -1011,6 +1019,27 @@ async function seal(bytes: Uint8Array, pw: string) {
  * 원본 바이트는 아직 입력 자리에 그대로 있다. (사람이 "만들기" 를 한 번
  * 누를 때 드는 값이라 다시 읽어도 된다.)
  */
+/**
+ * 읽는다. 객체 스트림을 펼칠 자리가 모자랐다고 하면(expNeed) 그만큼 더 잡고
+ * 다시 읽는다 — 객체 7만 개가 다 객체 스트림 안인 문서(IRS 설명서)는 펼친 것이
+ * 원본보다 커서 한 번에 안 들어간다. 입력은 자리를 다시 잡으면 지워지므로 다시 넣는다.
+ */
+function parseWithRoom(e: Exports, bytes: Uint8Array, wantOut: number): number {
+  let ok = e.parse(bytes.byteLength);
+  // 얼마나 풀릴지 미리 모르니 엔진이 달라는 만큼 주고 다시 — 몇 번 되풀이한다
+  for (let tries = 0; tries < 6 && e.setExpExtra; tries++) {
+    const need = e.expNeed?.() ?? 0;
+    if (need <= 0) break;
+    e.setExpExtra(need);
+    const second = e.expNeedSecond?.() ?? 0;
+    if (second > 0) e.setSecondRoom?.(second);
+    if (!e.reserve(bytes.byteLength, Math.max(wantOut, e.outCapacity()))) return ok;
+    new Uint8Array(e.memory.buffer, e.inputPtr(), bytes.byteLength).set(bytes);
+    ok = e.parse(bytes.byteLength);
+  }
+  return ok;
+}
+
 async function roomToWrite(e: Exports, want: number, wantSecond = 0): Promise<boolean> {
   if (wantSecond > 0) e.setSecondRoom?.(wantSecond);
   if (e.outCapacity() >= want && e.maxSecond() >= wantSecond) return true;

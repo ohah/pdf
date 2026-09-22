@@ -690,13 +690,15 @@ export class PDFDocument {
    */
   async text(page: number) {
     const q = await this.get(page, false);
-    return textOf(q.items, q.h, q.y0);
+    // 쪽 상자(CropBox) 밖의 글자는 안 보이는 글자다 — 한은 보고서는 쪽 위 여백에
+    // "복사 금지 … 담당자" 를 찍어 두고 CropBox 로 가린다. pdf.js·mupdf 도 안 낸다
+    return textOf(q.items, q.h, q.y0, q.w, q.x0);
   }
 
   /** 쪽의 줄들 — 자리·크기·글꼴까지. 제목·문단·표를 가르는 쪽(markdown)이 쓴다 */
   async lines(page: number): Promise<Line[]> {
     const q = await this.get(page, false);
-    return linesOf(q.items, q.h, q.y0);
+    return linesOf(q.items, q.h, q.y0, q.w, q.x0);
   }
 
   /**

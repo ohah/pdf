@@ -986,7 +986,41 @@ function linesOf(list: TextRun[], ang: number): TextRun[][] {
   // 한 줄 안은 나아가는 쪽 순서로 — 위 정렬은 y 가 먼저라 윗첨자(살짝 위)가
   // 줄 맨 앞에 몰린다. "10^19" 가 "^19 10" 이 되던 자리다.
   for (const l of out) l.sort((p, q) => along(p) - along(q));
-  return out;
+  // 같은 기준선에서 서로 겹쳐 찍힌 덩이(고친 문서에 옛 글이 남은 것, 겹친 층)는 한 줄이
+  // 아니다 — 섞으면 "20262026년 주요업무 년 시정" 처럼 글자가 끼어든다. 겹치는 것은
+  // 딴 줄로 뗀다. 자간으로 살짝 물린 것(폭의 30% 미만)은 같은 줄이다
+  const split: TextRun[][] = [];
+  // 겹침은 폭의 30% 넘게이고, 크기가 1.5배 넘게 다르거나 거의 통째로(80%) 겹칠 때만 —
+  // 같은 크기로 조금 물린 것(폭을 어림한 한글 조각)까지 떼면 멀쩡한 줄이 갈라진다
+  const overlaps = (a: TextRun, b: TextRun) => {
+    const a0 = along(a), a1 = a0 + Math.max(a.w, 1), b0 = along(b), b1 = b0 + Math.max(b.w, 1);
+    const small = Math.min(a1 - a0, b1 - b0);
+    const over = Math.min(a1, b1) - Math.max(a0, b0);
+    if (over <= small * 0.3) return false;
+    // 기준선이 어긋난 것(윗첨자·아랫첨자)은 겹친 층이 아니라 같은 줄의 첨자다
+    if (Math.abs(across(a) - across(b)) > Math.max(a.h, b.h) * 0.15) return false;
+    const ratio = Math.max(a.h, b.h) / Math.max(1e-6, Math.min(a.h, b.h));
+    return ratio > 1.5 || over > small * 0.8;
+  };
+  for (const l of out) {
+    // 겹친 것이 하나도 없으면 그대로 — 크기가 섞인 보통 줄(큰 첫 글자)을 건드리지 않게
+    if (!l.some((r, i) => i > 0 && overlaps(l[i - 1], r))) { split.push(l); continue; }
+    const layers: TextRun[][] = [];
+    for (const r of l) {
+      // 안 겹치는 층 가운데 글자 크기가 가장 비슷한 층에. 크기가 1.5배 넘게 다르면 딴 층
+      let best: TextRun[] | null = null, bestRatio = 1.5;
+      for (const L of layers) {
+        const last = L[L.length - 1];
+        if (overlaps(last, r)) continue;
+        const ratio = Math.max(last.h, r.h) / Math.max(1e-6, Math.min(last.h, r.h));
+        if (ratio < bestRatio) { bestRatio = ratio; best = L; }
+      }
+      if (!best) { best = []; layers.push(best); }
+      best.push(r);
+    }
+    split.push(...layers);
+  }
+  return split;
 }
 
 /**
@@ -1021,17 +1055,29 @@ function byColumn(runs: TextRun[]): TextRun[][] | null {
   // 지나니 줄 수의 15% 이하인 칸이 골이다 — 조각 수 기준이면 쪽 전체가 골이 된다
   const all = linesOf(runs, 0);
   const crossMax = Math.max(2, Math.floor(all.length * 0.15));
-  // 걸친 것이 crossMax 이하인 칸이 least 만큼 이어지면 골 후보. 제일 넓은 골을 고른다 —
-  // 제일 덜 걸친 골을 고르면 그림 옆의 좁은 빈틈이 이긴다
-  let best: { s: number; e: number; load: number } | null = null;
-  let s = -1, load = 0;
+  // 걸친 것이 crossMax 이하인 칸이 least 만큼 이어지면 골 후보. 후보가 여럿이면 양쪽에
+  // 줄이 가장 고르게 나뉘는 골을 고른다 — 제일 넓은 골을 고르면 쪽 번호·옆 여백의
+  // 색인 탭 앞의 빈 띠(25pt)가 진짜 골(16pt)을 이겨 단이 하나도 안 갈렸다(한은 보고서)
+  const bands: { s: number; e: number }[] = [];
+  let s = -1;
   for (let k = 0; k <= n; k++) {
     const low = k < n && cover[k] <= crossMax;
-    if (low) { if (s < 0) { s = k; load = 0; } load += cover[k]; continue; }
-    if (s >= 0 && (k - s) * bin >= least && (!best || k - s > best.e - best.s)) best = { s, e: k, load };
+    if (low) { if (s < 0) s = k; continue; }
+    if (s >= 0 && (k - s) * bin >= least) bands.push({ s, e: k });
     s = -1;
   }
-  if (!best) return null;
+  if (!bands.length) return null;
+  // 줄이 아니라 조각으로 센다 — 두 단의 줄은 기준선이 같아 y 로 한 줄에 묶여 있다
+  const sides = (b: { s: number; e: number }) => {
+    const mid = x0 + ((b.s + b.e) / 2) * bin;
+    let l = 0, r = 0;
+    for (const q of runs) {
+      if (q.x + Math.max(q.w, 1) <= mid) l++; else if (q.x >= mid) r++;
+    }
+    return Math.min(l, r);
+  };
+  let best = bands[0], bestScore = -1;
+  for (const b of bands) { const sc = sides(b) * 1000 + (b.e - b.s); if (sc > bestScore) { bestScore = sc; best = b; } }
   const gL = x0 + best.s * bin, gR = x0 + best.e * bin;
   const gutter = (gL + gR) / 2;
   // 줄 단위로 가른다 — 낱말 조각으로 가르면 두 단에 걸친 제목의 낱말이 좌우로 흩어진다.

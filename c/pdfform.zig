@@ -739,7 +739,7 @@ pub fn layoutScratch() void {
 /// 자리를 need 만큼 마련한다. 이미 잡아 둔 것이 크면 그대로 쓴다.
 /// keep 바이트는 새 자리로 옮겨 준다 — 스트림을 이어 붙이는 중이면
 /// 앞서 담은 것이 날아가면 안 된다.
-fn growBuf(at: *usize, cap: *usize, need: usize, least: usize, keep: usize) ?[]u8 {
+pub fn growBuf(at: *usize, cap: *usize, need: usize, least: usize, keep: usize) ?[]u8 {
     // 구역이 되감겼으면(merge·compact 가 그런다) 들고 있던 자리는 남의 것이다
     if (at.* != 0 and at.* + cap.* > core.zoneTop()) {
         at.* = 0;
@@ -877,11 +877,19 @@ pub fn streamFrom(b: []const u8, body: usize) ?[]const u8 {
     // 잘렸다는 뜻이므로 배로 늘려 다시 푼다. 예전에는 남은 자리에 맞춰
     // 자르고 말았고, 그래서 큰 쪽이 반만 그려지거나 통째로 사라졌다.
     var want = @max(@as(usize, 1024 * 1024), length *| 4);
+    // 자리가 모자라면 miniz 는 잘라 주지 않고 실패(0)한다 — 망가진 스트림과 구별이
+    // 안 된다. 그래서 0 이어도 자리를 배로 늘려 몇 번 더 해 본다(64MB 까지). 안 하면
+    // 236KB 가 1.5MB 로 풀리는 arXiv 그림 쪽이 통째로 백지였다(글자까지)
+    const ceil: usize = @max(@as(usize, 64 * 1024 * 1024), length *| 32);
     var tries: u32 = 0;
-    while (tries < 8) : (tries += 1) {
+    while (tries < 12) : (tries += 1) {
         const dst = growBuf(&tmp_at, &tmp_cap, want, 1024 * 1024, 0) orelse return null;
         const got = decodeChain(b, body, sp, data, length, dst);
-        if (got == 0) return null;
+        if (got == 0) {
+            if (dst.len >= ceil) return null;
+            want = @min(ceil, dst.len *| 2);
+            continue;
+        }
         if (got < dst.len) return dst[0..got];
         // 딱 맞게 찼다 — 더 있는지 모르니 늘려서 다시 본다
         want = dst.len *| 2;

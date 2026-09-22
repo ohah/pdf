@@ -105,8 +105,13 @@ function dedupe(ps: Piece[]): Piece[] {
 /** 조각들을 줄로 묶어 글로 잇는다. pageH 는 쪽 높이(pt) — y 를 위 기준으로 뒤집는다 */
 export function linesOf(pieces0: Piece[], pageH: number, y0 = 0, pageW?: number, x0 = 0): Line[] {
   // 쪽 상자 밖의 글자(책등에 세로로 찍은 장식 제목, 잘려 나간 자리)는 본문이 아니다
+  // 세로쓰기 조각은 w 가 아래로 나아간 길이라, 가로 너비는 글자 크기다(책등의 세로 제목이
+  // 쪽 왼쪽 여백 밖에 있는데 w 로 재면 안쪽까지 닿아 본문에 섞였다)
+  // 세로쓰기의 x 는 글자 가운데다(세로 원점) — 상자는 x±size/2
+  const left = (p: Piece) => (p.dir === "ttb" ? p.x - p.size / 2 : p.x);
+  const right = (p: Piece) => (p.dir === "ttb" ? p.x + p.size / 2 : p.x + Math.max(p.w, 0));
   const inPage = pageW
-    ? pieces0.filter((p) => p.x + Math.max(p.w, 0) > x0 - 2 && p.x < x0 + pageW + 2 && p.y > y0 - p.size && p.y < y0 + pageH + p.size)
+    ? pieces0.filter((p) => right(p) > x0 - 2 && left(p) < x0 + pageW + 2 && p.y > y0 - p.size && p.y < y0 + pageH + p.size)
     : pieces0;
   const pieces = dedupe(inPage);
   // 위 기준(y 아래로)으로 뒤집으므로 각도도 부호가 뒤집힌다
@@ -137,6 +142,6 @@ export function linesOf(pieces0: Piece[], pageH: number, y0 = 0, pageW?: number,
 }
 
 /** 쪽의 글 — 줄마다 한 줄 */
-export function textOf(pieces: Piece[], pageH: number, y0 = 0): string {
-  return linesOf(pieces, pageH, y0).map((l) => l.text).join("\n");
+export function textOf(pieces: Piece[], pageH: number, y0 = 0, pageW?: number, x0 = 0): string {
+  return linesOf(pieces, pageH, y0, pageW, x0).map((l) => l.text).join("\n");
 }

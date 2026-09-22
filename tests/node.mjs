@@ -116,6 +116,19 @@ const t = (name, cond, got) => {
   pdf.close();
 }
 
+// 실문서 100편 맞대기에서 나온 결함들 (tests/mkcorpus.mjs)
+{
+  const open = (f) => PDFDocument.open(`${FX}/${f}.pdf`);
+  { const pdf = await open("bigobj"); t("객체 스트림이 원본보다 커도 쪽 나무를 찾는다", pdf.pages === 1 && (await pdf.text(1)).includes("Pages inside a big object stream"), pdf.pages); pdf.close(); }
+  { const pdf = await open("bigcontent"); t("쪽 내용이 4배 넘게 풀려도 글자가 남는다", (await pdf.text(1)).includes("Text after a huge content stream")); pdf.close(); }
+  { const pdf = await open("mediaref"); const q = await pdf.get(1, false); t("/MediaBox·/CropBox 가 딴 객체", Math.abs(q.w - 575) < 1 && Math.abs(q.h - 821) < 1 && Math.abs((q.h - q.items[0].y) - 21) < 2, `${q.w}x${q.h} y${q.h - q.items[0]?.y}`); pdf.close(); }
+  { const pdf = await open("fontscope"); t("폼의 같은 이름 글꼴은 폼 것으로", (await pdf.text(1)) === "A\nB", JSON.stringify(await pdf.text(1))); pdf.close(); }
+  { const pdf = await open("formq"); const q = await pdf.get(1, false); const after = q.items.find((i) => i.text === "after form"); t("폼의 짝 없는 q 가 바깥에 안 샌다", after && Math.abs(after.x - 100) < 0.5 && Math.abs(after.size - 12) < 0.1, JSON.stringify(after && [after.x, after.size])); t("2MB 넘는 폼도 끝까지 읽는다", q.items.some((i) => i.text === "inside form")); pdf.close(); }
+  { const pdf = await open("cols"); const ls = (await pdf.text(1)).split("\n"); t("여백 탭이 있어도 두 단을 가른다", ls[1] === "left column line 1 of the text" && ls.includes("right column line 1 continues"), JSON.stringify(ls.slice(0, 3))); pdf.close(); }
+  { const pdf = await open("layers"); const ls = (await pdf.text(1)).split("\n"); t("겹쳐 찍힌 다른 크기 글은 딴 줄", ls[0] === "2026 big new title" && ls[1] === "old small title here", JSON.stringify(ls)); t("첨자는 그대로 같은 줄", ls[2] === "normal line with a^2", JSON.stringify(ls[2])); pdf.close(); }
+  { const pdf = await open("cropclip"); t("CropBox 밖 워터마크는 text() 에 안 나온다", (await pdf.text(1)) === "Body text inside crop", JSON.stringify(await pdf.text(1))); pdf.close(); }
+}
+
 // 암호가 걸린 문서
 {
   const pdf = await PDFDocument.open(`${FX}/enc-perm.pdf`, { password: "" });
