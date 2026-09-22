@@ -77,7 +77,8 @@ Indexed·Separation·Lab·ICC 대체, /Mask 스텐실과 색 열쇠 마스킹, S
 새 칸 만들기, 암호 걸기(AES-256/R6).
 
 어디까지 되고 무엇이 안 되는지는 [`docs/support.md`](docs/support.md) 에,
-pdf.js 와 하나씩 맞댄 표는 [`docs/compare.md`](docs/compare.md) 에 있다.
+pdf.js 와 하나씩 맞댄 표와 실문서 100편에서 pymupdf·pdf.js 와 글자·화소를 맞댄 결과(글자
+재현 0.992, 화소 차이 3.1% — pdf.js 는 3.2%)는 [`docs/compare.md`](docs/compare.md) 에 있다.
 
 ## 화면 갈래
 
